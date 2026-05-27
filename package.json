@@ -1,0 +1,25 @@
+{
+  "name": "octopool",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler types && tsc --noEmit",
+    "check": "pnpm format:check && pnpm lint && pnpm test && pnpm build && go test ./... && go vet ./...",
+    "deploy": "wrangler deploy",
+    "e2e": "sh test/e2e.sh",
+    "format": "oxfmt . --write && gofmt -w cmd",
+    "format:check": "oxfmt . --check",
+    "lint": "oxlint --deny-warnings",
+    "test": "vitest run",
+    "types": "wrangler types"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "oxfmt": "^0.52.0",
+    "oxlint": "^1.67.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14",
+    "wrangler": "^4.94.0"
+  }
+}

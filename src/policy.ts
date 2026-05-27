@@ -1,0 +1,253 @@
+import { HttpError, isObject } from "./http";
+import type { PoolPolicy, RelayRequest, RouteInfo } from "./types";
+
+const owner = "(?<owner>[A-Za-z0-9_.-]+)";
+const repo = "(?<repo>[A-Za-z0-9_.-]+)";
+const number = "[0-9]+";
+const sha = "[0-9A-Fa-f]{7,64}";
+const id = "[0-9]+";
+
+type RouteRule = {
+  pattern: RegExp;
+  kind: string;
+  resource: string;
+  cacheable: boolean;
+  largePayload?: boolean;
+  search?: boolean;
+  logs?: boolean;
+};
+
+const rules: RouteRule[] = [
+  route(`/repos/${owner}/${repo}/pulls/${number}`, "pr_view", "core"),
+  route(`/repos/${owner}/${repo}/pulls/${number}/files`, "pr_files", "core"),
+  route(`/repos/${owner}/${repo}/pulls/${number}/comments`, "pr_review_comments", "core"),
+  route(`/repos/${owner}/${repo}/pulls/${number}/reviews`, "pr_reviews", "core"),
+  route(`/repos/${owner}/${repo}/commits/${sha}/check-runs`, "commit_check_runs", "core"),
+  route(`/repos/${owner}/${repo}/commits/${sha}/status`, "commit_status", "core"),
+  route(`/repos/${owner}/${repo}/actions/runs`, "run_list", "core"),
+  route(`/repos/${owner}/${repo}/actions/runs/${id}`, "run_view", "core"),
+  route(`/repos/${owner}/${repo}/actions/runs/${id}/jobs`, "run_jobs", "core"),
+  route(`/repos/${owner}/${repo}/actions/runs/${id}/artifacts`, "run_artifacts", "core"),
+  route(`/repos/${owner}/${repo}/actions/jobs/${id}`, "job_view", "core"),
+  route(`/repos/${owner}/${repo}/actions/jobs/${id}/logs`, "job_logs", "core", {
+    largePayload: true,
+    logs: true,
+  }),
+  route(`/repos/${owner}/${repo}/check-runs/${id}/annotations`, "check_run_annotations", "core"),
+  route(`/repos/${owner}/${repo}/issues/${number}`, "issue_view", "core"),
+  route(`/repos/${owner}/${repo}/issues/${number}/comments`, "issue_comments", "core"),
+  route(`/repos/${owner}/${repo}/issues/${number}/timeline`, "issue_timeline", "core"),
+  route(`/repos/${owner}/${repo}/branches/(?<branch>[^/?#]+)`, "branch_view", "core"),
+  route("/rate_limit", "rate_limit", "core"),
+];
+
+function route(
+  path: string,
+  kind: string,
+  resource: string,
+  extra: Partial<RouteRule> = {},
+): RouteRule {
+  return {
+    pattern: new RegExp(`^${path}$`),
+    kind,
+    resource,
+    cacheable: true,
+    ...extra,
+  };
+}
+
+export function defaultPolicy(owners: string): PoolPolicy {
+  return {
+    allowed_owners: owners
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter((item) => item !== ""),
+    allow_search: false,
+    allow_logs: true,
+  };
+}
+
+export function parsePolicy(raw: string, fallbackOwners: string): PoolPolicy {
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!isObject(value)) {
+      return defaultPolicy(fallbackOwners);
+    }
+    const fallback = defaultPolicy(fallbackOwners);
+    return {
+      allowed_owners: Array.isArray(value.allowed_owners)
+        ? value.allowed_owners
+            .filter((item): item is string => typeof item === "string")
+            .map((item) => item.toLowerCase())
+        : fallback.allowed_owners,
+      allow_search:
+        typeof value.allow_search === "boolean" ? value.allow_search : fallback.allow_search,
+      allow_logs: typeof value.allow_logs === "boolean" ? value.allow_logs : fallback.allow_logs,
+    };
+  } catch {
+    return defaultPolicy(fallbackOwners);
+  }
+}
+
+export function validateRelayRequest(value: unknown): RelayRequest {
+  if (!isObject(value)) {
+    throw new HttpError(400, "invalid_request", "Request body must be an object");
+  }
+  const pool = requireText(value.pool, "pool");
+  const method = requireText(value.method, "method").toUpperCase();
+  const path = requireText(value.path, "path");
+  const lowerPath = path.toLowerCase();
+  if (
+    !path.startsWith("/") ||
+    path.includes("://") ||
+    path.includes("\\") ||
+    path.includes("?") ||
+    path.includes("#") ||
+    path.includes("..") ||
+    /(^|\/)\.(\/|$)/.test(path) ||
+    lowerPath.includes("%2e") ||
+    lowerPath.includes("%5c")
+  ) {
+    throw new HttpError(400, "invalid_path", "Path must be an absolute GitHub API path");
+  }
+  if (method !== "GET") {
+    throw new HttpError(403, "method_denied", "Only GET routes are enabled");
+  }
+  const query = normalizeQuery(value.query);
+  const headers = normalizeHeaders(value.headers);
+  return {
+    pool,
+    method,
+    path,
+    ...(query === undefined ? {} : { query }),
+    ...(headers === undefined ? {} : { headers }),
+    ...(isObject(value.route_hint) ? { route_hint: normalizeRouteHint(value.route_hint) } : {}),
+    ...(typeof value.cache_key === "string" ? { cache_key: value.cache_key } : {}),
+    ...(typeof value.idempotency_key === "string"
+      ? { idempotency_key: value.idempotency_key }
+      : {}),
+  };
+}
+
+export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteInfo {
+  for (const rule of rules) {
+    const match = rule.pattern.exec(request.path);
+    if (match === null) {
+      continue;
+    }
+    if (rule.search === true && !policy.allow_search) {
+      throw new HttpError(403, "search_denied", "Search routes are disabled for this pool");
+    }
+    if (rule.logs === true && !policy.allow_logs) {
+      throw new HttpError(403, "logs_denied", "Log routes are disabled for this pool");
+    }
+    const routeOwner = match.groups?.owner?.toLowerCase();
+    if (routeOwner !== undefined && !policy.allowed_owners.includes(routeOwner)) {
+      throw new HttpError(403, "owner_denied", `Owner ${routeOwner} is not allowed for this pool`);
+    }
+    const routeRepo = match.groups?.repo;
+    const info: RouteInfo = {
+      kind: rule.kind,
+      resource: rule.resource,
+      routeKey: normalizeRouteKey(request.method, request.path),
+      cacheable: rule.cacheable,
+      largePayload: rule.largePayload === true,
+      logs: rule.logs === true,
+    };
+    if (routeOwner !== undefined) {
+      info.owner = routeOwner;
+    }
+    if (routeRepo !== undefined) {
+      info.repo = routeRepo;
+    }
+    return info;
+  }
+  throw new HttpError(403, "route_denied", "Route is not enabled");
+}
+
+export function normalizeRouteKey(method: string, path: string): string {
+  return `${method.toUpperCase()} ${path
+    .replace(/\/pulls\/[0-9]+/g, "/pulls/:number")
+    .replace(/\/issues\/[0-9]+/g, "/issues/:number")
+    .replace(/\/comments\/[0-9]+/g, "/comments/:id")
+    .replace(/\/commits\/[0-9A-Fa-f]{7,64}/g, "/commits/:sha")
+    .replace(/\/actions\/runs\/[0-9]+/g, "/actions/runs/:id")
+    .replace(/\/actions\/jobs\/[0-9]+/g, "/actions/jobs/:id")
+    .replace(/\/check-runs\/[0-9]+/g, "/check-runs/:id")}`;
+}
+
+function requireText(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new HttpError(400, "invalid_request", `${field} must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+function normalizeQuery(value: unknown): Record<string, string | string[]> | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!isObject(value)) {
+    throw new HttpError(400, "invalid_query", "query must be an object");
+  }
+  const out: Record<string, string | string[]> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (!safeQueryKey(key)) {
+      throw new HttpError(400, "invalid_query", `query key ${key} is not allowed`);
+    }
+    if (typeof raw === "string") {
+      out[key] = raw;
+    } else if (Array.isArray(raw) && raw.every((item) => typeof item === "string")) {
+      out[key] = raw;
+    } else {
+      throw new HttpError(
+        400,
+        "invalid_query",
+        `query value ${key} must be a string or string array`,
+      );
+    }
+  }
+  return out;
+}
+
+function normalizeHeaders(value: unknown): Record<string, string> | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!isObject(value)) {
+    throw new HttpError(400, "invalid_headers", "headers must be an object");
+  }
+  const allowed = new Set(["accept", "x-github-api-version", "if-none-match", "if-modified-since"]);
+  const out: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    const lower = key.toLowerCase();
+    if (!allowed.has(lower)) {
+      continue;
+    }
+    if (typeof raw === "string" && raw.length <= 512) {
+      out[lower] = raw;
+    }
+  }
+  return out;
+}
+
+function normalizeRouteHint(
+  value: Record<string, unknown>,
+): NonNullable<RelayRequest["route_hint"]> {
+  const hint: NonNullable<RelayRequest["route_hint"]> = {};
+  if (typeof value.owner === "string") {
+    hint.owner = value.owner;
+  }
+  if (typeof value.repo === "string") {
+    hint.repo = value.repo;
+  }
+  if (typeof value.kind === "string") {
+    hint.kind = value.kind;
+  }
+  return hint;
+}
+
+function safeQueryKey(key: string): boolean {
+  const lower = key.toLowerCase();
+  return /^[a-z0-9_.-]+$/.test(lower) && !lower.includes("token") && lower !== "access_token";
+}

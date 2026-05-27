@@ -1,0 +1,80 @@
+export type JsonObject = Record<string, unknown>;
+
+export type RelayRequest = {
+  pool: string;
+  method: string;
+  path: string;
+  query?: Record<string, string | string[]>;
+  headers?: Record<string, string>;
+  route_hint?: {
+    owner?: string;
+    repo?: string;
+    kind?: string;
+  };
+  cache_key?: string;
+  idempotency_key?: string;
+};
+
+export type PoolPolicy = {
+  allowed_owners: string[];
+  allow_search: boolean;
+  allow_logs: boolean;
+};
+
+export type Caller = {
+  id: string;
+  name: string;
+  github_login: string;
+  org_login: string;
+  org_verified_at: string | null;
+};
+
+export type Identity = {
+  id: string;
+  kind: "pat" | "github_app";
+  login: string;
+  secret_ref: string;
+  weight: number;
+};
+
+export type RouteInfo = {
+  kind: string;
+  owner?: string;
+  repo?: string;
+  resource: string;
+  routeKey: string;
+  cacheable: boolean;
+  largePayload: boolean;
+  logs: boolean;
+};
+
+export type SelectionCandidate = {
+  id: string;
+  weight: number;
+};
+
+export type SelectionRequest = {
+  pool: string;
+  routeKey: string;
+  resource: string;
+  candidates: SelectionCandidate[];
+};
+
+export type SelectionResult = {
+  identityId: string;
+  reason: "highest_remaining" | "sticky" | "fallback";
+  leaseTtlSeconds: number;
+};
+
+export type RecordResult = {
+  identityId: string;
+  routeKey: string;
+  resource: string;
+  status: number;
+  rate?: {
+    limit?: number;
+    remaining?: number;
+    resetAt?: number;
+    retryAfter?: number;
+  };
+};
