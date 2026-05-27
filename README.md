@@ -21,6 +21,8 @@ Octopool runs on Cloudflare Workers. It accepts a normalized, read-only GitHub r
 It exists to make high-volume GitHub reads safe to share across trusted people and agents:
 
 - **Tokens stay server-side.** GitHub PATs and App private keys live in Cloudflare secrets, never in local config, logs, or D1.
+- **Rate budgets stack.** PATs and GitHub App installations keep separate GitHub rate-limit buckets; Octopool routes each cache miss to one healthy identity, so a pool can use the combined capacity without handing every caller every token.
+- **Cache hits cost zero GitHub quota.** Fresh D1 cache hits return from Octopool without touching GitHub, so common maintainer reads stop burning any pooled identity's budget.
 - **One pool, many callers.** Requests are routed across identities by remaining rate budget, with short leases and cooldowns to avoid stampedes and abuse flags.
 - **Public-repository only.** Every repo route passes a public-visibility check before any pooled identity or cache entry is used.
 - **Org-gated.** Only verified members of the allowed GitHub org get a caller token, and membership is re-checked as it goes stale.
@@ -58,7 +60,7 @@ octopool gh pr checks 85341 -R openclaw/openclaw --json name,state,bucket
 octopool stats
 ```
 
-Symlink it as `gh` for a transparent shim — supported reads go through the pool, everything else (and any mutation) passes straight to the real GitHub CLI:
+Symlink it as `gh` for a transparent shim — supported reads go to Octopool first, where the Worker serves cache hits or calls GitHub directly with a pooled identity. Everything else (and any mutation) passes straight to the real GitHub CLI:
 
 ```sh
 ln -s "$(command -v octopool)" ~/bin/gh
