@@ -13,6 +13,16 @@ fi
 root_html="$(curl --resolve "$host:443:$ip" -fsS "https://$host/")"
 printf "%s" "$root_html" | grep -q '<title>octopool</title>'
 
+curl --resolve "$host:80:$ip" -sS -o /tmp/octopool-http.txt -D /tmp/octopool-http.headers \
+  "http://$host/dashboard"
+grep -q '^HTTP/1.1 308' /tmp/octopool-http.headers
+grep -q '^location: https://'"$host"'/dashboard' /tmp/octopool-http.headers
+
+curl --resolve "$host:443:$ip" -sS -o /tmp/octopool-https.txt -D /tmp/octopool-https.headers \
+  "https://$host/"
+grep -qi '^strict-transport-security: max-age=31536000; includeSubDomains; preload' \
+  /tmp/octopool-https.headers
+
 root_json="$(curl --resolve "$host:443:$ip" -fsS -H "accept: application/json" "https://$host/")"
 printf "%s" "$root_json" | grep -q '"ok":true'
 printf "%s" "$root_json" | grep -q '"service":"octopool"'

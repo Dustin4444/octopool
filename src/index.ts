@@ -25,6 +25,7 @@ import { rootResponse } from "./landing";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import { PoolCoordinator } from "./pool-coordinator";
 import { ensurePublicGitHubRepo } from "./public-repos";
+import { httpsRedirect, secureResponse } from "./security";
 import { parseStatsWindow, poolStats } from "./stats";
 import {
   finishGitHubWebLogin,
@@ -42,13 +43,17 @@ export { PoolCoordinator };
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const requestId = crypto.randomUUID();
+    const redirect = httpsRedirect(request);
+    if (redirect !== undefined) {
+      return redirect;
+    }
     try {
-      return await routeRequest(request, env, ctx, requestId);
+      return secureResponse(request, await routeRequest(request, env, ctx, requestId));
     } catch (error) {
       if (shouldUseWebError(request)) {
-        return webErrorResponse(error, requestId);
+        return secureResponse(request, webErrorResponse(error, requestId));
       }
-      return errorResponse(error, requestId);
+      return secureResponse(request, errorResponse(error, requestId));
     }
   },
 };
