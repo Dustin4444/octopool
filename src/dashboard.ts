@@ -19,7 +19,7 @@ const DASHBOARD_HTML = `<!doctype html>
   aside{padding:14px;align-self:start;position:sticky;top:16px}
   label{display:block;color:var(--muted);font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.08em;margin:0 0 7px}
   input{width:100%;height:38px;border:1px solid var(--line);border-radius:6px;background:#0b0e13;color:var(--text);padding:8px 10px;font:inherit}
-  button,.linkbtn{height:38px;border:0;border-radius:6px;background:var(--text);color:var(--ink);padding:0 12px;font:700 13px/38px inherit;text-decoration:none;cursor:pointer}
+  button,.linkbtn{height:38px;border:0;border-radius:6px;background:var(--text);color:var(--ink);padding:0 12px;font:700 13px/1 inherit;text-decoration:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
   button.secondary,.linkbtn.secondary{background:#222936;color:var(--text);border:1px solid var(--line)}
   .controls{display:grid;gap:10px}
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
