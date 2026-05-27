@@ -128,4 +128,18 @@ The rest of gitcrawl remains intact.
 - [x] Gitcrawl hard-cut migration error.
 - [x] Tests.
 - [x] Autoreview.
-- [ ] Ship, deploy, e2e.
+- [x] Ship, deploy, e2e.
+
+## Ship Proof
+
+- Octopool commit: `1dd61b5`
+- Gitcrawl commits: `a45f16c`, `b7bf40e`
+- D1 migration `0002_github_cache.sql`: applied to remote `octopool`.
+- Worker deploy: `octopool.dev`, version `e0ad3e22-5dfb-413c-bb14-af16249e7bd7`.
+- E2E: `pnpm e2e`.
+- CLI login: `go run ./cmd/octopool login`.
+- CLI health: `go run ./cmd/octopool health`.
+- CLI relay: `go run ./cmd/octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number` returned `85341`.
+- Cache: raw request returned `miss`, repeated request returned `hit`; remote D1 cache row count `1`.
+- Fallback: non-OpenClaw repo read fell through to real `gh` even with a bogus Octopool URL.
+- Gitcrawl cut: `go run ./cmd/gitcrawl gh api ...` printed the Octopool migration note.
