@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fix docs-site rendering for wrapped Markdown list items.
 - Add a README and an octopus-themed docs site (dependency-free static generator in `scripts/`, GitHub Actions Pages workflow) served at `docs.octopool.dev`.
 - Add per-feature docs under `docs/` (relay, CLI, identities, cache, auth, admin, landing, operations) with an updated docs index.
 - Add GitHub App installation identities for public-repository relay reads, with Worker-minted installation tokens, selected-repo OpenClaw App setup, public-repo cache guards, and app avatar artwork.

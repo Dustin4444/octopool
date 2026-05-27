@@ -9,10 +9,8 @@ Source: `src/landing.ts`, `src/index.ts` (`/`, `githubLoginRedirect`).
 
 `GET /` branches on the `Accept` header:
 
-- `Accept: text/html` → the landing page (`text/html`, `cache-control: public,
-  max-age=300`).
-- anything else → the JSON health response: `{ "ok": true, "service": "octopool",
-  "request_id": "…" }` with `cache-control: no-store`.
+- `Accept: text/html` → the landing page (`text/html`, `cache-control: public, max-age=300`).
+- anything else → the JSON health response with `cache-control: no-store`.
 
 This keeps the relay's health probe and the public page on the same root path. The page
 intentionally says nothing about what Octopool is, and is marked `noindex`.

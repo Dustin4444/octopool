@@ -210,6 +210,7 @@ function markdownToHtml(markdown, currentRel) {
   const html = [];
   let paragraph = [];
   let list = null;
+  let listItem = [];
   let fence = null;
   let blockquote = [];
 
@@ -218,8 +219,14 @@ function markdownToHtml(markdown, currentRel) {
     html.push(`<p>${inline(paragraph.join(" "), currentRel)}</p>`);
     paragraph = [];
   };
+  const flushListItem = () => {
+    if (!listItem.length) return;
+    html.push(`<li>${inline(listItem.join(" "), currentRel)}</li>`);
+    listItem = [];
+  };
   const closeList = () => {
     if (!list) return;
+    flushListItem();
     html.push(`</${list}>`);
     list = null;
   };
@@ -353,9 +360,15 @@ function markdownToHtml(markdown, currentRel) {
         list = tag;
         html.push(`<${tag}>`);
       }
-      html.push(`<li>${inline((bullet || numbered)[1], currentRel)}</li>`);
+      flushListItem();
+      listItem = [(bullet || numbered)[1].trim()];
       continue;
     }
+    if (list && listItem.length && /^\s{2,}\S/.test(line)) {
+      listItem.push(line.trim());
+      continue;
+    }
+    closeList();
     paragraph.push(line.trim());
   }
   flushParagraph();
