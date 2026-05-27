@@ -195,6 +195,7 @@ func runAdminIdentity(ctx context.Context, args []string, stdout io.Writer) erro
 	login := fs.String("login", "", "GitHub login")
 	secretRef := fs.String("secret-ref", "", "Worker secret binding name")
 	kind := fs.String("kind", "pat", "identity kind")
+	installationID := fs.Int64("installation-id", 0, "GitHub App installation id")
 	privateScopes := fs.Bool("private-scopes", false, "allow owner-wide scopes to access private repositories")
 	scopeValues := multiFlag{}
 	fs.Var(&scopeValues, "scope", "owner/repo or owner, repeatable")
@@ -204,6 +205,9 @@ func runAdminIdentity(ctx context.Context, args []string, stdout io.Writer) erro
 	if *id == "" || *login == "" || *secretRef == "" {
 		return errors.New("--id, --login, and --secret-ref are required")
 	}
+	if *kind == "github_app" && *installationID <= 0 {
+		return errors.New("--installation-id is required for github_app identities")
+	}
 	token, err := requiredEnv(*adminTokenEnv)
 	if err != nil {
 		return err
@@ -211,9 +215,6 @@ func runAdminIdentity(ctx context.Context, args []string, stdout io.Writer) erro
 	scopes := make([]map[string]any, 0, len(scopeValues))
 	for _, scope := range scopeValues {
 		owner, repo, ok := strings.Cut(scope, "/")
-		if !ok && !*privateScopes {
-			return errors.New("--scope owner requires --private-scopes; use --scope owner/repo for repo-specific grants")
-		}
 		item := map[string]any{"owner": owner, "allow_private": *privateScopes && !ok}
 		if ok && repo != "" {
 			item["repo"] = repo
@@ -227,6 +228,9 @@ func runAdminIdentity(ctx context.Context, args []string, stdout io.Writer) erro
 		"secret_ref": *secretRef,
 		"kind":       *kind,
 		"scopes":     scopes,
+	}
+	if *installationID > 0 {
+		body["installation_id"] = *installationID
 	}
 	return postJSON(ctx, stdout, apiURL(*url, "/v1/admin/pools/"+urlPath(*pool)+"/identities"), token, body)
 }

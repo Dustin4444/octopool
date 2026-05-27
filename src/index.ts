@@ -22,6 +22,7 @@ import {
 import { landingResponse } from "./landing";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import { PoolCoordinator } from "./pool-coordinator";
+import { ensurePublicGitHubRepo } from "./public-repos";
 import type { Identity, SelectionRequest } from "./types";
 
 export { PoolCoordinator };
@@ -122,10 +123,12 @@ async function relayGitHub(
         if (activeIdentities.length === 0) {
           throw new HttpError(503, "no_identity", "No active identity can serve this route");
         }
-        if (
-          cached.identity !== undefined &&
-          activeIdentities.some((candidate) => candidate.id === cached.identity?.id)
-        ) {
+        const cachedIdentity =
+          cached.identity === undefined
+            ? undefined
+            : activeIdentities.find((candidate) => candidate.id === cached.identity?.id);
+        if (cached.identity !== undefined && cachedIdentity !== undefined) {
+          await ensurePublicGitHubRepo(env, route, cached.created_at);
           ctx.waitUntil(
             insertAudit(env, {
               requestId,
@@ -169,6 +172,7 @@ async function relayGitHub(
     const coordinator = env.POOL_COORDINATOR.getByName(`pool:${relayRequest.pool}`);
     const selection = await selectIdentity(coordinator, selectionRequest);
     identity = findIdentity(identities, selection.identityId);
+    await ensurePublicGitHubRepo(env, route);
     const github = await callGitHub(env, identity, relayRequest, route);
     const rate = rateFromHeaders(github.headers);
     ctx.waitUntil(
@@ -397,10 +401,25 @@ async function upsertIdentity(request: Request, env: Env, pool: string): Promise
   const id = requireString(body.id, "id");
   const login = requireString(body.login, "login");
   const secretRef = requireString(body.secret_ref, "secret_ref");
-  if (body.kind !== undefined && body.kind !== "pat") {
-    throw new HttpError(400, "identity_kind_unsupported", "Only PAT identities are enabled");
+  if (body.kind !== undefined && body.kind !== "pat" && body.kind !== "github_app") {
+    throw new HttpError(
+      400,
+      "identity_kind_unsupported",
+      "Only PAT and GitHub App identities are enabled",
+    );
   }
-  const kind = "pat";
+  const kind = body.kind === "github_app" ? "github_app" : "pat";
+  const installationId =
+    typeof body.installation_id === "number" && Number.isInteger(body.installation_id)
+      ? body.installation_id
+      : null;
+  if (kind === "github_app" && (installationId === null || installationId <= 0)) {
+    throw new HttpError(
+      400,
+      "installation_id_required",
+      "GitHub App identities require a positive installation_id",
+    );
+  }
   const weight =
     typeof body.weight === "number" && Number.isInteger(body.weight) ? body.weight : 100;
   const scopes = parseIdentityScopes(body.scopes);
@@ -417,15 +436,16 @@ async function upsertIdentity(request: Request, env: Env, pool: string): Promise
   }
   const statements = [
     env.DB.prepare(
-      `INSERT INTO identities (id, pool_id, kind, login, secret_ref, status, weight)
-       VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6)
+      `INSERT INTO identities (id, pool_id, kind, login, secret_ref, installation_id, status, weight)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7)
        ON CONFLICT(id) DO UPDATE SET
          login = excluded.login,
          secret_ref = excluded.secret_ref,
+         installation_id = excluded.installation_id,
          status = 'active',
          weight = excluded.weight,
          updated_at = CURRENT_TIMESTAMP`,
-    ).bind(id, pool, kind, login, secretRef, weight),
+    ).bind(id, pool, kind, login, secretRef, installationId, weight),
     env.DB.prepare("DELETE FROM identity_scopes WHERE identity_id = ?1").bind(id),
     ...scopes.map((scope) =>
       env.DB.prepare(
@@ -435,7 +455,20 @@ async function upsertIdentity(request: Request, env: Env, pool: string): Promise
     ),
   ];
   await env.DB.batch(statements);
-  return jsonResponse({ identity: { id, pool, kind, login, secret_ref: secretRef, weight } }, 201);
+  return jsonResponse(
+    {
+      identity: {
+        id,
+        pool,
+        kind,
+        login,
+        secret_ref: secretRef,
+        installation_id: installationId,
+        weight,
+      },
+    },
+    201,
+  );
 }
 
 function parseIdentityScopes(rawScopes: unknown): {
@@ -456,13 +489,6 @@ function parseIdentityScopes(rawScopes: unknown): {
     const repo =
       typeof scope.repo === "string" && scope.repo.trim() !== "" ? scope.repo.trim() : null;
     const allowPrivate = scope.allow_private === true ? 1 : 0;
-    if (repo === null && allowPrivate !== 1) {
-      throw new HttpError(
-        400,
-        "owner_wide_scope_requires_private",
-        "Owner-wide scopes must explicitly allow private repositories",
-      );
-    }
     out.push({ owner, repo, allowPrivate });
   }
   return out;

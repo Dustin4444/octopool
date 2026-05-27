@@ -8,10 +8,12 @@ type CacheRow = {
   body_encoding: "json" | "text" | "base64";
   identity_id: string | null;
   identity_kind: "pat" | "github_app" | null;
+  created_at: string;
 };
 
 export type CachedGitHubResponse = GitHubRelayResponse & {
   identity?: Pick<Identity, "id" | "kind">;
+  created_at: string;
 };
 
 export async function githubCacheKey(
@@ -43,7 +45,7 @@ export async function readGitHubCache(
   cacheKey: string,
 ): Promise<CachedGitHubResponse | undefined> {
   const row = await env.DB.prepare(
-    `SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind
+    `SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at
      FROM github_cache_entries
      WHERE cache_key = ?1
        AND expires_at > CURRENT_TIMESTAMP`,
@@ -58,6 +60,7 @@ export async function readGitHubCache(
     headers: parseJSONRecord(row.response_headers_json),
     body: JSON.parse(row.body_json) as unknown,
     body_encoding: row.body_encoding,
+    created_at: row.created_at,
     ...(row.identity_id === null || row.identity_kind === null
       ? {}
       : { identity: { id: row.identity_id, kind: row.identity_kind } }),

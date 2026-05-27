@@ -19,7 +19,7 @@ It lets trusted users and agents share an explicitly managed pool of GitHub iden
 ## Non-Goals
 
 - general-purpose HTTP proxy
-- browser login or OAuth consent UI in v1
+- storing or relaying private repository responses in the shared cache
 - bypassing GitHub authorization, repository permissions, or abuse controls
 - mutating GitHub state by default
 - replacing `gitcrawl` local SQLite search/cache
@@ -32,7 +32,7 @@ Pools are private, explicit, and admin-managed.
 Allowed identities:
 
 - user-provided GitHub PATs with informed consent
-- GitHub App installations where repo access is intended
+- GitHub App installations where public repo access is intended
 - service accounts only where GitHub policy and org policy allow them
 
 Disallowed behavior:
@@ -41,6 +41,8 @@ Disallowed behavior:
 - hidden credential reuse
 - rotating identities to evade repo/user bans or abuse detection
 - cross-user private repo access without explicit authorization
+
+Shared cache v1 is public-repository-only. Octopool checks repository visibility through GitHub's public repository endpoint before selecting a pooled identity or reading/writing D1 cache entries for repo routes.
 
 ## Architecture
 
@@ -70,11 +72,13 @@ pool:<pool_id>:route:<owner>/<repo>
 2. On configured cache miss, gitcrawl sends a normalized relay request to Octopool.
 3. Worker authenticates caller and validates command policy.
 4. Worker forwards routing request to the pool Durable Object.
-5. Durable Object selects a GitHub identity and creates a short lease.
-6. Worker performs the GitHub API request with the selected credential.
-7. Worker records rate-limit headers, status, route class, and redacted audit state.
-8. Worker returns a normalized response to gitcrawl.
-9. gitcrawl stores the response in its existing cache when eligible.
+5. Worker verifies repo routes are public before cache or pooled identity use.
+6. Durable Object selects a GitHub identity and creates a short lease.
+7. Worker performs the GitHub API request with the selected credential.
+8. GitHub App identities mint short-lived installation tokens server-side.
+9. Worker records rate-limit headers, status, route class, and redacted audit state.
+10. Worker returns a normalized response to gitcrawl.
+11. gitcrawl stores the response in its existing cache when eligible.
 
 ## API
 
@@ -173,6 +177,21 @@ Fields:
 Admin-only identity registration.
 
 v1 should store secret material through Wrangler/Cloudflare secret tooling, then store only metadata and secret references in D1.
+
+GitHub App identity body:
+
+```json
+{
+  "id": "ghapp_openclaw_openclaw",
+  "kind": "github_app",
+  "login": "octopool-cache",
+  "secret_ref": "OCTOPOOL_GITHUB_APP_PRIVATE_KEY",
+  "installation_id": 135990630,
+  "scopes": [{ "owner": "openclaw", "repo": "openclaw" }]
+}
+```
+
+The App ID is configured as `OCTOPOOL_GITHUB_APP_ID`; the private key secret must be stored as PKCS#8 `BEGIN PRIVATE KEY` PEM so Cloudflare Workers WebCrypto can sign GitHub App JWTs.
 
 ## Routing Policy
 

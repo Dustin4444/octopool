@@ -18,6 +18,8 @@ Gitcrawl remains the per-repo SQLite mirror, portable Git store, search, cluster
 - The default Octopool endpoint is compiled in as `https://octopool.dev`.
 - Env vars remain dev/CI escape hatches, not the product UX.
 - Octopool owns the shared Cloudflare cache for `gh` reads.
+- Shared cache is public-repository-only. Repo routes must pass an unauthenticated GitHub public visibility check before pooled identity use or cache writes.
+- OpenClaw GitHub App `octopool-cache` is installed only on selected repository `openclaw/openclaw` for v1; no private repo installation.
 - No gitcrawl push/pull cache bridge. Regenerate shared cache through Octopool read-through misses.
 - Gitcrawl portable stores keep their repo snapshot role and do not carry the runtime `gh` command cache.
 - Mutating `gh` commands must pass through to the real GitHub CLI. Octopool does not add write-back behavior.
@@ -104,6 +106,8 @@ Security notes:
 - Saved caller tokens are only sent to the saved Octopool URL. A URL override requires an explicit token env.
 - Relay policy denials fail closed once a request reaches Octopool.
 - Local owner prefiltering keeps ordinary non-OpenClaw `gh api` reads on the real GitHub CLI.
+- GitHub App installation tokens are minted server-side from Cloudflare secrets and never stored locally.
+- GitHub App private key is stored as PKCS#8 in Cloudflare and 1Password.
 - Production pre-migration D1 had one caller row, `steipete`; migration `0002` backfills GitHub user ID `58493`.
 
 ## Gitcrawl Cut

@@ -34,6 +34,7 @@ export type Identity = {
   kind: "pat" | "github_app";
   login: string;
   secret_ref: string;
+  installation_id: number | null;
   weight: number;
 };
 

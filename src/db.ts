@@ -10,6 +10,7 @@ type IdentityRow = {
   kind: "pat" | "github_app";
   login: string;
   secret_ref: string;
+  installation_id: number | null;
   weight: number;
 };
 
@@ -41,7 +42,7 @@ export async function loadIdentities(
 ): Promise<Identity[]> {
   if (route.owner === undefined) {
     const rows = await env.DB.prepare(
-      `SELECT id, kind, login, secret_ref, weight
+      `SELECT id, kind, login, secret_ref, installation_id, weight
        FROM identities
        WHERE pool_id = ?1
          AND status = 'active'`,
@@ -53,7 +54,7 @@ export async function loadIdentities(
   const owner = route.owner ?? "";
   const repo = route.repo ?? "";
   const rows = await env.DB.prepare(
-    `SELECT DISTINCT identities.id, identities.kind, identities.login, identities.secret_ref, identities.weight
+    `SELECT DISTINCT identities.id, identities.kind, identities.login, identities.secret_ref, identities.installation_id, identities.weight
      FROM identities
      JOIN identity_scopes ON identity_scopes.identity_id = identities.id
      WHERE identities.pool_id = ?1
@@ -61,7 +62,7 @@ export async function loadIdentities(
        AND lower(identity_scopes.owner) = lower(?2)
        AND (
          lower(identity_scopes.repo) = lower(?3)
-         OR (identity_scopes.repo IS NULL AND identity_scopes.allow_private = 1)
+         OR identity_scopes.repo IS NULL
        )`,
   )
     .bind(pool, owner, repo)
