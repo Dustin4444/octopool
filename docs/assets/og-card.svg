@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="octopool - a shared GitHub read relay">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#100b18"/>
+      <stop offset="1" stop-color="#07070b"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff5a78"/>
+      <stop offset=".55" stop-color="#d61f5c"/>
+      <stop offset="1" stop-color="#7a0f43"/>
+    </linearGradient>
+    <linearGradient id="arm" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e21e5e"/>
+      <stop offset="1" stop-color="#5e0a36"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ff285a" stop-opacity=".42"/>
+      <stop offset="45%" stop-color="#ff285a" stop-opacity=".14"/>
+      <stop offset="100%" stop-color="#ff285a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="none" stroke="#ff285a" stroke-opacity=".10" stroke-width="2"/>
+  <ellipse cx="905" cy="315" rx="430" ry="430" fill="url(#glow)"/>
+
+  <!-- angry octopus -->
+  <g transform="translate(720 86) scale(0.92)">
+    <g fill="none" stroke="url(#arm)" stroke-linecap="round">
+      <path stroke-width="15" d="M120,236 C66,282 52,352 86,404 C104,432 92,468 120,470"/>
+      <path stroke-width="19" d="M152,250 C112,300 100,372 128,420 C142,446 128,476 154,476"/>
+      <path stroke-width="22" d="M182,258 C166,322 162,392 146,440 C138,464 150,486 174,480"/>
+      <path stroke-width="24" d="M203,262 C198,338 192,408 184,452 C180,476 196,488 210,480"/>
+      <path stroke-width="24" d="M217,262 C222,338 228,408 236,452 C240,476 224,488 210,480"/>
+      <path stroke-width="22" d="M238,258 C254,322 258,392 274,440 C282,464 270,486 246,480"/>
+      <path stroke-width="19" d="M268,250 C308,300 320,372 292,420 C278,446 292,476 266,476"/>
+      <path stroke-width="15" d="M300,236 C354,282 368,352 334,404 C316,432 328,468 300,470"/>
+    </g>
+    <ellipse cx="210" cy="168" rx="116" ry="110" fill="url(#body)"/>
+    <ellipse cx="178" cy="108" rx="56" ry="34" fill="#fff" opacity=".10"/>
+    <ellipse cx="170" cy="152" rx="31" ry="33" fill="#fff"/>
+    <ellipse cx="250" cy="152" rx="31" ry="33" fill="#fff"/>
+    <circle cx="170" cy="159" r="13" fill="#0b0b12"/>
+    <circle cx="165" cy="154" r="4" fill="#fff" opacity=".9"/>
+    <circle cx="250" cy="159" r="13" fill="#0b0b12"/>
+    <circle cx="245" cy="154" r="4" fill="#fff" opacity=".9"/>
+    <path d="M136,110 L196,134" stroke="#4d0a28" stroke-width="15" stroke-linecap="round"/>
+    <path d="M284,110 L224,134" stroke="#4d0a28" stroke-width="15" stroke-linecap="round"/>
+    <path d="M186,208 Q210,190 234,208" fill="none" stroke="#4d0a28" stroke-width="9" stroke-linecap="round"/>
+    <path d="M201,198 L209,198 L205,210 Z" fill="#fff"/>
+    <path d="M213,198 L221,198 L217,210 Z" fill="#fff"/>
+  </g>
+
+  <!-- text block -->
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+    <text x="90" y="214" fill="#ff6781" font-size="26" font-weight="700" letter-spacing="6">GITHUB READ RELAY</text>
+    <text x="86" y="330" fill="#ffffff" font-size="132" font-weight="800" letter-spacing="-4">octopool</text>
+    <rect x="92" y="360" width="96" height="6" rx="3" fill="#ff285a"/>
+    <text x="90" y="430" fill="#d7cee0" font-size="40" font-weight="500">A shared, org-authenticated</text>
+    <text x="90" y="484" fill="#d7cee0" font-size="40" font-weight="500">GitHub relay &amp; cache.</text>
+    <text x="90" y="566" fill="#9b8fa8" font-size="27" font-weight="700" font-family="ui-monospace, SF Mono, Menlo, monospace" letter-spacing="1">docs.octopool.dev</text>
+  </g>
+</svg>

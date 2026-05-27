@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add a custom angry-octopus favicon (SVG + PNG + ICO + apple-touch-icon) and a 1200x630 social card, wired into the docs site and the `octopool.dev` landing page Open Graph/Twitter meta.
 - Gate the browser dashboard behind GitHub website login, D1-backed web sessions, and an admin dashboard role.
 - Add an authenticated browser dashboard for caller, identity limit, cache, and usage stats.
 - Add a docs link to the public `octopool.dev` landing page.

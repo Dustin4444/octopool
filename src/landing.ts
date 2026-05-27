@@ -9,7 +9,20 @@ const LANDING_HTML = `<!doctype html>
 <meta name="theme-color" content="#07070b">
 <meta name="robots" content="noindex">
 <title>octopool</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Ctext%20y='.9em'%20font-size='90'%3E%F0%9F%90%99%3C/text%3E%3C/svg%3E">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="octopool">
+<meta property="og:title" content="octopool - a shared GitHub read relay">
+<meta property="og:description" content="A shared, org-authenticated GitHub read relay and cache. Pooled GitHub identities for read-heavy maintainer automation.">
+<meta property="og:url" content="https://octopool.dev/">
+<meta property="og:image" content="https://docs.octopool.dev/assets/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="octopool - a shared GitHub read relay">
+<meta name="twitter:description" content="A shared, org-authenticated GitHub read relay and cache.">
+<meta name="twitter:image" content="https://docs.octopool.dev/assets/og-card.png">
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJvY3RvcG9vbCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImJnIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzE2MTExZiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwNzA3MGIiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImJvZHkiIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjZmY1YTc4Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iLjU1IiBzdG9wLWNvbG9yPSIjZDYxZjVjIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzdhMGY0MyIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iYXJtIiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iI2UyMWU1ZSIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM1ZTBhMzYiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8cmFkaWFsR3JhZGllbnQgaWQ9Imdsb3ciIGN4PSI1MCUiIGN5PSI0NCUiIHI9IjU1JSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iI2ZmMjg1YSIgc3RvcC1vcGFjaXR5PSIuNTUiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSI1NSUiIHN0b3AtY29sb3I9IiNmZjI4NWEiIHN0b3Atb3BhY2l0eT0iLjEyIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI2ZmMjg1YSIgc3RvcC1vcGFjaXR5PSIwIi8+CiAgICA8L3JhZGlhbEdyYWRpZW50PgogIDwvZGVmcz4KICA8cmVjdCB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHJ4PSIxNCIgZmlsbD0idXJsKCNiZykiLz4KICA8Y2lyY2xlIGN4PSIzMiIgY3k9IjI5IiByPSIyNSIgZmlsbD0idXJsKCNnbG93KSIvPgogIDxnIGZpbGw9Im5vbmUiIHN0cm9rZT0idXJsKCNhcm0pIiBzdHJva2UtbGluZWNhcD0icm91bmQiPgogICAgPHBhdGggc3Ryb2tlLXdpZHRoPSI0LjQiIGQ9Ik0yMSAzMyBDMTUgNDEgMTQgNDkgMTggNTUiLz4KICAgIDxwYXRoIHN0cm9rZS13aWR0aD0iNS40IiBkPSJNMjcgMzYgQzI0IDQ1IDIzIDUyIDI2IDU3Ii8+CiAgICA8cGF0aCBzdHJva2Utd2lkdGg9IjUuNCIgZD0iTTM3IDM2IEM0MCA0NSA0MSA1MiAzOCA1NyIvPgogICAgPHBhdGggc3Ryb2tlLXdpZHRoPSI0LjQiIGQ9Ik00MyAzMyBDNDkgNDEgNTAgNDkgNDYgNTUiLz4KICA8L2c+CiAgPGVsbGlwc2UgY3g9IjMyIiBjeT0iMjciIHJ4PSIxOSIgcnk9IjE4IiBmaWxsPSJ1cmwoI2JvZHkpIi8+CiAgPGVsbGlwc2UgY3g9IjI1LjUiIGN5PSIyNi41IiByeD0iNi40IiByeT0iNi44IiBmaWxsPSIjZmZmIi8+CiAgPGVsbGlwc2UgY3g9IjM4LjUiIGN5PSIyNi41IiByeD0iNi40IiByeT0iNi44IiBmaWxsPSIjZmZmIi8+CiAgPGNpcmNsZSBjeD0iMjYuNCIgY3k9IjI4IiByPSIyLjgiIGZpbGw9IiMwYjBiMTIiLz4KICA8Y2lyY2xlIGN4PSIzNy42IiBjeT0iMjgiIHI9IjIuOCIgZmlsbD0iIzBiMGIxMiIvPgogIDxjaXJjbGUgY3g9IjI1LjMiIGN5PSIyNi43IiByPSIxIiBmaWxsPSIjZmZmIi8+CiAgPGNpcmNsZSBjeD0iMzYuNSIgY3k9IjI2LjciIHI9IjEiIGZpbGw9IiNmZmYiLz4KICA8cGF0aCBkPSJNMTYuNSAxNiBMMjkgMjIuNSIgc3Ryb2tlPSIjNGQwYTI4IiBzdHJva2Utd2lkdGg9IjMuNCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPHBhdGggZD0iTTQ3LjUgMTYgTDM1IDIyLjUiIHN0cm9rZT0iIzRkMGEyOCIgc3Ryb2tlLXdpZHRoPSIzLjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDxwYXRoIGQ9Ik0yOSAzNSBRMzIgMzIuNCAzNSAzNSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjNGQwYTI4IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K" type="image/svg+xml">
+<link rel="apple-touch-icon" href="https://docs.octopool.dev/assets/apple-touch-icon.png">
 <style>
   *{box-sizing:border-box}
   html,body{height:100%}
