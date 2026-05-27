@@ -15,9 +15,9 @@ describe("docs site generator", () => {
       '<li><a href="relay.html">GitHub read relay</a> — the <code>POST /v1/github/request</code> endpoint, supported routes, response envelope, policy gates, and safety limits.</li>',
     );
     expect(index).toContain(
-      '<li><a href="gitcrawl-migrate.html">Gitcrawl gh migration</a> — moving the <code>gh</code> cache surface out of gitcrawl into Octopool.</li>',
+      '<li><a href="identities.html">Pooled identities &amp; routing</a> — PAT and GitHub App identities, scopes, and the pool coordinator&#39;s selection, leases, and cooldowns.</li>',
     );
     expect(index).not.toContain("</ul>\n<p>routes,");
-    expect(index).not.toContain("</ul>\n<p>gitcrawl into Octopool.");
+    expect(index).not.toContain("</ul>\n<p>and the pool coordinator");
   });
 });

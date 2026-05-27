@@ -22,7 +22,7 @@ const siteBase = cname ? `https://${cname}` : "";
 const productName = "octopool";
 const productTagline = "A shared GitHub read relay";
 const productDescription =
-  "Octopool is a Cloudflare-hosted, org-authenticated GitHub read relay and shared cache for gitcrawl. Trusted OpenClaw members and agents share a pool of GitHub identities for read-heavy maintainer automation, keeping tokens off developer machines.";
+  "Octopool is a Cloudflare-hosted, org-authenticated GitHub read relay and shared cache. Trusted OpenClaw members and agents share a pool of GitHub identities for read-heavy maintainer automation, keeping tokens off developer machines.";
 const installCommand = "go install github.com/openclaw/octopool/cmd/octopool@latest";
 
 // Inline-code placeholder sentinel. NUL never appears in markdown and survives escapeHtml.
@@ -36,7 +36,7 @@ const sections = [
   ["Core", ["identities.md", "cache.md", "auth.md", "admin.md"]],
   ["Web", ["landing.md", "dashboard.md"]],
   ["Operations", ["operations.md"]],
-  ["Reference", ["spec.md", "gitcrawl-migrate.md"]],
+  ["Reference", ["spec.md"]],
 ];
 
 const buildExcludes = [];
