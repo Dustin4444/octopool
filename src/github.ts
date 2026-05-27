@@ -1,12 +1,5 @@
 import { HttpError, parsePositiveInt } from "./http";
-import type { Identity, RelayRequest, RouteInfo } from "./types";
-
-type GitHubRelayResponse = {
-  status: number;
-  headers: Record<string, string>;
-  body: unknown;
-  body_encoding?: "json" | "text" | "base64";
-};
+import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
 export async function callGitHub(
   env: Env,

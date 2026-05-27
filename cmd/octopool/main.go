@@ -9,17 +9,50 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
 const defaultURL = "https://octopool.dev"
 
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
 func main() {
+	if isGHArgv(os.Args[0]) {
+		args := os.Args[1:]
+		var err error
+		if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+			err = execRealGH(context.Background(), args, os.Stdout, os.Stderr)
+		} else {
+			err = runGH(context.Background(), args, os.Stdout, os.Stderr)
+		}
+		if err != nil {
+			var exit exitCodeError
+			if errors.As(err, &exit) {
+				os.Exit(exit.Code)
+			}
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
+		var exit exitCodeError
+		if errors.As(err, &exit) {
+			os.Exit(exit.Code)
+		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+type exitCodeError struct {
+	Code int
+}
+
+func (e exitCodeError) Error() string {
+	return fmt.Sprintf("exit status %d", e.Code)
 }
 
 func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
@@ -28,6 +61,10 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return errors.New("missing command")
 	}
 	switch args[0] {
+	case "login":
+		return runLogin(ctx, args[1:], stdout)
+	case "gh":
+		return runGH(ctx, args[1:], stdout, stderr)
 	case "health":
 		return runHealth(ctx, args[1:], stdout)
 	case "request":
@@ -44,15 +81,22 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 }
 
 func runHealth(ctx context.Context, args []string, stdout io.Writer) error {
+	auth, err := loadAuth()
+	if err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("health", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	url := fs.String("url", envDefault("OCTOPOOL_URL", defaultURL), "Octopool base URL")
-	pool := fs.String("pool", envDefault("OCTOPOOL_POOL", "maintainers"), "pool id")
+	url := fs.String("url", defaultAuthURL(auth), "Octopool base URL")
+	pool := fs.String("pool", defaultAuthPool(auth), "pool id")
 	tokenEnv := fs.String("token-env", "OCTOPOOL_TOKEN", "caller token env var")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	token, err := requiredEnv(*tokenEnv)
+	if err := validateAuthURLForRequest(auth, *url, *tokenEnv); err != nil {
+		return err
+	}
+	token, err := callerToken(*tokenEnv)
 	if err != nil {
 		return err
 	}
@@ -60,10 +104,14 @@ func runHealth(ctx context.Context, args []string, stdout io.Writer) error {
 }
 
 func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
+	auth, err := loadAuth()
+	if err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("request", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	url := fs.String("url", envDefault("OCTOPOOL_URL", defaultURL), "Octopool base URL")
-	pool := fs.String("pool", envDefault("OCTOPOOL_POOL", "maintainers"), "pool id")
+	url := fs.String("url", defaultAuthURL(auth), "Octopool base URL")
+	pool := fs.String("pool", defaultAuthPool(auth), "pool id")
 	tokenEnv := fs.String("token-env", "OCTOPOOL_TOKEN", "caller token env var")
 	method := fs.String("method", "GET", "GitHub method")
 	path := fs.String("path", "", "GitHub API path")
@@ -77,7 +125,10 @@ func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
 	if *path == "" {
 		return errors.New("--path is required")
 	}
-	token, err := requiredEnv(*tokenEnv)
+	if err := validateAuthURLForRequest(auth, *url, *tokenEnv); err != nil {
+		return err
+	}
+	token, err := callerToken(*tokenEnv)
 	if err != nil {
 		return err
 	}
@@ -181,9 +232,7 @@ func runAdminIdentity(ctx context.Context, args []string, stdout io.Writer) erro
 }
 
 func getJSON(ctx context.Context, stdout io.Writer, url string, token string) error {
-	child, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(child, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
@@ -192,26 +241,43 @@ func getJSON(ctx context.Context, stdout io.Writer, url string, token string) er
 }
 
 func postJSON(ctx context.Context, stdout io.Writer, url string, token string, body map[string]any) error {
+	resp, err := postJSONRaw(ctx, url, token, body)
+	if err != nil {
+		return err
+	}
+	return writeJSONResponse(stdout, resp)
+}
+
+func postJSONRaw(
+	ctx context.Context,
+	url string,
+	token string,
+	body map[string]any,
+) (*http.Response, error) {
 	encoded, err := json.Marshal(body)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	child, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(child, http.MethodPost, url, strings.NewReader(string(encoded)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(encoded)))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	req.Header.Set("authorization", "Bearer "+token)
+	if token != "" {
+		req.Header.Set("authorization", "Bearer "+token)
+	}
 	req.Header.Set("content-type", "application/json")
-	return do(stdout, req)
+	return httpClient.Do(req)
 }
 
 func do(stdout io.Writer, req *http.Request) error {
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
+	return writeJSONResponse(stdout, resp)
+}
+
+func writeJSONResponse(stdout io.Writer, resp *http.Response) error {
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
@@ -227,6 +293,19 @@ func do(stdout io.Writer, req *http.Request) error {
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(value)
+}
+
+func doRaw(ctx context.Context, url string, token string, body map[string]any) ([]byte, int, error) {
+	resp, err := postJSONRaw(ctx, url, token, body)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	out, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return out, resp.StatusCode, nil
 }
 
 type multiFlag []string
@@ -269,6 +348,54 @@ func requiredEnv(name string) (string, error) {
 	return value, nil
 }
 
+func callerToken(envName string) (string, error) {
+	if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+		return value, nil
+	}
+	auth, err := loadAuth()
+	if err != nil {
+		return "", err
+	}
+	if auth.Token == "" {
+		return "", errors.New("not logged in; run: octopool login")
+	}
+	return auth.Token, nil
+}
+
+func defaultAuthURL(auth authFile) string {
+	return envDefault("OCTOPOOL_URL", firstNonEmpty(auth.URL, defaultURL))
+}
+
+func defaultAuthPool(auth authFile) string {
+	return envDefault("OCTOPOOL_POOL", firstNonEmpty(auth.Pool, "maintainers"))
+}
+
+func validateAuthURLForRequest(auth authFile, effectiveURL string, tokenEnvName string) error {
+	if strings.TrimSpace(os.Getenv(tokenEnvName)) != "" {
+		return nil
+	}
+	effective := strings.TrimRight(strings.TrimSpace(firstNonEmpty(effectiveURL, defaultURL)), "/")
+	stored := strings.TrimRight(strings.TrimSpace(firstNonEmpty(auth.URL, defaultURL)), "/")
+	if effective != stored {
+		return fmt.Errorf("URL override requires %s or a fresh octopool login for that URL", tokenEnvName)
+	}
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func isGHArgv(argv0 string) bool {
+	base := filepath.Base(argv0)
+	return base == "gh" || base == "octopool-gh"
+}
+
 func urlPath(value string) string {
 	return strings.ReplaceAll(value, "/", "%2F")
 }
@@ -278,5 +405,5 @@ func apiURL(base string, path string) string {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: octopool <health|request|admin> [flags]")
+	fmt.Fprintln(w, "usage: octopool <login|gh|health|request|admin> [flags]")
 }

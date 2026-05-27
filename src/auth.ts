@@ -62,6 +62,73 @@ export function newToken(prefix: string): string {
   return `${prefix}_${base64Url(bytes)}`;
 }
 
+export async function githubUserFromToken(token: string): Promise<{
+  id: number;
+  login: string;
+  name?: string;
+}> {
+  const response = await fetch("https://api.github.com/user", {
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token}`,
+      "user-agent": "octopool",
+      "x-github-api-version": "2022-11-28",
+    },
+  });
+  if (!response.ok) {
+    throw new HttpError(
+      401,
+      "github_auth_failed",
+      `GitHub token check failed with ${response.status}`,
+    );
+  }
+  const body: unknown = await response.json();
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new HttpError(502, "github_auth_failed", "GitHub user response was invalid");
+  }
+  const login = (body as { login?: unknown }).login;
+  const id = (body as { id?: unknown }).id;
+  const name = (body as { name?: unknown }).name;
+  if (typeof login !== "string" || typeof id !== "number") {
+    throw new HttpError(502, "github_auth_failed", "GitHub user response was incomplete");
+  }
+  return {
+    id,
+    login,
+    ...(typeof name === "string" && name.trim() !== "" ? { name } : {}),
+  };
+}
+
+export async function githubUserByLogin(login: string): Promise<{
+  id: number;
+  login: string;
+}> {
+  const response = await fetch(`https://api.github.com/users/${encodeURIComponent(login)}`, {
+    headers: {
+      accept: "application/vnd.github+json",
+      "user-agent": "octopool",
+      "x-github-api-version": "2022-11-28",
+    },
+  });
+  if (!response.ok) {
+    throw new HttpError(
+      502,
+      "github_user_lookup_failed",
+      `GitHub user lookup failed with ${response.status}`,
+    );
+  }
+  const body: unknown = await response.json();
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new HttpError(502, "github_user_lookup_failed", "GitHub user response was invalid");
+  }
+  const resolvedLogin = (body as { login?: unknown }).login;
+  const id = (body as { id?: unknown }).id;
+  if (typeof resolvedLogin !== "string" || typeof id !== "number") {
+    throw new HttpError(502, "github_user_lookup_failed", "GitHub user response was incomplete");
+  }
+  return { id, login: resolvedLogin };
+}
+
 export async function verifyGitHubOrgMember(env: Env, login: string): Promise<string> {
   const token = secret(env, "OCTOPOOL_GITHUB_ORG_TOKEN");
   if (token === undefined || token.trim() === "") {
@@ -92,6 +159,36 @@ export async function verifyGitHubOrgMember(env: Env, login: string): Promise<st
       "org_member_denied",
       `${login} is not a public or token-visible ${org} member`,
     );
+  }
+  throw new HttpError(
+    502,
+    "org_verification_failed",
+    `GitHub membership check failed with ${response.status}`,
+  );
+}
+
+export async function verifyGitHubOrgMemberWithToken(
+  env: Env,
+  token: string,
+  login: string,
+): Promise<string> {
+  const org = env.ALLOWED_GITHUB_ORG;
+  const response = await fetch(
+    `https://api.github.com/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(login)}`,
+    {
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${token}`,
+        "user-agent": "octopool",
+        "x-github-api-version": "2022-11-28",
+      },
+    },
+  );
+  if (response.status === 204) {
+    return new Date().toISOString();
+  }
+  if (response.status === 404) {
+    throw new HttpError(403, "org_member_denied", `${login} is not a ${org} org member`);
   }
   throw new HttpError(
     502,

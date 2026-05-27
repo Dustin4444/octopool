@@ -249,5 +249,15 @@ function normalizeRouteHint(
 
 function safeQueryKey(key: string): boolean {
   const lower = key.toLowerCase();
-  return /^[a-z0-9_.-]+$/.test(lower) && !lower.includes("token") && lower !== "access_token";
+  return (
+    /^[a-z0-9_.-]+$/.test(lower) &&
+    !lower.includes("token") &&
+    !lower.includes("secret") &&
+    !lower.includes("password") &&
+    !lower.includes("passwd") &&
+    !lower.includes("api_key") &&
+    !lower.includes("apikey") &&
+    !lower.includes("access_key") &&
+    !lower.includes("private_key")
+  );
 }

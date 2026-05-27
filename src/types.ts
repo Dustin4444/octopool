@@ -48,6 +48,13 @@ export type RouteInfo = {
   logs: boolean;
 };
 
+export type GitHubRelayResponse = {
+  status: number;
+  headers: Record<string, string>;
+  body: unknown;
+  body_encoding?: "json" | "text" | "base64";
+};
+
 export type SelectionCandidate = {
   id: string;
   weight: number;

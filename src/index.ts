@@ -1,10 +1,14 @@
 import {
   authenticateAdmin,
   authenticateCaller,
+  githubUserByLogin,
+  githubUserFromToken,
   hashToken,
   newToken,
   verifyGitHubOrgMember,
+  verifyGitHubOrgMemberWithToken,
 } from "./auth";
+import { githubCacheKey, readGitHubCache, shouldUseGitHubCache, writeGitHubCache } from "./cache";
 import { ensurePool, insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, rateFromHeaders } from "./github";
 import {
@@ -48,6 +52,9 @@ async function routeRequest(
   }
   if (request.method === "GET" && url.pathname === "/login/github") {
     return githubLoginRedirect(env, url);
+  }
+  if (request.method === "POST" && url.pathname === "/v1/login/github-cli") {
+    return loginGitHubCLI(request, env);
   }
   if (request.method === "GET" && /^\/v1\/pools\/[^/]+\/health$/.test(url.pathname)) {
     const pool = routeParam(url.pathname, /^\/v1\/pools\/(?<pool>[^/]+)\/health$/, "pool");
@@ -104,6 +111,51 @@ async function relayGitHub(
   let identity: Identity | undefined;
   try {
     route = classifyRoute(relayRequest, policy);
+    const cacheEnabled = shouldUseGitHubCache(relayRequest, route);
+    const cacheKey = cacheEnabled
+      ? await githubCacheKey(relayRequest.pool, relayRequest, route)
+      : undefined;
+    if (cacheKey !== undefined) {
+      const cached = await readGitHubCache(env, cacheKey);
+      if (cached !== undefined) {
+        const activeIdentities = await loadIdentities(env, relayRequest.pool, route);
+        if (activeIdentities.length === 0) {
+          throw new HttpError(503, "no_identity", "No active identity can serve this route");
+        }
+        if (
+          cached.identity !== undefined &&
+          activeIdentities.some((candidate) => candidate.id === cached.identity?.id)
+        ) {
+          ctx.waitUntil(
+            insertAudit(env, {
+              requestId,
+              callerId: caller.id,
+              pool: relayRequest.pool,
+              routeKey: route.routeKey,
+              routeKind: route.kind,
+              status: cached.status,
+              durationMs: Date.now() - started,
+              identityId: cached.identity.id,
+            }),
+          );
+          return jsonResponse({
+            status: cached.status,
+            headers: cached.headers,
+            body: cached.body,
+            body_encoding: cached.body_encoding,
+            identity: cached.identity,
+            relay: {
+              pool: relayRequest.pool,
+              request_id: requestId,
+              cacheable: route.cacheable,
+              cache: "hit",
+              stale_ok: false,
+              route_kind: route.kind,
+            },
+          });
+        }
+      }
+    }
     const identities = await loadIdentities(env, relayRequest.pool, route);
     if (identities.length === 0) {
       throw new HttpError(503, "no_identity", "No active identity can serve this route");
@@ -138,6 +190,9 @@ async function relayGitHub(
           status: github.status,
           durationMs: Date.now() - started,
         }),
+        ...(cacheKey === undefined
+          ? []
+          : [writeGitHubCache(env, cacheKey, relayRequest, route, github, identity)]),
       ]),
     );
     return jsonResponse({
@@ -153,6 +208,7 @@ async function relayGitHub(
         pool: relayRequest.pool,
         request_id: requestId,
         cacheable: route.cacheable,
+        cache: cacheKey === undefined ? "bypass" : "miss",
         stale_ok: false,
         route_kind: route.kind,
         lease_reason: selection.reason,
@@ -223,6 +279,76 @@ async function poolHealth(env: Env, pool: string): Promise<Response> {
   });
 }
 
+async function loginGitHubCLI(request: Request, env: Env): Promise<Response> {
+  const body = await parseJsonObject(request);
+  const githubToken = requireString(body.github_token, "github_token");
+  const pool = loginPool(env, body.pool);
+  const user = await githubUserFromToken(githubToken);
+  const verifiedAt = await verifyGitHubOrgMemberWithToken(env, githubToken, user.login);
+  await ensurePool(env, pool);
+  const token = newToken("op");
+  const existing = await env.DB.prepare(
+    `SELECT callers.id
+     FROM callers
+     JOIN caller_pools ON caller_pools.caller_id = callers.id
+     WHERE callers.github_user_id = ?1
+       AND callers.org_login = ?2
+       AND callers.status = 'active'
+       AND caller_pools.pool_id = ?3
+     LIMIT 1`,
+  )
+    .bind(user.id, env.ALLOWED_GITHUB_ORG, pool)
+    .first<{ id: string }>();
+  if (existing === null) {
+    throw new HttpError(403, "caller_not_provisioned", "Caller is not provisioned for this pool");
+  }
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE callers
+       SET name = ?1,
+           token_hash = ?2,
+           github_login = ?3,
+           github_user_id = ?4,
+           org_verified_at = ?5,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?6`,
+    ).bind(
+      user.name ?? user.login,
+      await hashToken(token),
+      user.login,
+      user.id,
+      verifiedAt,
+      existing.id,
+    ),
+  ]);
+  return jsonResponse(
+    {
+      caller: {
+        id: existing.id,
+        name: user.name ?? user.login,
+        github_login: user.login,
+        org_login: env.ALLOWED_GITHUB_ORG,
+        pool,
+      },
+      token,
+    },
+    201,
+  );
+}
+
+function loginPool(env: Env, requested: unknown): string {
+  const configured = (env as unknown as Record<string, string | undefined>).DEFAULT_LOGIN_POOL;
+  const allowed =
+    configured === undefined || configured.trim() === "" ? "maintainers" : configured.trim();
+  if (requested === undefined || requested === null || requested === "") {
+    return allowed;
+  }
+  if (typeof requested !== "string" || requested.trim() !== allowed) {
+    throw new HttpError(403, "pool_denied", "CLI login cannot self-grant this pool");
+  }
+  return allowed;
+}
+
 async function createCaller(request: Request, env: Env): Promise<Response> {
   const body = await parseJsonObject(request);
   const pool = requireString(body.pool, "pool");
@@ -231,13 +357,22 @@ async function createCaller(request: Request, env: Env): Promise<Response> {
     typeof body.name === "string" && body.name.trim() !== "" ? body.name.trim() : githubLogin;
   await ensurePool(env, pool);
   const verifiedAt = await verifyGitHubOrgMember(env, githubLogin);
+  const githubUser = await githubUserByLogin(githubLogin);
   const token = newToken("op");
   const callerId = `caller_${crypto.randomUUID()}`;
   await env.DB.prepare(
-    `INSERT INTO callers (id, name, token_hash, github_login, org_login, org_verified_at, status)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active')`,
+    `INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_login, org_verified_at, status)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active')`,
   )
-    .bind(callerId, name, await hashToken(token), githubLogin, env.ALLOWED_GITHUB_ORG, verifiedAt)
+    .bind(
+      callerId,
+      name,
+      await hashToken(token),
+      githubUser.login,
+      githubUser.id,
+      env.ALLOWED_GITHUB_ORG,
+      verifiedAt,
+    )
     .run();
   await env.DB.prepare("INSERT INTO caller_pools (caller_id, pool_id) VALUES (?1, ?2)")
     .bind(callerId, pool)

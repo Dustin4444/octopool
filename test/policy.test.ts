@@ -56,6 +56,14 @@ describe("route policy", () => {
       validateRelayRequest({
         pool: "maintainers",
         method: "GET",
+        path: "/repos/openclaw/openclaw/pulls/1",
+        query: { client_secret: "secret" },
+      }),
+    ).toThrow(/query key/);
+    expect(() =>
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
         path: "/repos/openclaw/openclaw/branches/.",
       }),
     ).toThrow(/absolute GitHub API path/);
