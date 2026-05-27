@@ -22,13 +22,15 @@ Plain vars (in `wrangler.jsonc`):
 - `MAX_RESPONSE_BYTES` = `2097152`
 - `REQUEST_TIMEOUT_MS` = `15000`
 - `ORG_VERIFY_TTL_SECONDS` = `86400`
+- `GITHUB_OAUTH_CLIENT_ID` = Octopool GitHub App OAuth client id
 
 Optional vars (set as needed): `PUBLIC_REPO_TTL_SECONDS` (default 30), `DEFAULT_LOGIN_POOL`
-(default `maintainers`), `GITHUB_OAUTH_CLIENT_ID`.
+(default `maintainers`).
 
 Secrets (via `wrangler secret put`, never in D1/KV/logs):
 
-- `OCTOPOOL_ADMIN_TOKEN` — admin auth.
+- `OCTOPOOL_ADMIN_TOKEN` — admin API auth.
+- `GITHUB_OAUTH_CLIENT_SECRET` — website GitHub login.
 - `OCTOPOOL_GITHUB_ORG_TOKEN` — background org-membership verifier.
 - `OCTOPOOL_GITHUB_APP_ID` — GitHub App id (for App identities).
 - One secret per identity `secret_ref` — PAT value, or the App private key as **PKCS#8**
@@ -43,6 +45,8 @@ D1 schema lives in `migrations/`:
 - `0002_github_cache.sql` — `github_user_id` column + production caller backfill, and
   `github_cache_entries`.
 - `0003_github_app_public_cache.sql` — `installation_id` column and `github_public_repos`.
+- `0004_web_dashboard_sessions.sql` — dashboard role, OAuth states, and hashed website
+  sessions.
 
 Apply with `wrangler d1 migrations apply octopool` (add `--remote` for production).
 

@@ -23,7 +23,8 @@ click-to-rage shake. It respects `prefers-reduced-motion`. App icon artwork live
 
 ## `GET /login/github`
 
-The sign-in button links here. The Worker issues a 302 redirect:
+The sign-in button links here. The Worker creates a short-lived OAuth state, stores only a
+hash in D1, sets an `HttpOnly` state cookie, and issues a 302 redirect:
 
 - If `GITHUB_OAUTH_CLIENT_ID` is configured, it redirects to GitHub's OAuth authorize URL
   with `scope=read:org`, `allow_signup=false`, and
@@ -31,6 +32,11 @@ The sign-in button links here. The Worker issues a 302 redirect:
 - If no client id is configured, it falls back to `https://github.com/login`.
 
 The `read:org` scope and `allow_signup=false` reflect that Octopool access is gated on
-OpenClaw org membership (see [Auth](auth.md)). The callback handler is not implemented in
-v1 — the CLI login flow (`octopool login`, via `gh auth token`) is the working
-authentication path; the web button is a placeholder OAuth entry.
+OpenClaw org membership (see [Auth](auth.md)).
+
+## `GET /login/github/callback`
+
+The callback exchanges the GitHub OAuth code, verifies the GitHub user, checks OpenClaw
+membership through the configured org verifier token, finds the already-provisioned
+caller by immutable GitHub user id, and creates a web session. The dashboard additionally
+requires `dashboard_role = 'admin'`.

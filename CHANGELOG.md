@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Gate the browser dashboard behind GitHub website login, D1-backed web sessions, and an admin dashboard role.
 - Add an authenticated browser dashboard for caller, identity limit, cache, and usage stats.
 - Add a docs link to the public `octopool.dev` landing page.
 - Fix docs-site rendering for wrapped Markdown list items.

@@ -80,10 +80,10 @@ Each links to its page on [docs.octopool.dev](https://docs.octopool.dev):
 - **[Octopool CLI](https://docs.octopool.dev/cli.html)** — `octopool login`, the `gh` shim, and real-`gh` fallback.
 - **[Pooled identities & routing](https://docs.octopool.dev/identities.html)** — PAT and GitHub App identities, scopes, and the coordinator's selection, leases, and cooldowns.
 - **[Cache & public-repo guard](https://docs.octopool.dev/cache.html)** — the D1 read-through cache and public-only visibility enforcement.
-- **[Auth & org membership](https://docs.octopool.dev/auth.html)** — caller auth, admin auth, and the GitHub-CLI login exchange.
+- **[Auth & org membership](https://docs.octopool.dev/auth.html)** — caller auth, admin auth, website sessions, and the GitHub-CLI login exchange.
 - **[Admin & provisioning](https://docs.octopool.dev/admin.html)** — registering callers and identities.
 - **[Landing page & GitHub login](https://docs.octopool.dev/landing.html)** — `octopool.dev` and the OAuth entry.
-- **[Dashboard](https://docs.octopool.dev/dashboard.html)** — browser view for limits, cache, identity, and caller usage stats.
+- **[Dashboard](https://docs.octopool.dev/dashboard.html)** — GitHub-login-gated browser view for limits, cache, identity, and caller usage stats.
 - **[Deployment & operations](https://docs.octopool.dev/operations.html)** — Cloudflare resources, config, migrations, and the deploy flow.
 
 ## Development

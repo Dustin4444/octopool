@@ -15,6 +15,7 @@
     "MAX_RESPONSE_BYTES": "2097152",
     "REQUEST_TIMEOUT_MS": "15000",
     "ORG_VERIFY_TTL_SECONDS": "86400",
+    "GITHUB_OAUTH_CLIENT_ID": "Iv23lilUVXPNTPhNhUmZ",
   },
   "routes": [
     {

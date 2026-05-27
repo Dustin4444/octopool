@@ -39,7 +39,7 @@ export async function authenticateCaller(
 }
 
 export async function authenticateAdmin(request: Request, env: Env): Promise<void> {
-  const configured = secret(env, "OCTOPOOL_ADMIN_TOKEN");
+  const configured = envSecret(env, "OCTOPOOL_ADMIN_TOKEN");
   if (configured === undefined || configured.trim() === "") {
     throw new HttpError(503, "admin_unconfigured", "Admin token is not configured");
   }
@@ -130,7 +130,7 @@ export async function githubUserByLogin(login: string): Promise<{
 }
 
 export async function verifyGitHubOrgMember(env: Env, login: string): Promise<string> {
-  const token = secret(env, "OCTOPOOL_GITHUB_ORG_TOKEN");
+  const token = envSecret(env, "OCTOPOOL_GITHUB_ORG_TOKEN");
   if (token === undefined || token.trim() === "") {
     throw new HttpError(
       503,
@@ -197,7 +197,7 @@ export async function verifyGitHubOrgMemberWithToken(
   );
 }
 
-async function ensureFreshOrgMembership(env: Env, caller: CallerRow): Promise<void> {
+export async function ensureFreshOrgMembership(env: Env, caller: CallerRow): Promise<void> {
   const ttlSeconds = Number.parseInt(env.ORG_VERIFY_TTL_SECONDS, 10);
   const ttlMs = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds * 1000 : 86_400_000;
   const verifiedAt = caller.org_verified_at === null ? 0 : Date.parse(caller.org_verified_at);
@@ -235,6 +235,6 @@ function base64Url(bytes: Uint8Array): string {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
-function secret(env: Env, name: string): string | undefined {
+export function envSecret(env: Env, name: string): string | undefined {
   return (env as unknown as Record<string, string | undefined>)[name];
 }

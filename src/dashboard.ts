@@ -14,7 +14,7 @@ const DASHBOARD_HTML = `<!doctype html>
   header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin:0 auto 18px;max-width:1380px}
   h1{margin:0;font-size:22px;line-height:1.1;font-weight:750;letter-spacing:0}
   .sub{margin:6px 0 0;color:var(--muted);font-size:13px}
-  .shell{max-width:1380px;margin:0 auto;display:grid;grid-template-columns:280px minmax(0,1fr);gap:16px}
+  .shell{max-width:1380px;margin:0 auto;display:grid;grid-template-columns:260px minmax(0,1fr);gap:16px}
   aside,.panel,.tile{background:var(--panel);border:1px solid var(--line);border-radius:8px}
   aside{padding:14px;align-self:start;position:sticky;top:16px}
   label{display:block;color:var(--muted);font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.08em;margin:0 0 7px}
@@ -64,11 +64,10 @@ const DASHBOARD_HTML = `<!doctype html>
   <div class="shell">
     <aside>
       <div class="controls">
-        <div><label for="token">Admin token</label><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="OCTOPOOL_ADMIN_TOKEN"></div>
         <div><label for="pool">Pool</label><input id="pool" value="maintainers" spellcheck="false"></div>
-        <div class="row"><button id="load">Load</button><button class="secondary" id="clear">Clear</button></div>
+        <div class="row"><button id="load">Refresh</button><a class="linkbtn secondary" href="/logout">Logout</a></div>
       </div>
-      <div class="who" id="who"><strong>Not loaded</strong><span>Use your Octopool admin token.</span></div>
+      <div class="who" id="who"><strong>Loading</strong><span>Checking web session.</span></div>
       <div class="error" id="error"></div>
     </aside>
     <section class="grid">
@@ -94,37 +93,30 @@ const DASHBOARD_HTML = `<!doctype html>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
-const tokenInput = $("token");
 const poolInput = $("pool");
 let loadSerial = 0;
-tokenInput.value = localStorage.getItem("octopool.token") || "";
 poolInput.value = localStorage.getItem("octopool.pool") || "maintainers";
 $("load").addEventListener("click", load);
-$("clear").addEventListener("click", () => {
-  loadSerial += 1;
-  localStorage.removeItem("octopool.token");
-  tokenInput.value = "";
-  resetDashboard();
-});
-if (tokenInput.value) load();
+load();
 
 async function load() {
   const serial = (loadSerial += 1);
-  const token = tokenInput.value.trim();
   const pool = poolInput.value.trim() || "maintainers";
   localStorage.setItem("octopool.pool", pool);
   const err = $("error");
   err.style.display = "none";
-  if (!token) {
-    resetDashboard();
-    return showError("Missing admin token.");
-  }
-  localStorage.setItem("octopool.token", token);
   const response = await fetch("/v1/dashboard?pool=" + encodeURIComponent(pool), {
-    headers: { authorization: "Bearer " + token, accept: "application/json" },
+    headers: { accept: "application/json" },
+    credentials: "same-origin",
   });
   const data = await response.json().catch(() => ({}));
   if (serial !== loadSerial) return;
+  if (response.status === 401 && data.error && (
+    data.error.code === "missing_web_session" || data.error.code === "invalid_web_session"
+  )) {
+    window.location.href = "/login/github?next=/dashboard";
+    return;
+  }
   if (!response.ok) {
     resetDashboard();
     return showError((data.error && data.error.message) || "Dashboard request failed.");
@@ -133,7 +125,7 @@ async function load() {
 }
 
 function render(data) {
-  $("who").replaceChildren(el("strong", "Admin"), el("span", data.pool + " · " + data.generated_at));
+  $("who").replaceChildren(el("strong", data.operator.github_login), el("span", data.pool + " · " + data.generated_at));
   $("tiles").replaceChildren(
     tile("Requests 24h", fmt(data.usage.requests_24h), data.usage.errors_24h + " errors"),
     tile("Cache Fresh", fmt(data.cache.fresh_entries), fmt(data.cache.total_entries) + " total"),
@@ -206,7 +198,7 @@ function statusPill(status) {
   return el("span", String(status), "pill " + kind);
 }
 function resetDashboard() {
-  $("who").replaceChildren(el("strong", "Not loaded"), el("span", "Use your Octopool admin token."));
+  $("who").replaceChildren(el("strong", "Not loaded"), el("span", "Use your GitHub web login."));
   $("tiles").replaceChildren();
   $("rates").replaceChildren();
   $("rate-count").textContent = "";

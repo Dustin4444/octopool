@@ -2,16 +2,21 @@
 
 `/dashboard` is the browser view for Octopool operators.
 
-Source: `src/dashboard.ts`, `src/index.ts` (`dashboardData`).
+Source: `src/dashboard.ts`, `src/index.ts` (`dashboardData`), `src/web-session.ts`.
 
 ## Login model
 
-The dashboard uses the admin token, because it exposes pool-wide identity state and other
-callers' usage. Paste `OCTOPOOL_ADMIN_TOKEN`; the token is stored only in browser
-localStorage and sent as `Authorization: Bearer …` to `/v1/dashboard`.
+The dashboard uses the website GitHub login, not a pasted admin token.
 
-The endpoint uses the same admin auth boundary as provisioning. Ordinary relay caller
-tokens cannot load dashboard data.
+- `/dashboard` redirects anonymous browsers to `/login/github?next=/dashboard`.
+- `/login/github/callback` verifies GitHub identity and OpenClaw membership.
+- The caller must already be provisioned for the default login pool.
+- The caller must have `dashboard_role = 'admin'`.
+- A successful login stores an opaque `octopool_session` cookie (`HttpOnly`, `Secure`,
+  `SameSite=Lax`) and a hashed session row in D1.
+
+`/v1/dashboard` uses the same web session and role gate. Ordinary relay caller tokens and
+non-admin org members cannot load dashboard data.
 
 ## Data shown
 

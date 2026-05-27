@@ -1,10 +1,12 @@
 # Auth & Org Membership
 
-Octopool has three auth surfaces: caller auth for relay traffic, admin auth for
-provisioning, and the GitHub-CLI login exchange that mints caller tokens. All of them are
-pinned to a single allowed GitHub org (`ALLOWED_GITHUB_ORG`, `openclaw`).
+Octopool has four auth surfaces: caller auth for relay traffic, admin auth for
+provisioning, the GitHub-CLI login exchange that mints caller tokens, and website
+sessions for `/dashboard`. All of them are pinned to a single allowed GitHub org
+(`ALLOWED_GITHUB_ORG`, `openclaw`).
 
-Source: `src/auth.ts`, `src/index.ts` (`loginGitHubCLI`, `createCaller`).
+Source: `src/auth.ts`, `src/web-session.ts`, `src/index.ts` (`loginGitHubCLI`,
+`createCaller`).
 
 ## Caller auth
 
@@ -27,6 +29,24 @@ Admin endpoints (`/v1/admin/...`) require `Authorization: Bearer <OCTOPOOL_ADMIN
 The comparison is constant-time. If no admin token is configured, admin endpoints return
 `503 admin_unconfigured`. Admin auth is entirely separate from caller auth — ordinary
 callers can never reach admin routes.
+
+## Website session auth
+
+The browser dashboard uses GitHub OAuth and an opaque cookie session:
+
+1. `/login/github` redirects to GitHub with `read:org`, `allow_signup=false`, and a
+   random state stored as a D1 hash plus an `HttpOnly` state cookie.
+2. `/login/github/callback` exchanges the code with GitHub, resolves the user, verifies
+   OpenClaw membership with the configured org verifier token, and finds the
+   pre-provisioned caller by immutable GitHub user id.
+3. A random `octopool_session` cookie is set (`HttpOnly`, `Secure`, `SameSite=Lax`).
+   Only its SHA-256 hash is stored in `web_sessions`; the raw session token is never
+   stored.
+4. `/dashboard` and `/v1/dashboard` require a valid session, a pool grant, and
+   `dashboard_role = 'admin'`.
+
+Non-admin org members may be valid Octopool callers, but they cannot see pool-wide
+operator data.
 
 ## GitHub-CLI login exchange
 

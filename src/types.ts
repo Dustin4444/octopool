@@ -29,6 +29,11 @@ export type Caller = {
   org_verified_at: string | null;
 };
 
+export type WebSession = Caller & {
+  dashboard_role: "none" | "admin";
+  expires_at: string;
+};
+
 export type Identity = {
   id: string;
   kind: "pat" | "github_app";

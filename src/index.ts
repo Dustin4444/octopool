@@ -24,6 +24,14 @@ import { landingResponse } from "./landing";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import { PoolCoordinator } from "./pool-coordinator";
 import { ensurePublicGitHubRepo } from "./public-repos";
+import {
+  finishGitHubWebLogin,
+  logoutWebSession,
+  requireDashboardAdmin,
+  startGitHubWebLogin,
+  webLoginRedirect,
+  webMeResponse,
+} from "./web-session";
 import type { Identity, SelectionRequest } from "./types";
 
 export { PoolCoordinator };
@@ -53,10 +61,28 @@ async function routeRequest(
     return jsonResponse({ ok: true, service: "octopool", request_id: requestId });
   }
   if (request.method === "GET" && url.pathname === "/login/github") {
-    return githubLoginRedirect(env, url);
+    return startGitHubWebLogin(env, url);
+  }
+  if (request.method === "GET" && url.pathname === "/login/github/callback") {
+    return finishGitHubWebLogin(request, env, url);
+  }
+  if (request.method === "GET" && url.pathname === "/logout") {
+    return logoutWebSession(request, env);
   }
   if (request.method === "GET" && url.pathname === "/dashboard") {
+    try {
+      await requireDashboardAdmin(request, env, loginPool(env, undefined));
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 401) {
+        return webLoginRedirect(request);
+      }
+      throw error;
+    }
     return dashboardResponse();
+  }
+  if (request.method === "GET" && url.pathname === "/v1/me") {
+    const session = await requireDashboardAdmin(request, env, loginPool(env, undefined));
+    return webMeResponse(session);
   }
   if (request.method === "GET" && url.pathname === "/v1/dashboard") {
     return dashboardData(request, env);
@@ -94,7 +120,7 @@ async function dashboardData(request: Request, env: Env): Promise<Response> {
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(pool)) {
     throw new HttpError(400, "pool_invalid", "Pool id is invalid");
   }
-  await authenticateAdmin(request, env);
+  const operator = await requireDashboardAdmin(request, env, pool);
   const coordinator = env.POOL_COORDINATOR.getByName(`pool:${pool}`);
   const [
     identities,
@@ -120,7 +146,11 @@ async function dashboardData(request: Request, env: Env): Promise<Response> {
   return jsonResponse({
     generated_at: new Date().toISOString(),
     pool,
-    operator: { kind: "admin" },
+    operator: {
+      kind: "web",
+      github_login: operator.github_login,
+      dashboard_role: operator.dashboard_role,
+    },
     identities: {
       total: identities.length,
       active: identities.filter((identity) => identity.status === "active").length,
@@ -351,19 +381,6 @@ async function dashboardPublicRepos(env: Env) {
     fresh_entries: row?.fresh_entries ?? 0,
     newest_checked_at: row?.newest_checked_at ?? null,
   };
-}
-
-function githubLoginRedirect(env: Env, url: URL): Response {
-  const clientId = (env as unknown as Record<string, string | undefined>).GITHUB_OAUTH_CLIENT_ID;
-  if (clientId === undefined || clientId.trim() === "") {
-    return Response.redirect("https://github.com/login", 302);
-  }
-  const authorize = new URL("https://github.com/login/oauth/authorize");
-  authorize.searchParams.set("client_id", clientId.trim());
-  authorize.searchParams.set("redirect_uri", `${url.origin}/login/github/callback`);
-  authorize.searchParams.set("scope", "read:org");
-  authorize.searchParams.set("allow_signup", "false");
-  return Response.redirect(authorize.toString(), 302);
 }
 
 async function relayGitHub(
