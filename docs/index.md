@@ -1,9 +1,9 @@
 # Octopool
 
-Octopool is a Cloudflare-hosted, org-authenticated GitHub read relay and shared cache for
-`gitcrawl`. It lets trusted OpenClaw members and agents share a pool of GitHub identities
-for read-heavy maintainer automation, keeping tokens off developer machines and enforcing
-routing, caching, and safety policy centrally.
+Octopool is a Cloudflare-hosted, org-authenticated GitHub read relay and shared cache. It
+lets trusted OpenClaw members and agents share a pool of GitHub identities for read-heavy
+maintainer automation, keeping tokens off developer machines and enforcing routing,
+caching, and safety policy centrally.
 
 ## Feature docs
 
@@ -26,5 +26,3 @@ routing, caching, and safety policy centrally.
 ## Reference
 
 - [Project spec](spec.md) — the full product contract and design.
-- [Gitcrawl gh migration](gitcrawl-migrate.md) — moving the `gh` cache surface out of
-  gitcrawl into Octopool.

@@ -5,6 +5,7 @@
 ### Documentation
 
 - Document Homebrew installation from `openclaw/tap`.
+- Reposition README and primary docs around Octopool as a standalone GitHub relay.
 
 ### Fixes
 

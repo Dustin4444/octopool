@@ -4,7 +4,7 @@
 
 # octopool
 
-**A shared, org-authenticated GitHub read relay and cache for [gitcrawl](https://github.com/openclaw/gitcrawl).**
+**A shared, org-authenticated GitHub read relay and cache.**
 
 One angry octopus guarding a pool of GitHub identities, so trusted members and agents can run read-heavy maintainer automation without keeping tokens on their machines.
 
@@ -18,7 +18,7 @@ One angry octopus guarding a pool of GitHub identities, so trusted members and a
 
 Octopool runs on Cloudflare Workers. It accepts a normalized, read-only GitHub request, picks a healthy GitHub identity from a pool, performs the call, caches the result, and returns a clean envelope. Callers never see the underlying GitHub tokens.
 
-It exists to make `gh`-style reads safe to share:
+It exists to make high-volume GitHub reads safe to share across trusted people and agents:
 
 - **Tokens stay server-side.** GitHub PATs and App private keys live in Cloudflare secrets, never in local config, logs, or D1.
 - **One pool, many callers.** Requests are routed across identities by remaining rate budget, with short leases and cooldowns to avoid stampedes and abuse flags.
@@ -47,7 +47,7 @@ octopool login
 # logged in to https://octopool.dev as you for pool maintainers
 ```
 
-Use it like `gh api` for the supported read routes:
+Use the CLI like `gh api` for supported read routes:
 
 ```sh
 octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
@@ -63,8 +63,8 @@ ln -s "$(command -v octopool)" ~/bin/gh
 ## How it works
 
 ```text
-gitcrawl / octopool gh        Cloudflare Worker            GitHub
-─────────────────────         ──────────────────          ──────
+Octopool caller             Cloudflare Worker            GitHub
+───────────────             ──────────────────          ──────
   octopool gh api  ──▶  authenticate caller (org-gated)
                         classify route + policy
                         public-repo visibility guard ──▶  GET /repos/:o/:r
@@ -73,7 +73,7 @@ gitcrawl / octopool gh        Cloudflare Worker            GitHub
                         mint token (PAT / App JWT) ──▶  GET api.github.com/...
                         record rate + cooldown
                         write D1 cache
-                  ◀──   normalized response envelope
+                  ◀──   GitHub-shaped response body
 ```
 
 A Durable Object (`PoolCoordinator`, one per pool) holds per-identity rate snapshots, sticky route leases, and cooldowns so concurrent callers share identities without exhausting or tripping any single one.

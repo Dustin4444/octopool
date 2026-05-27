@@ -2,19 +2,19 @@
 
 ## Product Contract
 
-`octopool` is a Cloudflare-hosted GitHub request relay for `gitcrawl`.
+`octopool` is a Cloudflare-hosted GitHub read relay and shared cache.
 
 It lets trusted users and agents share an explicitly managed pool of GitHub identities for read-heavy maintainer automation, while keeping credentials off developer machines and enforcing routing, audit, and safety policy centrally.
 
 ## Goals
 
-- route `gitcrawl gh` cache misses and live reads through a shared relay
+- route supported read-only GitHub requests through a shared relay
 - support 1..n GitHub identities per pool
 - prefer healthy identities with available rate budget
 - avoid agent stampedes against the same GitHub endpoint
 - keep GitHub tokens out of logs, local config, and SQLite stores
 - expose compact quota, health, and audit state for maintainers
-- preserve local `gitcrawl` behavior when the relay is unavailable
+- fall through to the real GitHub CLI when the local shim sees unsupported commands
 
 ## Non-Goals
 
@@ -22,7 +22,7 @@ It lets trusted users and agents share an explicitly managed pool of GitHub iden
 - storing or relaying private repository responses in the shared cache
 - bypassing GitHub authorization, repository permissions, or abuse controls
 - mutating GitHub state by default
-- replacing `gitcrawl` local SQLite search/cache
+- replacing project-specific local mirrors, search indexes, or triage stores
 - public multi-tenant SaaS
 
 ## Trust Model
@@ -51,7 +51,7 @@ Shared cache v1 is public-repository-only. Octopool checks repository visibility
 - D1: users, pools, credential metadata, audit summaries, policy config
 - Cloudflare Secrets / Secrets Store: GitHub tokens and app private keys
 - Analytics Engine or logs: aggregate metrics, no secrets, redacted request bodies
-- `gitcrawl` client: local shim integration, fallback behavior, cache tagging
+- `octopool` CLI: login, `gh api` shim, fallback to the real GitHub CLI
 
 Durable Object partition key:
 
@@ -68,17 +68,17 @@ pool:<pool_id>:route:<owner>/<repo>
 
 ## Request Flow
 
-1. `gitcrawl gh ...` handles local/cacheable reads first.
-2. On configured cache miss, gitcrawl sends a normalized relay request to Octopool.
+1. A caller uses `octopool gh api`, a `gh` symlink, or `POST /v1/github/request`.
+2. The CLI or API client sends a normalized read request to Octopool.
 3. Worker authenticates caller and validates command policy.
-4. Worker forwards routing request to the pool Durable Object.
-5. Worker verifies repo routes are public before cache or pooled identity use.
-6. Durable Object selects a GitHub identity and creates a short lease.
-7. Worker performs the GitHub API request with the selected credential.
-8. GitHub App identities mint short-lived installation tokens server-side.
-9. Worker records rate-limit headers, status, route class, and redacted audit state.
-10. Worker returns a normalized response to gitcrawl.
-11. gitcrawl stores the response in its existing cache when eligible.
+4. Worker verifies repo routes are public before cache or pooled identity use.
+5. Worker checks D1 for a fresh cache entry.
+6. Worker forwards routing request to the pool Durable Object on cache miss.
+7. Durable Object selects a GitHub identity and creates a short lease.
+8. Worker performs the GitHub API request with the selected credential.
+9. GitHub App identities mint short-lived installation tokens server-side.
+10. Worker records rate-limit headers, status, route class, and redacted audit state.
+11. Worker writes eligible public responses to D1 and returns the GitHub-shaped body.
 
 ## API
 
@@ -110,7 +110,7 @@ Request:
     "repo": "openclaw",
     "kind": "pr_view"
   },
-  "cache_key": "gitcrawl-gh:...",
+  "cache_key": "github-rest:...",
   "idempotency_key": "..."
 }
 ```
@@ -213,7 +213,7 @@ Default strategy:
 - avoid identities with recent 401, 403, abuse, or secondary-rate-limit responses
 - keep short per-route leases to avoid many agents piling onto the same identity
 - respect repo allowlists and deny private repo routes without an explicit grant
-- serve stale cached gitcrawl data locally before relay when policy allows it
+- serve fresh shared cache entries before touching a pooled identity
 
 Lease shape:
 
@@ -255,7 +255,7 @@ Caller auth:
 Admin auth:
 
 - separate admin token or Cloudflare Access
-- no admin endpoints exposed to ordinary gitcrawl clients
+- no admin endpoints exposed to ordinary relay clients
 
 GitHub auth:
 
@@ -273,17 +273,13 @@ GitHub auth:
 - audit every routed request with route key and identity id
 - expose public login only if policy allows it; otherwise use identity id
 
-## gitcrawl Integration
+## CLI And Integration
 
-Config:
+Default CLI flow:
 
-```toml
-[relay]
-enabled = true
-url = "https://octopool.example.com"
-pool = "maintainers"
-token_env = "OCTOPOOL_TOKEN"
-mode = "cache-miss"
+```text
+octopool login
+octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 ```
 
 Environment:
@@ -292,21 +288,21 @@ Environment:
 OCTOPOOL_URL
 OCTOPOOL_TOKEN
 OCTOPOOL_POOL
-GITCRAWL_RELAY_URL
-GITCRAWL_RELAY_TOKEN
+OCTOPOOL_GH_PATH
+OCTOPOOL_ALLOWED_OWNERS
 ```
 
 Modes:
 
-- `off`: never use relay
-- `cache-miss`: local cache/search first, relay for supported misses
-- `live-read`: relay preferred for supported read-only GitHub requests
-- `direct`: bypass relay and use local `gh`/GitHub credentials
+- `octopool gh ...`: explicit shim invocation.
+- `gh` symlink: transparent shim on `PATH`.
+- direct API: callers can post normalized requests to `/v1/github/request`.
 
 Fallback:
 
-- relay unavailable: fall back to existing `gitcrawl gh` behavior
-- relay 429/403 with stale local cache: serve stale when command policy allows
+- unsupported or mutating commands: run the real GitHub CLI
+- non-allowed owners: run the real GitHub CLI before any relay call
+- relay unavailable: run the real GitHub CLI when the local command is safe to pass through
 - relay policy deny: fail closed and explain route/policy, not token identity
 
 ## Supported v1 Routes
@@ -338,7 +334,7 @@ Metrics:
 - relay cache hit/miss once response cache exists
 - denied routes by policy reason
 - secondary-rate-limit events
-- fallback count reported by gitcrawl clients
+- fallback count reported by CLI clients
 
 Debug commands later:
 
@@ -376,5 +372,5 @@ wrangler.jsonc
 - PAT-only v1 or GitHub App first?
 - Should Octopool cache responses, or only coordinate token selection?
 - Do we need Cloudflare Access from day one for admin endpoints?
-- Which `gitcrawl gh` commands should be relay-enabled first?
+- Which additional `gh api` read shapes should be relay-enabled next?
 - Should private repos require per-repo grants even inside a trusted pool?
