@@ -6,6 +6,7 @@
 
 - Document Homebrew installation from `openclaw/tap`.
 - Reposition README and primary docs around Octopool as a standalone GitHub relay.
+- Remove the Gitcrawl migration page from Octopool docs; the migration notice belongs in Gitcrawl.
 
 ### Fixes
 
