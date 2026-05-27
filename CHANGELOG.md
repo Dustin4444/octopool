@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add a docs link to the public `octopool.dev` landing page.
 - Fix docs-site rendering for wrapped Markdown list items.
 - Add a README and an octopus-themed docs site (dependency-free static generator in `scripts/`, GitHub Actions Pages workflow) served at `docs.octopool.dev`.
 - Add per-feature docs under `docs/` (relay, CLI, identities, cache, auth, admin, landing, operations) with an updated docs index.
