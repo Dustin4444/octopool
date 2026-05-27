@@ -1,0 +1,85 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to (re)release (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Stash GoReleaser config
+        run: cp .goreleaser.yaml /tmp/.goreleaser.yaml
+
+      - name: Check out release tag
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: git checkout "$RELEASE_TAG"
+
+      - name: Resolve release tag
+        id: release
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          tag="${DISPATCH_TAG:-$REF_NAME}"
+          if [ -z "$tag" ]; then
+            echo "::error::could not resolve release tag"
+            exit 1
+          fi
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >>"$GITHUB_OUTPUT"
+
+      - name: GoReleaser
+        uses: goreleaser/goreleaser-action@v7.2.2
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --config /tmp/.goreleaser.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish changelog release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          notes="$(awk -v version="$RELEASE_VERSION" '
+            $1 == "##" && $2 == version { in_section = 1 }
+            in_section && $1 == "##" && $2 != version { exit }
+            in_section { print }
+          ' CHANGELOG.md)"
+          if [ -z "$notes" ]; then
+            echo "::error::CHANGELOG.md has no section for $RELEASE_VERSION"
+            exit 1
+          fi
+          gh release edit "$RELEASE_TAG" --notes "$notes"
+          body="$(gh release view "$RELEASE_TAG" --json body --jq '.body')"
+          if ! grep -q "^## $RELEASE_VERSION" <<<"$body"; then
+            echo "::error::GitHub release $RELEASE_TAG does not contain the $RELEASE_VERSION changelog"
+            exit 1
+          fi

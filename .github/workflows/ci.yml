@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Set up pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.3 --activate
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Go module tidiness
+        run: |
+          go mod tidy
+          if [ -n "$(git status --porcelain -- go.mod go.sum)" ]; then
+            git status --short -- go.mod go.sum
+            exit 1
+          fi
+
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          mapfile -t files < <(git ls-files '*.go')
+          if [ "${#files[@]}" -gt 0 ]; then
+            diff="$(gofmt -l "${files[@]}")"
+            if [ -n "$diff" ]; then
+              echo "$diff"
+              exit 1
+            fi
+          fi
+
+      - name: Check
+        run: pnpm check
+
+      - name: Build docs site
+        run: pnpm docs:site
+
+      - name: Snapshot release build
+        uses: goreleaser/goreleaser-action@v7.2.2
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish

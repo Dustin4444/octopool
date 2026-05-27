@@ -11,6 +11,12 @@ normal use.
 
 ## Install modes
 
+Install with `go install`:
+
+```sh
+go install github.com/openclaw/octopool/cmd/octopool@latest
+```
+
 The binary inspects `argv[0]` and behaves as a `gh` shim when invoked as `gh` or
 `octopool-gh`:
 

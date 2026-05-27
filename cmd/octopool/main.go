@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 )
@@ -17,6 +18,11 @@ import (
 const defaultURL = "https://octopool.dev"
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
 
 func main() {
 	if isGHArgv(os.Args[0]) {
@@ -61,6 +67,9 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return errors.New("missing command")
 	}
 	switch args[0] {
+	case "version", "--version":
+		fmt.Fprintln(stdout, versionLine())
+		return nil
 	case "login":
 		return runLogin(ctx, args[1:], stdout)
 	case "gh":
@@ -78,6 +87,49 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		usage(stderr)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func versionLine() string {
+	infoVersion, infoCommit, infoDate := buildInfoVersion()
+	displayVersion := version
+	if displayVersion == "dev" && infoVersion != "" {
+		displayVersion = infoVersion
+	}
+	displayCommit := commit
+	if displayCommit == "unknown" && infoCommit != "" {
+		displayCommit = infoCommit
+	}
+	displayDate := date
+	if displayDate == "unknown" && infoDate != "" {
+		displayDate = infoDate
+	}
+	return fmt.Sprintf("octopool %s (%s, %s)", displayVersion, displayCommit, displayDate)
+}
+
+func buildInfoVersion() (string, string, string) {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "", "", ""
+	}
+	infoVersion := ""
+	if info.Main.Version != "" && info.Main.Version != "(devel)" {
+		infoVersion = strings.TrimPrefix(info.Main.Version, "v")
+	}
+	infoCommit := ""
+	infoDate := ""
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			if len(setting.Value) >= 7 {
+				infoCommit = setting.Value[:7]
+			} else {
+				infoCommit = setting.Value
+			}
+		case "vcs.time":
+			infoDate = setting.Value
+		}
+	}
+	return infoVersion, infoCommit, infoDate
 }
 
 func runHealth(ctx context.Context, args []string, stdout io.Writer) error {
