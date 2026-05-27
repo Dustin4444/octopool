@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 - Unreleased
+
+### Documentation
+
+- Document Homebrew installation from `openclaw/tap`.
+
 ## 0.1.0 - 2026-05-27
 
 ### Features

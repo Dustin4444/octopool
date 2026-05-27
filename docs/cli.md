@@ -11,7 +11,13 @@ normal use.
 
 ## Install modes
 
-Install with `go install`:
+Install with Homebrew:
+
+```sh
+brew install openclaw/tap/octopool
+```
+
+Or install from source:
 
 ```sh
 go install github.com/openclaw/octopool/cmd/octopool@latest

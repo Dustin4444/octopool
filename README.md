@@ -31,6 +31,12 @@ It exists to make `gh`-style reads safe to share:
 Install the CLI (the default endpoint `https://octopool.dev` is compiled in):
 
 ```sh
+brew install openclaw/tap/octopool
+```
+
+Or install from source:
+
+```sh
 go install github.com/openclaw/octopool/cmd/octopool@latest
 ```
 
