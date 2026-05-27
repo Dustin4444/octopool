@@ -20,7 +20,7 @@ import {
   requireString,
   routeParam,
 } from "./http";
-import { landingResponse } from "./landing";
+import { rootResponse } from "./landing";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import { PoolCoordinator } from "./pool-coordinator";
 import { ensurePublicGitHubRepo } from "./public-repos";
@@ -32,6 +32,7 @@ import {
   webLoginRedirect,
   webMeResponse,
 } from "./web-session";
+import { shouldUseWebError, webErrorResponse } from "./web-error";
 import type { Identity, SelectionRequest } from "./types";
 
 export { PoolCoordinator };
@@ -42,6 +43,9 @@ export default {
     try {
       return await routeRequest(request, env, ctx, requestId);
     } catch (error) {
+      if (shouldUseWebError(request)) {
+        return webErrorResponse(error, requestId);
+      }
       return errorResponse(error, requestId);
     }
   },
@@ -55,10 +59,7 @@ async function routeRequest(
 ): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/") {
-    if ((request.headers.get("accept") ?? "").includes("text/html")) {
-      return landingResponse();
-    }
-    return jsonResponse({ ok: true, service: "octopool", request_id: requestId });
+    return rootResponse(request, requestId);
   }
   if (request.method === "GET" && url.pathname === "/login/github") {
     return startGitHubWebLogin(env, url);

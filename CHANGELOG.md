@@ -6,6 +6,10 @@
 
 - Document Homebrew installation from `openclaw/tap`.
 
+### Fixes
+
+- Serve the landing page by default at `/` and render browser login failures as HTML instead of raw JSON.
+
 ## 0.1.0 - 2026-05-27
 
 ### Features

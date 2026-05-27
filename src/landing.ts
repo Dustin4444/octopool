@@ -1,3 +1,6 @@
+import { jsonResponse } from "./http";
+import { wantsJson } from "./web-error";
+
 // Public landing page for octopool.dev. Intentionally says nothing about what
 // octopool is: just an angry octopus and a single GitHub sign-in button.
 
@@ -239,6 +242,16 @@ export function landingResponse(): Response {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "public, max-age=300",
+      vary: "Accept",
     },
   });
+}
+
+export function rootResponse(request: Request, requestId: string): Response {
+  if (wantsJson(request)) {
+    return jsonResponse({ ok: true, service: "octopool", request_id: requestId }, 200, {
+      vary: "Accept",
+    });
+  }
+  return landingResponse();
 }

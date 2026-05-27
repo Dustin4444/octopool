@@ -10,9 +10,12 @@ if [ -z "$ip" ]; then
   exit 1
 fi
 
-root="$(curl --resolve "$host:443:$ip" -fsS "https://$host/")"
-printf "%s" "$root" | grep -q '"ok":true'
-printf "%s" "$root" | grep -q '"service":"octopool"'
+root_html="$(curl --resolve "$host:443:$ip" -fsS "https://$host/")"
+printf "%s" "$root_html" | grep -q '<title>octopool</title>'
+
+root_json="$(curl --resolve "$host:443:$ip" -fsS -H "accept: application/json" "https://$host/")"
+printf "%s" "$root_json" | grep -q '"ok":true'
+printf "%s" "$root_json" | grep -q '"service":"octopool"'
 
 health_code="$(
   curl --resolve "$host:443:$ip" -sS -o /tmp/octopool-health.json -w "%{http_code}" \

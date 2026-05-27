@@ -67,7 +67,8 @@ pnpm e2e       # smoke-test the live deployment
 
 `test/e2e.sh` resolves `octopool.dev`, then asserts:
 
-- `GET /` returns the JSON health body (`"ok":true`, `"service":"octopool"`).
+- `GET /` returns the landing page.
+- `GET /` with `Accept: application/json` returns the JSON health body (`"ok":true`, `"service":"octopool"`).
 - `GET /v1/pools/maintainers/health` without a token returns `401 missing_auth`.
 - `POST /v1/github/request` without a token returns `401 missing_auth`.
 

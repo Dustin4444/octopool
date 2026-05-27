@@ -1,8 +1,8 @@
 # Landing Page & GitHub Login
 
 `octopool.dev` serves a deliberately minimal landing page — an animated angry octopus, a
-"Sign in with GitHub" button, a dashboard link, and a docs link — while API clients keep
-getting JSON.
+"Sign in with GitHub" button, a dashboard link, and a docs link — while API clients can
+still request JSON.
 
 Source: `src/landing.ts`, `src/index.ts` (`/`, `githubLoginRedirect`).
 
@@ -10,11 +10,12 @@ Source: `src/landing.ts`, `src/index.ts` (`/`, `githubLoginRedirect`).
 
 `GET /` branches on the `Accept` header:
 
-- `Accept: text/html` → the landing page (`text/html`, `cache-control: public, max-age=300`).
-- anything else → the JSON health response with `cache-control: no-store`.
+- default or `Accept: text/html` → the landing page (`text/html`, `cache-control: public, max-age=300`).
+- explicit `Accept: application/json` without `text/html` → the JSON health response with `cache-control: no-store`.
 
-This keeps the relay's health probe and the public page on the same root path. The page
-intentionally says nothing about what Octopool is, and is marked `noindex`.
+This keeps the public page friendly for browser and chat-link clients while preserving a
+root health response for explicit JSON probes. The page intentionally says nothing about
+what Octopool is, and is marked `noindex`.
 
 The page is a single self-contained HTML string: an inline SVG octopus with CSS
 animations (bobbing, swaying tentacles, an anger glow), pointer-tracking eyes/tilt, and a
@@ -39,4 +40,5 @@ OpenClaw org membership (see [Auth](auth.md)).
 The callback exchanges the GitHub OAuth code, verifies the GitHub user, checks OpenClaw
 membership through the configured org verifier token, finds the already-provisioned
 caller by immutable GitHub user id, and creates a web session. The dashboard additionally
-requires `dashboard_role = 'admin'`.
+requires `dashboard_role = 'admin'`. Browser-facing login and dashboard failures render a
+small HTML error page instead of exposing the API JSON envelope.
