@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add a README and an octopus-themed docs site (dependency-free static generator in `scripts/`, GitHub Actions Pages workflow) served at `docs.octopool.dev`.
 - Add per-feature docs under `docs/` (relay, CLI, identities, cache, auth, admin, landing, operations) with an updated docs index.
 - Add GitHub App installation identities for public-repository relay reads, with Worker-minted installation tokens, selected-repo OpenClaw App setup, public-repo cache guards, and app avatar artwork.
 - Move the GitHub CLI cache/shim surface out of gitcrawl into Octopool with `octopool login`, local token storage, `octopool gh api ...`, and a D1 read-through cache for pooled GitHub reads.
