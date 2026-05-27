@@ -15,6 +15,7 @@ import {
   requireString,
   routeParam,
 } from "./http";
+import { landingResponse } from "./landing";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import { PoolCoordinator } from "./pool-coordinator";
 import type { Identity, SelectionRequest } from "./types";
@@ -40,7 +41,13 @@ async function routeRequest(
 ): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/") {
+    if ((request.headers.get("accept") ?? "").includes("text/html")) {
+      return landingResponse();
+    }
     return jsonResponse({ ok: true, service: "octopool", request_id: requestId });
+  }
+  if (request.method === "GET" && url.pathname === "/login/github") {
+    return githubLoginRedirect(env, url);
   }
   if (request.method === "GET" && /^\/v1\/pools\/[^/]+\/health$/.test(url.pathname)) {
     const pool = routeParam(url.pathname, /^\/v1\/pools\/(?<pool>[^/]+)\/health$/, "pool");
@@ -64,6 +71,19 @@ async function routeRequest(
     return upsertIdentity(request, env, pool);
   }
   throw new HttpError(404, "not_found", "Route not found");
+}
+
+function githubLoginRedirect(env: Env, url: URL): Response {
+  const clientId = (env as unknown as Record<string, string | undefined>).GITHUB_OAUTH_CLIENT_ID;
+  if (clientId === undefined || clientId.trim() === "") {
+    return Response.redirect("https://github.com/login", 302);
+  }
+  const authorize = new URL("https://github.com/login/oauth/authorize");
+  authorize.searchParams.set("client_id", clientId.trim());
+  authorize.searchParams.set("redirect_uri", `${url.origin}/login/github/callback`);
+  authorize.searchParams.set("scope", "read:org");
+  authorize.searchParams.set("allow_signup", "false");
+  return Response.redirect(authorize.toString(), 302);
 }
 
 async function relayGitHub(
