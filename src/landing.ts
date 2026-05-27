@@ -91,10 +91,16 @@ const LANDING_HTML = `<!doctype html>
   .login:hover{transform:translateY(-2px) scale(1.02);box-shadow:0 12px 40px rgba(255,40,90,.35)}
   .login:active{transform:translateY(0) scale(.99)}
   .login svg{flex:0 0 auto}
-  .docs-link{
+  .quick-links{
     position:relative;
     z-index:2;
+    display:flex;
+    gap:18px;
+    align-items:center;
+    justify-content:center;
     margin-top:calc(clamp(28px,5vh,56px) * -0.55);
+  }
+  .quick-links a{
     color:rgba(255,255,255,.64);
     font-size:13px;
     font-weight:600;
@@ -103,7 +109,7 @@ const LANDING_HTML = `<!doctype html>
     text-transform:uppercase;
     transition:color .18s ease,transform .18s ease;
   }
-  .docs-link:hover{color:#fff;transform:translateY(-1px)}
+  .quick-links a:hover{color:#fff;transform:translateY(-1px)}
   .brand{
     position:absolute;
     bottom:26px;
@@ -180,7 +186,10 @@ const LANDING_HTML = `<!doctype html>
       </svg>
       Sign in with GitHub
     </a>
-    <a class="docs-link" href="https://docs.octopool.dev/">Docs</a>
+    <div class="quick-links">
+      <a href="/dashboard">Dashboard</a>
+      <a href="https://docs.octopool.dev/">Docs</a>
+    </div>
     <div class="brand">octopool</div>
   </main>
   <script>

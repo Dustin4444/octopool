@@ -18,6 +18,7 @@ routing, caching, and safety policy centrally.
   exchange.
 - [Admin & provisioning](admin.md) — registering callers and identities.
 - [Landing page & GitHub login](landing.md) — `octopool.dev` and the OAuth entry.
+- [Dashboard](dashboard.md) — limits, cache, identity, and caller usage views.
 - [Deployment & operations](operations.md) — Cloudflare resources, config, migrations,
   build/test/deploy.
 

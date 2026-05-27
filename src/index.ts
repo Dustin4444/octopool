@@ -9,6 +9,7 @@ import {
   verifyGitHubOrgMemberWithToken,
 } from "./auth";
 import { githubCacheKey, readGitHubCache, shouldUseGitHubCache, writeGitHubCache } from "./cache";
+import { dashboardResponse } from "./dashboard";
 import { ensurePool, insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, rateFromHeaders } from "./github";
 import {
@@ -54,6 +55,12 @@ async function routeRequest(
   if (request.method === "GET" && url.pathname === "/login/github") {
     return githubLoginRedirect(env, url);
   }
+  if (request.method === "GET" && url.pathname === "/dashboard") {
+    return dashboardResponse();
+  }
+  if (request.method === "GET" && url.pathname === "/v1/dashboard") {
+    return dashboardData(request, env);
+  }
   if (request.method === "POST" && url.pathname === "/v1/login/github-cli") {
     return loginGitHubCLI(request, env);
   }
@@ -79,6 +86,271 @@ async function routeRequest(
     return upsertIdentity(request, env, pool);
   }
   throw new HttpError(404, "not_found", "Route not found");
+}
+
+async function dashboardData(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const pool = url.searchParams.get("pool")?.trim() || "maintainers";
+  if (!/^[A-Za-z0-9_-]{1,80}$/.test(pool)) {
+    throw new HttpError(400, "pool_invalid", "Pool id is invalid");
+  }
+  await authenticateAdmin(request, env);
+  const coordinator = env.POOL_COORDINATOR.getByName(`pool:${pool}`);
+  const [
+    identities,
+    cache,
+    usage,
+    users,
+    recent,
+    routeUsage,
+    identityUsage,
+    publicRepos,
+    coordinatorSnapshot,
+  ] = await Promise.all([
+    dashboardIdentities(env, pool),
+    dashboardCache(env, pool),
+    dashboardUsage(env, pool),
+    dashboardUsers(env, pool),
+    dashboardRecent(env, pool),
+    dashboardRouteUsage(env, pool),
+    dashboardIdentityUsage(env, pool),
+    dashboardPublicRepos(env),
+    coordinator.snapshot(),
+  ]);
+  return jsonResponse({
+    generated_at: new Date().toISOString(),
+    pool,
+    operator: { kind: "admin" },
+    identities: {
+      total: identities.length,
+      active: identities.filter((identity) => identity.status === "active").length,
+      items: identities,
+    },
+    cache,
+    usage,
+    users,
+    recent,
+    route_usage: routeUsage,
+    identity_usage: identityUsage,
+    public_repos: publicRepos,
+    coordinator: coordinatorSnapshot,
+  });
+}
+
+async function dashboardUsage(env: Env, pool: string) {
+  const row = await env.DB.prepare(
+    `SELECT
+       COUNT(*) AS requests_24h,
+       SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors_24h,
+       AVG(duration_ms) AS avg_duration_ms_24h,
+       MAX(created_at) AS latest_seen_at
+     FROM audit_events
+     WHERE pool_id = ?1
+       AND created_at >= datetime('now', '-24 hours')`,
+  )
+    .bind(pool)
+    .first<{
+      requests_24h: number;
+      errors_24h: number | null;
+      avg_duration_ms_24h: number | null;
+      latest_seen_at: string | null;
+    }>();
+  return {
+    requests_24h: row?.requests_24h ?? 0,
+    errors_24h: row?.errors_24h ?? 0,
+    avg_duration_ms_24h: row?.avg_duration_ms_24h ?? null,
+    latest_seen_at: row?.latest_seen_at ?? null,
+  };
+}
+
+async function dashboardIdentities(env: Env, pool: string) {
+  const rows = await env.DB.prepare(
+    `SELECT id, kind, login, installation_id, status, weight, updated_at
+     FROM identities
+     WHERE pool_id = ?1
+     ORDER BY status = 'active' DESC, weight DESC, id`,
+  )
+    .bind(pool)
+    .all<{
+      id: string;
+      kind: string;
+      login: string;
+      installation_id: number | null;
+      status: string;
+      weight: number;
+      updated_at: string;
+    }>();
+  return rows.results;
+}
+
+async function dashboardCache(env: Env, pool: string) {
+  const row = await env.DB.prepare(
+    `SELECT
+       COUNT(*) AS total_entries,
+       SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,
+       SUM(CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS expired_entries,
+       COALESCE(SUM(length(body_json)), 0) AS body_bytes,
+       MIN(created_at) AS oldest_created_at,
+       MAX(created_at) AS newest_created_at
+     FROM github_cache_entries
+     WHERE pool_id = ?1`,
+  )
+    .bind(pool)
+    .first<{
+      total_entries: number;
+      fresh_entries: number | null;
+      expired_entries: number | null;
+      body_bytes: number | null;
+      oldest_created_at: string | null;
+      newest_created_at: string | null;
+    }>();
+  return {
+    total_entries: row?.total_entries ?? 0,
+    fresh_entries: row?.fresh_entries ?? 0,
+    expired_entries: row?.expired_entries ?? 0,
+    body_bytes: row?.body_bytes ?? 0,
+    oldest_created_at: row?.oldest_created_at ?? null,
+    newest_created_at: row?.newest_created_at ?? null,
+    routes: await dashboardCacheRoutes(env, pool),
+  };
+}
+
+async function dashboardCacheRoutes(env: Env, pool: string) {
+  const rows = await env.DB.prepare(
+    `SELECT
+       route_kind,
+       COUNT(*) AS entries,
+       SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,
+       MAX(created_at) AS latest_created_at
+     FROM github_cache_entries
+     WHERE pool_id = ?1
+     GROUP BY route_kind
+     ORDER BY entries DESC, route_kind
+     LIMIT 12`,
+  )
+    .bind(pool)
+    .all<{
+      route_kind: string;
+      entries: number;
+      fresh_entries: number | null;
+      latest_created_at: string | null;
+    }>();
+  return rows.results.map((row) => ({
+    ...row,
+    fresh_entries: row.fresh_entries ?? 0,
+  }));
+}
+
+async function dashboardUsers(env: Env, pool: string) {
+  const rows = await env.DB.prepare(
+    `SELECT
+       callers.id,
+       callers.name,
+       callers.github_login,
+       COUNT(*) AS requests,
+       SUM(CASE WHEN audit_events.status >= 400 THEN 1 ELSE 0 END) AS errors,
+       AVG(audit_events.duration_ms) AS avg_duration_ms,
+       MAX(audit_events.created_at) AS last_seen
+     FROM audit_events
+     JOIN callers ON callers.id = audit_events.caller_id
+     WHERE audit_events.pool_id = ?1
+       AND audit_events.created_at >= datetime('now', '-7 days')
+     GROUP BY callers.id, callers.name, callers.github_login
+     ORDER BY requests DESC, last_seen DESC
+     LIMIT 20`,
+  )
+    .bind(pool)
+    .all<{
+      id: string;
+      name: string;
+      github_login: string;
+      requests: number;
+      errors: number | null;
+      avg_duration_ms: number | null;
+      last_seen: string | null;
+    }>();
+  return rows.results.map((row) => ({ ...row, errors: row.errors ?? 0 }));
+}
+
+async function dashboardRecent(env: Env, pool: string) {
+  const rows = await env.DB.prepare(
+    `SELECT
+       audit_events.created_at,
+       callers.github_login,
+       audit_events.route_kind,
+       audit_events.route_key,
+       audit_events.identity_id,
+       audit_events.status,
+       audit_events.error_code,
+       audit_events.duration_ms
+     FROM audit_events
+     JOIN callers ON callers.id = audit_events.caller_id
+     WHERE audit_events.pool_id = ?1
+     ORDER BY audit_events.created_at DESC
+     LIMIT 20`,
+  )
+    .bind(pool)
+    .all<{
+      created_at: string;
+      github_login: string;
+      route_kind: string;
+      route_key: string;
+      identity_id: string | null;
+      status: number;
+      error_code: string | null;
+      duration_ms: number;
+    }>();
+  return rows.results;
+}
+
+async function dashboardRouteUsage(env: Env, pool: string) {
+  const rows = await env.DB.prepare(
+    `SELECT route_kind, COUNT(*) AS requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors
+     FROM audit_events
+     WHERE pool_id = ?1
+       AND created_at >= datetime('now', '-24 hours')
+     GROUP BY route_kind
+     ORDER BY requests DESC
+     LIMIT 12`,
+  )
+    .bind(pool)
+    .all<{ route_kind: string; requests: number; errors: number | null }>();
+  return rows.results.map((row) => ({ ...row, errors: row.errors ?? 0 }));
+}
+
+async function dashboardIdentityUsage(env: Env, pool: string) {
+  const rows = await env.DB.prepare(
+    `SELECT identity_id, COUNT(*) AS requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors
+     FROM audit_events
+     WHERE pool_id = ?1
+       AND created_at >= datetime('now', '-24 hours')
+       AND identity_id IS NOT NULL
+     GROUP BY identity_id
+     ORDER BY requests DESC
+     LIMIT 20`,
+  )
+    .bind(pool)
+    .all<{ identity_id: string; requests: number; errors: number | null }>();
+  return rows.results.map((row) => ({ ...row, errors: row.errors ?? 0 }));
+}
+
+async function dashboardPublicRepos(env: Env) {
+  const row = await env.DB.prepare(
+    `SELECT
+       COUNT(*) AS total_entries,
+       SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,
+       MAX(checked_at) AS newest_checked_at
+     FROM github_public_repos`,
+  ).first<{
+    total_entries: number;
+    fresh_entries: number | null;
+    newest_checked_at: string | null;
+  }>();
+  return {
+    total_entries: row?.total_entries ?? 0,
+    fresh_entries: row?.fresh_entries ?? 0,
+    newest_checked_at: row?.newest_checked_at ?? null,
+  };
 }
 
 function githubLoginRedirect(env: Env, url: URL): Response {

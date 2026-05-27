@@ -83,6 +83,7 @@ Each links to its page on [docs.octopool.dev](https://docs.octopool.dev):
 - **[Auth & org membership](https://docs.octopool.dev/auth.html)** — caller auth, admin auth, and the GitHub-CLI login exchange.
 - **[Admin & provisioning](https://docs.octopool.dev/admin.html)** — registering callers and identities.
 - **[Landing page & GitHub login](https://docs.octopool.dev/landing.html)** — `octopool.dev` and the OAuth entry.
+- **[Dashboard](https://docs.octopool.dev/dashboard.html)** — browser view for limits, cache, identity, and caller usage stats.
 - **[Deployment & operations](https://docs.octopool.dev/operations.html)** — Cloudflare resources, config, migrations, and the deploy flow.
 
 ## Development

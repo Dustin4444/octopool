@@ -1,7 +1,8 @@
 # Landing Page & GitHub Login
 
 `octopool.dev` serves a deliberately minimal landing page — an animated angry octopus, a
-"Sign in with GitHub" button, and a docs link — while API clients keep getting JSON.
+"Sign in with GitHub" button, a dashboard link, and a docs link — while API clients keep
+getting JSON.
 
 Source: `src/landing.ts`, `src/index.ts` (`/`, `githubLoginRedirect`).
 

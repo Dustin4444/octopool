@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import type { RecordResult, SelectionRequest, SelectionResult } from "./types";
+import type { CoordinatorSnapshot, RecordResult, SelectionRequest, SelectionResult } from "./types";
 
 type LeaseRow = {
   identity_id: string;
@@ -133,6 +133,38 @@ export class PoolCoordinator extends DurableObject<Env> {
         Date.now() + cooldown.ttlMs,
       );
     }
+  }
+
+  snapshot(): CoordinatorSnapshot {
+    const now = Date.now();
+    const rates = this.ctx.storage.sql
+      .exec<CoordinatorSnapshot["rates"][number]>(
+        `SELECT identity_id, resource, remaining, reset_at
+         FROM rate_states
+         WHERE reset_at > ?
+         ORDER BY identity_id, resource`,
+        now,
+      )
+      .toArray();
+    const cooldowns = this.ctx.storage.sql
+      .exec<CoordinatorSnapshot["cooldowns"][number]>(
+        `SELECT identity_id, route_key, status, reason, expires_at
+         FROM cooldowns
+         WHERE expires_at > ?
+         ORDER BY expires_at`,
+        now,
+      )
+      .toArray();
+    const leases = this.ctx.storage.sql
+      .exec<CoordinatorSnapshot["leases"][number]>(
+        `SELECT route_key, identity_id, expires_at
+         FROM leases
+         WHERE expires_at > ?
+         ORDER BY expires_at`,
+        now,
+      )
+      .toArray();
+    return { rates, cooldowns, leases };
   }
 
   private cooldownExpiresAt(identityId: string, routeKey: string, now: number): number | undefined {

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add an authenticated browser dashboard for caller, identity limit, cache, and usage stats.
 - Add a docs link to the public `octopool.dev` landing page.
 - Fix docs-site rendering for wrapped Markdown list items.
 - Add a README and an octopus-themed docs site (dependency-free static generator in `scripts/`, GitHub Actions Pages workflow) served at `docs.octopool.dev`.

@@ -86,3 +86,24 @@ export type RecordResult = {
     retryAfter?: number;
   };
 };
+
+export type CoordinatorSnapshot = {
+  rates: {
+    identity_id: string;
+    resource: string;
+    remaining: number;
+    reset_at: number;
+  }[];
+  cooldowns: {
+    identity_id: string;
+    route_key: string;
+    status: number;
+    reason: string;
+    expires_at: number;
+  }[];
+  leases: {
+    route_key: string;
+    identity_id: string;
+    expires_at: number;
+  }[];
+};
