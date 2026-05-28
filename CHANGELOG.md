@@ -2,6 +2,10 @@
 
 ## 0.2.1 - Unreleased
 
+### Fixes
+
+- Explain `octopool login` GitHub token verification failures without dumping raw JSON.
+
 ## 0.2.0 - 2026-05-28
 
 ### Documentation

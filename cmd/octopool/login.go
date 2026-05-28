@@ -24,6 +24,14 @@ type loginResponse struct {
 	Token string `json:"token"`
 }
 
+type apiErrorResponse struct {
+	Error struct {
+		Code      string `json:"code"`
+		Message   string `json:"message"`
+		RequestID string `json:"request_id"`
+	} `json:"error"`
+}
+
 func runLogin(ctx context.Context, args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -49,7 +57,7 @@ func runLogin(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	if status >= 400 {
-		return fmt.Errorf("login failed: %s", strings.TrimSpace(string(out)))
+		return formatLoginFailure(status, out, *ghPath)
 	}
 	var response loginResponse
 	if err := json.Unmarshal(out, &response); err != nil {
@@ -69,6 +77,33 @@ func runLogin(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "logged in to %s as %s for pool %s\n", strings.TrimRight(*baseURL, "/"), response.Caller.GitHubLogin, *pool)
 	return nil
+}
+
+func formatLoginFailure(status int, body []byte, ghPath string) error {
+	trimmed := strings.TrimSpace(string(body))
+	var response apiErrorResponse
+	if err := json.Unmarshal(body, &response); err != nil || response.Error.Code == "" {
+		return fmt.Errorf("login failed: HTTP %d: %s", status, trimmed)
+	}
+	message := response.Error.Message
+	if message == "" {
+		message = response.Error.Code
+	}
+	requestID := ""
+	if response.Error.RequestID != "" {
+		requestID = "\nOctopool request id: " + response.Error.RequestID
+	}
+	if response.Error.Code == "github_auth_failed" {
+		resolvedGHPath := ghPath
+		if resolved, err := resolveGHPath(ghPath); err == nil {
+			resolvedGHPath = resolved
+		}
+		if strings.Contains(message, "403") {
+			return fmt.Errorf("login failed: GitHub rejected the local gh token while Octopool verified it (%s).\nLikely cause: the GitHub API rate limit for this token is exhausted, or the token needs re-auth.\nCheck reset: %s api rate_limit --jq '.resources.core'\nRetry after reset: octopool login --gh-path %s%s", message, resolvedGHPath, resolvedGHPath, requestID)
+		}
+		return fmt.Errorf("login failed: GitHub rejected the local gh token while Octopool verified it (%s).\nRefresh GitHub CLI auth: %s auth login\nThen retry: octopool login --gh-path %s%s", message, resolvedGHPath, resolvedGHPath, requestID)
+	}
+	return fmt.Errorf("login failed: %s: %s%s", response.Error.Code, message, requestID)
 }
 
 func validateLoginURL(rawURL string) error {
