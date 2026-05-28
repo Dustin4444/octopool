@@ -1,3 +1,5 @@
+![Octopool banner](docs/assets/readme-banner.jpg)
+
 <div align="center">
 
 <img src="docs/assets/octopool-github-app-512.png" alt="octopool" width="128" height="128">
