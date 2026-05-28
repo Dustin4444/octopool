@@ -4,6 +4,8 @@
 
 ### Fixes
 
+- Route browser GitHub OAuth through the registered `octopool.dev` callback, then forward back to `octopool.openclaw.ai` so the authoritative website can log in without GitHub rejecting the redirect URI.
+
 ## 0.2.2 - 2026-05-28
 
 ### Fixes

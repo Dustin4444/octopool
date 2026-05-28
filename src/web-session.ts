@@ -26,9 +26,11 @@ export async function startGitHubWebLogin(request: Request, env: Env, url: URL):
   const state = await signedOAuthState(env, next);
 
   const authorize = new URL("https://github.com/login/oauth/authorize");
-  const origin = effectiveOrigin(request, env);
   authorize.searchParams.set("client_id", clientId);
-  authorize.searchParams.set("redirect_uri", `${origin}/login/github/callback`);
+  authorize.searchParams.set(
+    "redirect_uri",
+    `${githubOAuthCallbackOrigin(request, env)}/login/github/callback`,
+  );
   authorize.searchParams.set("scope", "read:org");
   authorize.searchParams.set("state", state);
   authorize.searchParams.set("allow_signup", "false");
@@ -197,7 +199,7 @@ async function exchangeGitHubCode(request: Request, env: Env, code: string): Pro
       client_id: clientId,
       client_secret: clientSecret,
       code,
-      redirect_uri: `${effectiveOrigin(request, env)}/login/github/callback`,
+      redirect_uri: `${githubOAuthCallbackOrigin(request, env)}/login/github/callback`,
     }),
   });
   const body: unknown = await response.json().catch(() => undefined);
@@ -227,6 +229,22 @@ function safeNextPath(value: string | null): string {
     return "/dashboard";
   }
   return value;
+}
+
+function githubOAuthCallbackOrigin(request: Request, env: Env): string {
+  const configured = envSecret(env, "GITHUB_OAUTH_CALLBACK_ORIGIN")?.trim();
+  if (configured === undefined || configured === "") {
+    return effectiveOrigin(request, env);
+  }
+  const url = new URL(configured);
+  if (url.protocol !== "https:" || url.pathname !== "/" || url.search !== "" || url.hash !== "") {
+    throw new HttpError(
+      503,
+      "github_oauth_unconfigured",
+      "GitHub OAuth callback origin is invalid",
+    );
+  }
+  return url.origin;
 }
 
 async function signedOAuthState(env: Env, nextPath: string): Promise<string> {

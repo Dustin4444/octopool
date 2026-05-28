@@ -23,7 +23,7 @@ import {
   routeParam,
 } from "./http";
 import { discoveryResponse } from "./discovery";
-import { APP_ORIGIN, isPublicRequest } from "./hosts";
+import { isPublicRequest } from "./hosts";
 import { rootResponse } from "./landing";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import { PoolCoordinator } from "./pool-coordinator";
@@ -38,6 +38,7 @@ import {
   webLoginRedirect,
   webMeResponse,
 } from "./web-session";
+import { publicWebHostRedirect } from "./web-routing";
 import { shouldUseWebError, webErrorResponse } from "./web-error";
 import type { Identity, SelectionRequest } from "./types";
 
@@ -142,19 +143,6 @@ async function routeRequest(
     return upsertIdentity(request, env, pool);
   }
   throw new HttpError(404, "not_found", "Route not found");
-}
-
-function publicWebHostRedirect(request: Request, url: URL, env: Env): Response | undefined {
-  if (!isPublicRequest(request, env)) {
-    return undefined;
-  }
-  if (url.pathname === "/login/github/callback") {
-    return Response.redirect(`${APP_ORIGIN}/login/github?next=/dashboard`, 302);
-  }
-  if (url.pathname === "/login/github" || url.pathname === "/dashboard") {
-    return Response.redirect(`${APP_ORIGIN}${url.pathname}${url.search}`, 302);
-  }
-  return undefined;
 }
 
 async function dashboardData(request: Request, env: Env): Promise<Response> {

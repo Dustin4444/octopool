@@ -16,6 +16,7 @@
     "REQUEST_TIMEOUT_MS": "15000",
     "ORG_VERIFY_TTL_SECONDS": "86400",
     "GITHUB_OAUTH_CLIENT_ID": "Iv23lilUVXPNTPhNhUmZ",
+    "GITHUB_OAUTH_CALLBACK_ORIGIN": "https://octopool.dev",
   },
   "routes": [
     {

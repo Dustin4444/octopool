@@ -4,6 +4,7 @@ import { PROXY_HOST_HEADER, PROXY_SECRET_HEADER } from "../src/hosts";
 import { errorResponse, HttpError } from "../src/http";
 import { rootResponse } from "../src/landing";
 import proxyWorker from "../src/openclaw-proxy";
+import { publicWebHostRedirect } from "../src/web-routing";
 import { startGitHubWebLogin } from "../src/web-session";
 import { shouldUseWebError, webErrorResponse } from "../src/web-error";
 
@@ -102,6 +103,19 @@ describe("web routing helpers", () => {
     expect(html).not.toContain('{"error"');
   });
 
+  it("forwards public GitHub OAuth callbacks to the authoritative app host", async () => {
+    const response = publicWebHostRedirect(
+      new Request("https://octopool.dev/login/github/callback?code=abc&state=state.123.sig"),
+      new URL("https://octopool.dev/login/github/callback?code=abc&state=state.123.sig"),
+      discoveryEnv(),
+    );
+
+    expect(response?.status).toBe(302);
+    expect(response?.headers.get("location")).toBe(
+      "https://octopool.openclaw.ai/login/github/callback?code=abc&state=state.123.sig",
+    );
+  });
+
   it("keeps API errors as JSON even for broad accepts", () => {
     const request = new Request("https://octopool.dev/v1/pools/maintainers/health", {
       headers: { accept: "text/html,application/json" },
@@ -148,7 +162,7 @@ describe("web routing helpers", () => {
     const state = location.searchParams.get("state") ?? "";
     expect(location.origin).toBe("https://github.com");
     expect(location.searchParams.get("redirect_uri")).toBe(
-      "https://octopool.openclaw.ai/login/github/callback",
+      "https://octopool.dev/login/github/callback",
     );
     expect(state).toMatch(/^state\.[-_A-Za-z0-9]+\.[-_A-Za-z0-9]+$/);
     expect(response.headers.get("set-cookie")).toContain(encodeURIComponent(state));
@@ -201,6 +215,7 @@ function oauthEnv(): Env & { DB: { prepare: ReturnType<typeof vi.fn> } } {
   return {
     GITHUB_OAUTH_CLIENT_ID: "client-id",
     GITHUB_OAUTH_CLIENT_SECRET: "client-secret",
+    GITHUB_OAUTH_CALLBACK_ORIGIN: "https://octopool.dev",
     OCTOPOOL_PROXY_SECRET: "proxy-secret",
     DB: { prepare },
   } as unknown as Env & { DB: { prepare: ReturnType<typeof vi.fn> } };

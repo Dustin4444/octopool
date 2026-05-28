@@ -37,15 +37,18 @@ signed OAuth state, mirrors it in an `HttpOnly` state cookie, and issues a 302 r
 
 - If `GITHUB_OAUTH_CLIENT_ID` is configured, it redirects to GitHub's OAuth authorize URL
   with `scope=read:org`, `allow_signup=false`, and
-  `redirect_uri=<origin>/login/github/callback`.
+  `redirect_uri=<callback-origin>/login/github/callback`. The callback origin defaults
+  to the effective request origin, or `GITHUB_OAUTH_CALLBACK_ORIGIN` when the GitHub App
+  is registered to a different host.
 - If no client id is configured, it falls back to `https://github.com/login`.
 
 The `read:org` scope and `allow_signup=false` reflect that Octopool access is gated on
 OpenClaw org membership (see [Auth](auth.md)).
 
-On `octopool.dev`, `/login/github`, `/login/github/callback`, and `/dashboard` redirect
-to `https://octopool.openclaw.ai/...`; `/logout` stays local long enough to clear any
-old host-scoped cookie, then returns to the public page. `octopool.dev` does not issue new
+On `octopool.dev`, `/login/github` and `/dashboard` redirect to
+`https://octopool.openclaw.ai/...`; `/login/github/callback` preserves GitHub's `code`
+and `state` query while forwarding back to the authoritative host. `/logout` stays local
+long enough to clear any old host-scoped cookie, then returns to the public page. `octopool.dev` does not issue new
 website sessions, and dashboard JSON endpoints are not served there.
 
 ## `GET /login/github/callback`

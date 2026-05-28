@@ -109,6 +109,7 @@ Edit `wrangler.jsonc` for your account:
 - `vars.ALLOWED_GITHUB_ORG` — the GitHub org whose members may mint caller tokens.
 - `vars.DEFAULT_ALLOWED_OWNERS` — comma-separated GitHub owners (orgs/users) whose repos this pool may read.
 - `vars.GITHUB_OAUTH_CLIENT_ID` — the OAuth client id of your GitHub App (for browser sign-in).
+- `vars.GITHUB_OAUTH_CALLBACK_ORIGIN` — optional HTTPS origin registered as the GitHub OAuth callback when browser sign-in starts on a different host.
 - `routes[]` — the custom domain you want octopool served on.
 
 If you don't need OpenClaw's second-host proxy, you can ignore `wrangler.openclaw-proxy.jsonc` and deploy only the main Worker.

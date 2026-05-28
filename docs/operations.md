@@ -38,6 +38,8 @@ Edit `wrangler.jsonc`:
   the default pool may read.
 - `vars.GITHUB_OAUTH_CLIENT_ID` — OAuth client id of your GitHub App, used for browser
   sign-in. Pair with the `GITHUB_OAUTH_CLIENT_SECRET` secret below.
+- `vars.GITHUB_OAUTH_CALLBACK_ORIGIN` — optional HTTPS origin registered as the GitHub
+  OAuth callback when browser sign-in starts on a different host.
 - `routes[]` — the custom domain you want octopool served on.
 
 If you only need one host, you can ignore `wrangler.openclaw-proxy.jsonc`. It exists so
