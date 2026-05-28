@@ -16,9 +16,9 @@ Currently configured project: `octopool` (target: `..`).
    `revalidate` / `triage`); deepsec auto-detects and reuses the
    subscription. See
    `node_modules/deepsec/dist/docs/vercel-setup.md` after install.
-3. Open the parent repo in your coding agent (Claude Code, Cursor, …)
-   and have it follow `data/octopool/SETUP.md` to fill in
-   `data/octopool/INFO.md`.
+3. Open `data/octopool/INFO.md` before scanning; it is the tracked
+   project context for this repo. Update it when the trust boundary or
+   auth/cache shape changes.
 
 ## Daily commands
 
@@ -44,9 +44,9 @@ To scan another codebase from this same `.deepsec/`:
 pnpm deepsec init-project ../some-other-package   # path relative to .deepsec/
 ```
 
-Appends an entry to `deepsec.config.ts` and writes
-`data/<id>/{INFO.md,SETUP.md,project.json}`. Open the new SETUP.md
-in your agent to fill in INFO.md.
+Appends an entry to `deepsec.config.ts` and writes generated project
+context files under `data/<id>/`. Keep the hand-curated `INFO.md`
+tracked; leave regenerated scan metadata ignored.
 
 ## Layout
 
@@ -54,7 +54,6 @@ in your agent to fill in INFO.md.
 deepsec.config.ts        Project list (one entry per scanned repo)
 data/octopool/
   INFO.md                Repo context — checked into git, hand-curated
-  SETUP.md               Agent setup prompt — checked in, deletable
   project.json           Generated (gitignored)
   files/                 One JSON per scanned source file (gitignored)
   runs/                  Run metadata (gitignored)

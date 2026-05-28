@@ -1,14 +1,14 @@
 # Agent setup
 
-This is a deepsec scanning workspace. Each registered project has its
-own setup prompt at `data/<id>/SETUP.md` — open the relevant one when
-asked to set a project up.
+This is a deepsec scanning workspace. Each registered project keeps
+hand-curated context in `data/<id>/INFO.md` — open the relevant one
+when asked to scan or refresh project setup.
 
 ## Common tasks
 
-- **Set up a project for scanning**: read `data/<id>/SETUP.md` and
-  follow it (read `node_modules/deepsec/SKILL.md`, then fill
-  `data/<id>/INFO.md` from the target codebase).
+- **Set up a project for scanning**: read
+  `node_modules/deepsec/SKILL.md`, then fill `data/<id>/INFO.md` from
+  the target codebase.
 - **Add a new project**: run `deepsec init-project <root>` — it
   scaffolds `data/<id>/` and prints/writes the setup prompt for the
   new project.
