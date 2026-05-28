@@ -118,12 +118,12 @@ const LANDING_HTML = `<!doctype html>
     position:relative;
     z-index:2;
     display:grid;
-    grid-template-columns:auto minmax(0,1fr) 44px;
+    grid-template-columns:auto minmax(0,1fr) 36px;
     align-items:center;
-    gap:13px;
-    width:min(742px,calc(100vw - 48px));
-    min-height:72px;
-    padding:13px 14px 13px 22px;
+    gap:10px;
+    width:min(560px,calc(100vw - 48px));
+    min-height:56px;
+    padding:9px 10px 9px 17px;
     border:1px solid rgba(255,255,255,.13);
     border-radius:18px;
     background:linear-gradient(180deg,rgba(25,18,29,.88),rgba(9,9,14,.94));
@@ -136,22 +136,22 @@ const LANDING_HTML = `<!doctype html>
     overflow:hidden;
     text-overflow:ellipsis;
     white-space:nowrap;
-    font:800 19px/1.15 ui-monospace,SFMono-Regular,Menlo,monospace;
+    font:800 15px/1.15 ui-monospace,SFMono-Regular,Menlo,monospace;
     color:#fff6fa;
     background:transparent;
   }
   .install-command .prompt{
-    width:20px;
+    width:17px;
     color:#ff4d82;
     text-shadow:0 0 16px rgba(255,40,90,.52);
   }
   .copy-command{
     display:grid;
     place-items:center;
-    width:44px;
-    height:44px;
-    border:1px solid rgba(255,255,255,.13);
-    border-radius:12px;
+    width:36px;
+    height:36px;
+    border:1px solid rgba(255,255,255,.12);
+    border-radius:10px;
     background:rgba(255,255,255,.07);
     color:#ffd7e3;
     box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
@@ -167,7 +167,7 @@ const LANDING_HTML = `<!doctype html>
   }
   .copy-command:active{transform:translateY(0) scale(.98)}
   .copy-command[data-copied="true"]{color:#8fffd2;border-color:rgba(143,255,210,.42);background:rgba(143,255,210,.12)}
-  .copy-command svg{width:19px;height:19px}
+  .copy-command svg{width:17px;height:17px}
   .quick-links{
     position:relative;
     z-index:2;
