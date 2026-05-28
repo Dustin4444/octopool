@@ -6,6 +6,12 @@
 
 - Soften the public Homebrew install CTA colors and add a dedicated copy button.
 - Fit the install CTA pill to its command so the prompt, text, and copy button sit flush instead of stretching across a fixed 560px box.
+
+### Documentation
+
+- Rewrite the README around the actual pitch: pool an org's GitHub identities and a D1 cache behind one Cloudflare Worker to take read traffic off individual PATs and Apps, with a step-by-step Cloudflare self-deploy section (Worker, D1, Durable Object, secrets, custom domain, caller/identity provisioning, smoke test).
+- Lead `docs/index.md` with the same pitch and a self-deploy entry point.
+- Add a self-host Cloudflare quickstart to `docs/operations.md` and note that `git push` does not auto-deploy the Worker — only the docs site has a Pages workflow.
 - Add `/.well-known/octopool` server discovery, self-host login UX (`octopool login [server]` / `--server`), and `octopool whoami`.
 - Split browser hosts so `octopool.openclaw.ai` owns website login through an OpenClaw proxy while `octopool.dev` stays a Homebrew-install landing page.
 
