@@ -72,6 +72,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return nil
 	case "login":
 		return runLogin(ctx, args[1:], stdout)
+	case "whoami":
+		return runWhoami(args[1:], stdout)
 	case "gh":
 		return runGH(ctx, args[1:], stdout, stderr)
 	case "health":
@@ -289,6 +291,40 @@ func runAdminIdentity(ctx context.Context, args []string, stdout io.Writer) erro
 	return postJSON(ctx, stdout, apiURL(*url, "/v1/admin/pools/"+urlPath(*pool)+"/identities"), token, body)
 }
 
+func runWhoami(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("whoami", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	jsonOutput := fs.Bool("json", false, "print JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: octopool whoami [--json]")
+	}
+	auth, err := loadAuth()
+	if err != nil {
+		return err
+	}
+	if auth.Token == "" {
+		return errors.New("not logged in; run: octopool login")
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(map[string]string{
+			"server": auth.URL,
+			"pool":   auth.Pool,
+			"login":  auth.Login,
+		})
+	}
+	fmt.Fprintf(stdout, "server: %s\n", auth.URL)
+	fmt.Fprintf(stdout, "pool: %s\n", auth.Pool)
+	if auth.Login != "" {
+		fmt.Fprintf(stdout, "login: %s\n", auth.Login)
+	}
+	return nil
+}
+
 func getJSON(ctx context.Context, stdout io.Writer, url string, token string) error {
 	resp, err := getJSONRaw(ctx, url, token)
 	if err != nil {
@@ -471,5 +507,5 @@ func apiURL(base string, path string) string {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: octopool <login|gh|health|stats|request|admin> [flags]")
+	fmt.Fprintln(w, "usage: octopool <login|whoami|gh|health|stats|request|admin> [flags]")
 }

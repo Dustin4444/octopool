@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { discoveryResponse } from "../src/discovery";
 import { PROXY_HOST_HEADER, PROXY_SECRET_HEADER } from "../src/hosts";
 import { errorResponse, HttpError } from "../src/http";
 import { rootResponse } from "../src/landing";
@@ -7,6 +8,36 @@ import { startGitHubWebLogin } from "../src/web-session";
 import { shouldUseWebError, webErrorResponse } from "../src/web-error";
 
 describe("web routing helpers", () => {
+  it("serves server discovery for public and proxied app hosts", async () => {
+    const publicDiscovery = await discoveryResponse(
+      new Request("https://octopool.dev/.well-known/octopool"),
+      discoveryEnv(),
+    ).json();
+    expect(publicDiscovery).toMatchObject({
+      service: "octopool",
+      version: 1,
+      api_base: "https://octopool.dev",
+      app_base: "https://octopool.openclaw.ai",
+      default_pool: "maintainers",
+      allowed_org: "openclaw",
+      auth: { cli_github_token: true, web_login: true },
+    });
+
+    const appDiscovery = await discoveryResponse(
+      new Request("https://octopool.dev/.well-known/octopool", {
+        headers: {
+          [PROXY_HOST_HEADER]: "octopool.openclaw.ai",
+          [PROXY_SECRET_HEADER]: "proxy-secret",
+        },
+      }),
+      discoveryEnv(),
+    ).json();
+    expect(appDiscovery).toMatchObject({
+      api_base: "https://octopool.openclaw.ai",
+      app_base: "https://octopool.openclaw.ai",
+    });
+  });
+
   it("serves the landing page by default and JSON only when requested", async () => {
     const proxyEnv = { OCTOPOOL_PROXY_SECRET: "proxy-secret" };
     const html = rootResponse(new Request("https://octopool.openclaw.ai/"), "req-html");
@@ -171,4 +202,11 @@ function oauthEnv(): Env & { DB: { prepare: ReturnType<typeof vi.fn> } } {
     OCTOPOOL_PROXY_SECRET: "proxy-secret",
     DB: { prepare },
   } as unknown as Env & { DB: { prepare: ReturnType<typeof vi.fn> } };
+}
+
+function discoveryEnv(): Env {
+  return {
+    ALLOWED_GITHUB_ORG: "openclaw",
+    OCTOPOOL_PROXY_SECRET: "proxy-secret",
+  } as unknown as Env;
 }

@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestVersionCommand(t *testing.T) {
@@ -51,5 +53,58 @@ func TestValidateAuthURLForRequestNormalizesTrailingSlash(t *testing.T) {
 
 	if err := validateAuthURLForRequest(auth, "https://octopool.dev", "OCTOPOOL_TOKEN"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWhoamiPrintsSavedLogin(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := saveAuth(authFile{
+		URL:       "https://octopool.example.com",
+		Pool:      "core",
+		Token:     "op_test",
+		Login:     "alice",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	if err := runWhoami(nil, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	got := stdout.String()
+	for _, want := range []string{
+		"server: https://octopool.example.com",
+		"pool: core",
+		"login: alice",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in %q", want, got)
+		}
+	}
+}
+
+func TestWhoamiJSON(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := saveAuth(authFile{
+		URL:       "https://octopool.example.com",
+		Pool:      "core",
+		Token:     "op_test",
+		Login:     "alice",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	if err := runWhoami([]string{"--json"}, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["server"] != "https://octopool.example.com" || got["pool"] != "core" || got["login"] != "alice" {
+		t.Fatalf("whoami JSON = %#v", got)
 	}
 }

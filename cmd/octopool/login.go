@@ -42,13 +42,20 @@ type apiErrorResponse struct {
 func runLogin(ctx context.Context, args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	baseURL := fs.String("url", envDefault("OCTOPOOL_URL", defaultURL), "Octopool base URL")
-	pool := fs.String("pool", envDefault("OCTOPOOL_POOL", "maintainers"), "pool id")
+	urlFlag := fs.String("url", "", "Octopool base URL")
+	serverFlag := fs.String("server", "", "Octopool server URL")
+	pool := fs.String("pool", "", "pool id")
 	ghPath := fs.String("gh-path", envDefault("OCTOPOOL_GH_PATH", "gh"), "GitHub CLI path")
-	if err := fs.Parse(args); err != nil {
+	trustRedirect := fs.Bool("trust-discovery-redirect", false, "allow discovery api_base on a different host")
+	if err := fs.Parse(normalizeLoginArgs(args)); err != nil {
 		return err
 	}
-	if err := validateLoginURL(*baseURL); err != nil {
+	baseURL, err := loginServerArgument(fs, *urlFlag, *serverFlag)
+	if err != nil {
+		return err
+	}
+	server, err := discoverLoginServer(ctx, baseURL, *pool, *trustRedirect)
+	if err != nil {
 		return err
 	}
 	token, err := localGitHubToken(ctx, *ghPath)
@@ -57,9 +64,9 @@ func runLogin(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	body := map[string]any{
 		"github_token": token,
-		"pool":         *pool,
+		"pool":         server.Pool,
 	}
-	out, status, err := doRaw(ctx, apiURL(*baseURL, "/v1/login/github-cli"), "", body)
+	out, status, err := doRaw(ctx, apiURL(server.APIBase, "/v1/login/github-cli"), "", body)
 	if err != nil {
 		return err
 	}
@@ -74,16 +81,77 @@ func runLogin(ctx context.Context, args []string, stdout io.Writer) error {
 		return errors.New("login response did not include a caller token")
 	}
 	if err := saveAuth(authFile{
-		URL:       strings.TrimRight(*baseURL, "/"),
-		Pool:      *pool,
+		URL:       server.APIBase,
+		Pool:      server.Pool,
 		Token:     response.Token,
 		Login:     response.Caller.GitHubLogin,
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "logged in to %s as %s for pool %s\n", strings.TrimRight(*baseURL, "/"), response.Caller.GitHubLogin, *pool)
+	fmt.Fprintf(stdout, "logged in to %s as %s for pool %s\n", server.APIBase, response.Caller.GitHubLogin, server.Pool)
 	return nil
+}
+
+func normalizeLoginArgs(args []string) []string {
+	flags := make([]string, 0, len(args))
+	positionals := []string{}
+	valueFlags := map[string]bool{
+		"gh-path": true,
+		"pool":    true,
+		"server":  true,
+		"url":     true,
+	}
+	for index := 0; index < len(args); index += 1 {
+		arg := args[index]
+		if arg == "--" {
+			positionals = append(positionals, args[index+1:]...)
+			break
+		}
+		if strings.HasPrefix(arg, "-") && arg != "-" {
+			flags = append(flags, arg)
+			name := loginFlagName(arg)
+			if valueFlags[name] && !strings.Contains(arg, "=") && index+1 < len(args) {
+				index += 1
+				flags = append(flags, args[index])
+			}
+			continue
+		}
+		positionals = append(positionals, arg)
+	}
+	return append(flags, positionals...)
+}
+
+func loginFlagName(arg string) string {
+	name := strings.TrimLeft(arg, "-")
+	if before, _, ok := strings.Cut(name, "="); ok {
+		name = before
+	}
+	return name
+}
+
+func loginServerArgument(fs *flag.FlagSet, urlFlag string, serverFlag string) (string, error) {
+	visited := map[string]bool{}
+	fs.Visit(func(item *flag.Flag) {
+		visited[item.Name] = true
+	})
+	if fs.NArg() > 1 {
+		return "", errors.New("usage: octopool login [server] [--pool <pool>]")
+	}
+	positional := ""
+	if fs.NArg() == 1 {
+		positional = fs.Arg(0)
+	}
+	if visited["url"] && visited["server"] && strings.TrimSpace(urlFlag) != strings.TrimSpace(serverFlag) {
+		return "", errors.New("--url and --server disagree")
+	}
+	if positional != "" && (visited["url"] || visited["server"]) {
+		flagValue := firstNonEmpty(serverFlag, urlFlag)
+		if strings.TrimSpace(flagValue) != strings.TrimSpace(positional) {
+			return "", errors.New("login server positional argument disagrees with --url/--server")
+		}
+	}
+	return firstNonEmpty(positional, serverFlag, urlFlag, envDefault("OCTOPOOL_URL", defaultURL)), nil
 }
 
 func formatLoginFailure(status int, body []byte, ghPath string) error {

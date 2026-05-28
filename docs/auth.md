@@ -56,15 +56,17 @@ This is what `octopool login` calls.
 
 Flow:
 
-1. Body carries `github_token` (the user's `gh auth token`) and an optional `pool`.
-2. The Worker resolves the GitHub user (`GET /user`) and verifies that user is a member
+1. The CLI discovers the server with `GET /.well-known/octopool`, then chooses the
+   discovered `api_base` and `default_pool` unless flags override them.
+2. Body carries `github_token` (the user's `gh auth token`) and an optional `pool`.
+3. The Worker resolves the GitHub user (`GET /user`) and verifies that user is a member
    of `ALLOWED_GITHUB_ORG` using the supplied token.
-3. The caller must already be **provisioned** — matched by immutable GitHub **user id**,
+4. The caller must already be **provisioned** — matched by immutable GitHub **user id**,
    org, active status, and a grant for the requested pool. There is no self-service
    pool grant: an unprovisioned user gets `403 caller_not_provisioned`.
-4. A new caller token (`op_…`) is generated, hashed, and stored; the row is refreshed
+5. A new caller token (`op_…`) is generated, hashed, and stored; the row is refreshed
    with the current login, user id, and verification time.
-5. The plaintext token is returned once, for the CLI to store locally.
+6. The plaintext token is returned once, for the CLI to store locally.
 
 ### Pool restriction
 

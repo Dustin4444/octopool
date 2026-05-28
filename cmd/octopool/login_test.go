@@ -1,6 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"flag"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -71,5 +78,85 @@ func TestFormatLoginFailureDoesNotTreatResetHeaderAsRateLimit(t *testing.T) {
 	}
 	if strings.Contains(got, "Retry after reset") {
 		t.Fatalf("did not expect rate-limit guidance:\n%s", got)
+	}
+}
+
+func TestLoginAcceptsPositionalServerAndStoresDiscoveredAuth(t *testing.T) {
+	t.Setenv("GH_TOKEN", "gh_test")
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/octopool":
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"service":"octopool","version":1,"api_base":"` + server.URL + `","app_base":"` + server.URL + `","default_pool":"core","allowed_org":"acme","auth":{"cli_github_token":true,"web_login":true}}`))
+		case "/v1/login/github-cli":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body["github_token"] != "gh_test" || body["pool"] != "core" {
+				t.Fatalf("login body = %#v", body)
+			}
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"caller":{"github_login":"alice","pool":"core"},"token":"op_test"}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	if err := runLogin(t.Context(), []string{server.URL}, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "logged in to "+server.URL+" as alice for pool core") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	authFilePath, err := authPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(authFilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var auth authFile
+	if err := json.Unmarshal(data, &auth); err != nil {
+		t.Fatal(err)
+	}
+	if auth.URL != server.URL || auth.Pool != "core" || auth.Token != "op_test" || auth.Login != "alice" {
+		t.Fatalf("auth = %#v", auth)
+	}
+}
+
+func TestLoginServerArgumentRejectsDisagreement(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	server := fs.String("server", "", "server")
+	if err := fs.Parse([]string{"--server", "https://flag.example", "https://pos.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loginServerArgument(fs, "", *server); err == nil {
+		t.Fatal("expected disagreement error")
+	}
+}
+
+func TestNormalizeLoginArgsAllowsFlagsAfterServer(t *testing.T) {
+	got := normalizeLoginArgs([]string{
+		"https://octopool.example.com",
+		"--pool",
+		"core",
+		"--trust-discovery-redirect",
+	})
+	want := []string{
+		"--pool",
+		"core",
+		"--trust-discovery-redirect",
+		"https://octopool.example.com",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("normalizeLoginArgs() = %#v", got)
 	}
 }

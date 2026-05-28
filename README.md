@@ -42,11 +42,18 @@ Or install from source:
 go install github.com/openclaw/octopool/cmd/octopool@latest
 ```
 
-Log in with your existing GitHub CLI session — Octopool exchanges your `gh` token for a caller token and stores it locally:
+Log in with your existing GitHub CLI session — Octopool discovers the server, exchanges
+your `gh` token for a caller token, and stores the server URL locally:
 
 ```sh
 octopool login
 # logged in to https://octopool.dev as you for pool maintainers
+
+octopool login https://octopool.your-org.dev
+# same flow for a self-hosted Octopool
+
+octopool whoami
+# server: https://octopool.your-org.dev
 ```
 
 Use the CLI like `gh` for supported read routes:
@@ -106,7 +113,7 @@ The Worker is TypeScript on Cloudflare Workers; the CLI is Go.
 pnpm install
 pnpm check        # format + lint + vitest + types + go test + go vet
 pnpm test         # vitest only
-pnpm deploy       # wrangler deploy
+pnpm run deploy   # deploy backing Worker and OpenClaw proxy Worker
 pnpm e2e          # smoke-test the live deployment
 pnpm docs:site    # build the docs site into dist/docs-site
 pnpm sql:generate # regenerate sqlc-backed query artifacts

@@ -7,7 +7,7 @@ Octopool supports — falling through to the real `gh` for everything else.
 Source: `cmd/octopool/`.
 
 The compiled-in default endpoint is `https://octopool.dev`. No config is required for
-normal use.
+normal OpenClaw use, and self-hosted servers are selected at login time.
 
 ## Install modes
 
@@ -32,13 +32,26 @@ The binary inspects `argv[0]` and behaves as a `gh` shim when invoked as `gh` or
 
 ## Commands
 
-### `octopool login`
+### `octopool login [server]`
 
 Reads a local GitHub token (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), exchanges it
-with `POST /v1/login/github-cli`, and saves the returned caller token.
+with `POST /v1/login/github-cli`, and saves the returned caller token. The server can be
+passed as a positional argument, `--server`, or the older `--url` flag:
+
+```sh
+octopool login
+octopool login https://octopool.your-org.dev
+octopool login --server https://octopool.your-org.dev
+```
 
 - The login URL must be HTTPS. `http://` is allowed only for loopback hosts, or when
   `OCTOPOOL_ALLOW_INSECURE_LOGIN=1` is set for local development.
+- The CLI fetches `GET /.well-known/octopool`, verifies `service: "octopool"`, uses the
+  discovered `api_base`, and defaults to the discovered `default_pool` unless `--pool` is
+  passed.
+- If discovery points `api_base` at a different host, login fails unless
+  `--trust-discovery-redirect` is passed. This keeps a mistyped or compromised discovery
+  host from silently receiving your local GitHub token.
 - The token is stored 0600 at `<user-config-dir>/octopool/auth.json` (URL, pool, token,
   login, timestamp).
 - Octopool validates the GitHub identity and OpenClaw org membership during login, and
@@ -48,6 +61,19 @@ with `POST /v1/login/github-cli`, and saves the returned caller token.
 octopool login
 # logged in to https://octopool.dev as steipete for pool maintainers
 ```
+
+### `octopool whoami [--json]`
+
+Prints the saved login target:
+
+```sh
+octopool whoami
+# server: https://octopool.dev
+# pool: maintainers
+# login: steipete
+```
+
+Use `--json` for scripts.
 
 ### `octopool gh api <GET path> [--jq <expr>]`
 
@@ -153,3 +179,32 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_ALLOWED_OWNERS` — local owner prefilter for the `gh` shim (default `openclaw`).
 - `OCTOPOOL_ADMIN_TOKEN` — admin token for `octopool admin`.
 - `OCTOPOOL_ALLOW_INSECURE_LOGIN=1` — permit non-HTTPS login for local dev.
+
+## Server discovery
+
+Self-hosted Octopool servers expose:
+
+```http
+GET /.well-known/octopool
+```
+
+Response shape:
+
+```json
+{
+  "service": "octopool",
+  "version": 1,
+  "api_base": "https://octopool.your-org.dev",
+  "app_base": "https://octopool.your-org.dev",
+  "default_pool": "maintainers",
+  "allowed_org": "your-org",
+  "auth": {
+    "cli_github_token": true,
+    "web_login": true
+  },
+  "min_cli_version": "0.2.2"
+}
+```
+
+`octopool.dev` advertises itself as the API base and `https://octopool.openclaw.ai` as
+the browser app base. A one-domain self-host can use the same origin for both.

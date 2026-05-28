@@ -9,7 +9,8 @@ caching, and safety policy centrally.
 
 - [GitHub read relay](relay.md) — the `POST /v1/github/request` endpoint, supported
   routes, response envelope, policy gates, and safety limits.
-- [Octopool CLI](cli.md) — `octopool login`, the `gh` shim, and real-`gh` fallback.
+- [Octopool CLI](cli.md) — `octopool login [server]`, discovery, `whoami`, the `gh` shim,
+  and real-`gh` fallback.
 - [Pooled identities & routing](identities.md) — PAT and GitHub App identities, scopes,
   and the pool coordinator's selection, leases, and cooldowns.
 - [Cache & public-repo guard](cache.md) — the D1 read-through cache and public-only

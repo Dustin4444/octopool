@@ -52,6 +52,16 @@ root_json="$(curl --resolve "$host:443:$ip" -fsS -H "accept: application/json" "
 printf "%s" "$root_json" | grep -q '"ok":true'
 printf "%s" "$root_json" | grep -q '"service":"octopool"'
 
+discovery_json="$(curl --resolve "$host:443:$ip" -fsS "https://$host/.well-known/octopool")"
+printf "%s" "$discovery_json" | grep -q '"service":"octopool"'
+printf "%s" "$discovery_json" | grep -q '"cli_github_token":true'
+if [ "$host" = "octopool.dev" ]; then
+  printf "%s" "$discovery_json" | grep -q '"api_base":"https://octopool.dev"'
+  printf "%s" "$discovery_json" | grep -q '"app_base":"https://octopool.openclaw.ai"'
+else
+  printf "%s" "$discovery_json" | grep -q '"api_base":"https://'"$host"'"'
+fi
+
 health_code="$(
   curl --resolve "$host:443:$ip" -sS -o /tmp/octopool-health.json -w "%{http_code}" \
     "https://$host/v1/pools/maintainers/health"

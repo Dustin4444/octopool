@@ -93,6 +93,7 @@ first and fails if generated SQL artifacts are stale.
 - `GET /dashboard` redirects to the authoritative app host on `octopool.dev`, and to
   GitHub login on `octopool.openclaw.ai`.
 - `GET /` with `Accept: application/json` returns the JSON health body (`"ok":true`, `"service":"octopool"`).
+- `GET /.well-known/octopool` returns discovery metadata for CLI self-host login.
 - `GET /v1/pools/maintainers/health` without a token returns `401 missing_auth`.
 - `POST /v1/github/request` without a token returns `401 missing_auth`.
 

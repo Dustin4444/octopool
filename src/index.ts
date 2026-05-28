@@ -22,6 +22,7 @@ import {
   requireString,
   routeParam,
 } from "./http";
+import { discoveryResponse } from "./discovery";
 import { APP_ORIGIN, isPublicRequest } from "./hosts";
 import { rootResponse } from "./landing";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
@@ -67,6 +68,9 @@ async function routeRequest(
   requestId: string,
 ): Promise<Response> {
   const url = new URL(request.url);
+  if (request.method === "GET" && url.pathname === "/.well-known/octopool") {
+    return discoveryResponse(request, env);
+  }
   if (request.method === "GET" && url.pathname === "/") {
     return rootResponse(request, requestId, env);
   }

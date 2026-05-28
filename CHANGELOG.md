@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Add `/.well-known/octopool` server discovery, self-host login UX (`octopool login [server]` / `--server`), and `octopool whoami`.
 - Split browser hosts so `octopool.openclaw.ai` owns website login through an OpenClaw proxy while `octopool.dev` stays a Homebrew-install landing page.
 
 ## 0.2.1 - 2026-05-28
