@@ -12,6 +12,7 @@ import { githubCacheKey, readGitHubCache, shouldUseGitHubCache, writeGitHubCache
 import { dashboardResponse } from "./dashboard";
 import { ensurePool, insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, rateFromHeaders } from "./github";
+import { sanitizeGitHubResponse } from "./github-sanitize";
 import { queries } from "./generated/sql";
 import {
   errorResponse,
@@ -36,7 +37,7 @@ import {
   webMeResponse,
 } from "./web-session";
 import { shouldUseWebError, webErrorResponse } from "./web-error";
-import type { GitHubRelayResponse, Identity, RouteInfo, SelectionRequest } from "./types";
+import type { Identity, SelectionRequest } from "./types";
 
 export { PoolCoordinator };
 
@@ -323,105 +324,6 @@ async function dashboardPublicRepos(env: Env) {
   };
 }
 
-function sanitizeGitHubResponse(
-  route: RouteInfo,
-  response: GitHubRelayResponse,
-): GitHubRelayResponse {
-  if (route.kind === "repo_view" && isRecord(response.body)) {
-    return { ...response, body: sanitizeRepoView(response.body) };
-  }
-  return { ...response, body: stripTokenScopedGitHubFields(response.body) };
-}
-
-function sanitizeRepoView(input: Record<string, unknown>): Record<string, unknown> {
-  const allowed = new Set([
-    "id",
-    "node_id",
-    "name",
-    "full_name",
-    "owner",
-    "private",
-    "html_url",
-    "description",
-    "fork",
-    "url",
-    "homepage",
-    "language",
-    "forks_count",
-    "stargazers_count",
-    "watchers_count",
-    "size",
-    "default_branch",
-    "open_issues_count",
-    "is_template",
-    "topics",
-    "visibility",
-    "archived",
-    "disabled",
-    "license",
-    "pushed_at",
-    "created_at",
-    "updated_at",
-    "clone_url",
-    "ssh_url",
-    "git_url",
-    "svn_url",
-    "mirror_url",
-    "has_issues",
-    "has_projects",
-    "has_downloads",
-    "has_wiki",
-    "has_pages",
-    "has_discussions",
-    "network_count",
-    "subscribers_count",
-    "organization",
-  ]);
-  const body: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (allowed.has(key)) {
-      body[key] = stripTokenScopedGitHubFields(value);
-    }
-  }
-  return body;
-}
-
-function stripTokenScopedGitHubFields(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(stripTokenScopedGitHubFields);
-  }
-  if (!isRecord(value)) {
-    return value;
-  }
-  if (isGitHubRepoObject(value) && value.private !== false) {
-    return null;
-  }
-  const out: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (tokenScopedGitHubField(key)) {
-      continue;
-    }
-    out[key] = stripTokenScopedGitHubFields(item);
-  }
-  return out;
-}
-
-function isGitHubRepoObject(value: Record<string, unknown>): boolean {
-  return (
-    typeof value.full_name === "string" &&
-    typeof value.html_url === "string" &&
-    typeof value.private === "boolean"
-  );
-}
-
-function tokenScopedGitHubField(key: string): boolean {
-  return key === "permissions" || key === "role_name" || key === "temp_clone_token";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 async function relayGitHub(
   request: Request,
   env: Env,
@@ -494,11 +396,11 @@ async function relayGitHub(
         }
       }
     }
-    await ensurePublicGitHubRepo(env, route);
     const identities = await loadIdentities(env, relayRequest.pool, route);
     if (identities.length === 0) {
       throw new HttpError(503, "no_identity", "No active identity can serve this route");
     }
+    await ensurePublicGitHubRepo(env, route);
     const selectionRequest: SelectionRequest = {
       pool: relayRequest.pool,
       routeKey: route.routeKey,
