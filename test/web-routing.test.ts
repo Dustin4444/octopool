@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
+import { PROXY_HOST_HEADER, PROXY_SECRET_HEADER } from "../src/hosts";
 import { errorResponse, HttpError } from "../src/http";
 import { rootResponse } from "../src/landing";
+import proxyWorker from "../src/openclaw-proxy";
 import { startGitHubWebLogin } from "../src/web-session";
 import { shouldUseWebError, webErrorResponse } from "../src/web-error";
 
 describe("web routing helpers", () => {
   it("serves the landing page by default and JSON only when requested", async () => {
+    const proxyEnv = { OCTOPOOL_PROXY_SECRET: "proxy-secret" };
     const html = rootResponse(new Request("https://octopool.openclaw.ai/"), "req-html");
     expect(html.headers.get("content-type")).toContain("text/html");
     expect(html.headers.get("vary")).toBe("Accept");
@@ -14,9 +17,26 @@ describe("web routing helpers", () => {
     expect(app).toContain("Sign in with GitHub");
     expect(app).toContain('href="/dashboard"');
 
+    const proxiedApp = await rootResponse(
+      new Request("https://octopool.dev/", {
+        headers: {
+          [PROXY_HOST_HEADER]: "octopool.openclaw.ai",
+          [PROXY_SECRET_HEADER]: "proxy-secret",
+        },
+      }),
+      "req-proxied",
+      proxyEnv,
+    ).text();
+    expect(proxiedApp).toContain("Sign in with GitHub");
+    expect(proxiedApp).toContain('href="/dashboard"');
+    expect(proxiedApp).not.toContain("brew install openclaw/tap/octopool");
+
     const publicHtml = await rootResponse(
-      new Request("https://octopool.dev/"),
+      new Request("https://octopool.dev/", {
+        headers: { [PROXY_HOST_HEADER]: "octopool.openclaw.ai" },
+      }),
       "req-public",
+      proxyEnv,
     ).text();
     expect(publicHtml).toContain("brew install openclaw/tap/octopool");
     expect(publicHtml).not.toContain("Sign in with GitHub");
@@ -80,17 +100,66 @@ describe("web routing helpers", () => {
   it("starts GitHub OAuth with stateless signed state", async () => {
     const env = oauthEnv();
     const response = await startGitHubWebLogin(
+      new Request("https://octopool.dev/login/github", {
+        headers: {
+          [PROXY_HOST_HEADER]: "octopool.openclaw.ai",
+          [PROXY_SECRET_HEADER]: "proxy-secret",
+        },
+      }),
       env,
-      new URL("https://octopool.openclaw.ai/login/github?next=/" + "x".repeat(300)),
+      new URL("https://octopool.dev/login/github?next=/" + "x".repeat(300)),
     );
 
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("location") ?? "");
     const state = location.searchParams.get("state") ?? "";
     expect(location.origin).toBe("https://github.com");
+    expect(location.searchParams.get("redirect_uri")).toBe(
+      "https://octopool.openclaw.ai/login/github/callback",
+    );
     expect(state).toMatch(/^state\.[-_A-Za-z0-9]+\.[-_A-Za-z0-9]+$/);
     expect(response.headers.get("set-cookie")).toContain(encodeURIComponent(state));
     expect(env.DB.prepare).not.toHaveBeenCalled();
+  });
+
+  it("redirects HTTP at the OpenClaw proxy before forwarding", async () => {
+    const response = await proxyWorker.fetch(new Request("http://octopool.openclaw.ai/dashboard"), {
+      OCTOPOOL_ORIGIN: "https://octopool.dev",
+      OCTOPOOL_PROXY_SECRET: "proxy-secret",
+    });
+
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe("https://octopool.openclaw.ai/dashboard");
+  });
+
+  it("forwards app-host proxy requests with authenticated host context and no cache", async () => {
+    const fetchMock = vi.fn(async (_request: Request) => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const response = await proxyWorker.fetch(
+        new Request("https://octopool.openclaw.ai/login/github", {
+          headers: {
+            accept: "text/html",
+            host: "octopool.openclaw.ai",
+          },
+        }),
+        {
+          OCTOPOOL_ORIGIN: "https://octopool.dev",
+          OCTOPOOL_PROXY_SECRET: "proxy-secret",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      const forwarded = fetchMock.mock.calls[0]?.[0] as Request;
+      expect(new URL(forwarded.url).origin).toBe("https://octopool.dev");
+      expect(forwarded.cache).toBe("no-store");
+      expect(forwarded.headers.get("host")).toBeNull();
+      expect(forwarded.headers.get(PROXY_HOST_HEADER)).toBe("octopool.openclaw.ai");
+      expect(forwarded.headers.get(PROXY_SECRET_HEADER)).toBe("proxy-secret");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -99,6 +168,7 @@ function oauthEnv(): Env & { DB: { prepare: ReturnType<typeof vi.fn> } } {
   return {
     GITHUB_OAUTH_CLIENT_ID: "client-id",
     GITHUB_OAUTH_CLIENT_SECRET: "client-secret",
+    OCTOPOOL_PROXY_SECRET: "proxy-secret",
     DB: { prepare },
   } as unknown as Env & { DB: { prepare: ReturnType<typeof vi.fn> } };
 }

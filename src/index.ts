@@ -22,7 +22,8 @@ import {
   requireString,
   routeParam,
 } from "./http";
-import { APP_ORIGIN, isPublicHost, rootResponse } from "./landing";
+import { APP_ORIGIN, isPublicRequest } from "./hosts";
+import { rootResponse } from "./landing";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import { PoolCoordinator } from "./pool-coordinator";
 import { ensurePublicGitHubRepo } from "./public-repos";
@@ -67,20 +68,20 @@ async function routeRequest(
 ): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/") {
-    return rootResponse(request, requestId);
+    return rootResponse(request, requestId, env);
   }
-  const webHostRedirect = publicWebHostRedirect(url);
+  const webHostRedirect = publicWebHostRedirect(request, url, env);
   if (webHostRedirect !== undefined) {
     return webHostRedirect;
   }
   if (
-    isPublicHost(url.hostname) &&
+    isPublicRequest(request, env) &&
     (url.pathname === "/v1/me" || url.pathname === "/v1/dashboard")
   ) {
     throw new HttpError(404, "not_found", "Route not found");
   }
   if (request.method === "GET" && url.pathname === "/login/github") {
-    return startGitHubWebLogin(env, url);
+    return startGitHubWebLogin(request, env, url);
   }
   if (request.method === "GET" && url.pathname === "/login/github/callback") {
     return finishGitHubWebLogin(request, env, url);
@@ -93,7 +94,7 @@ async function routeRequest(
       await requireDashboardAdmin(request, env, loginPool(env, undefined));
     } catch (error) {
       if (error instanceof HttpError && error.status === 401) {
-        return webLoginRedirect(request);
+        return webLoginRedirect(request, env);
       }
       throw error;
     }
@@ -139,8 +140,8 @@ async function routeRequest(
   throw new HttpError(404, "not_found", "Route not found");
 }
 
-function publicWebHostRedirect(url: URL): Response | undefined {
-  if (!isPublicHost(url.hostname)) {
+function publicWebHostRedirect(request: Request, url: URL, env: Env): Response | undefined {
+  if (!isPublicRequest(request, env)) {
     return undefined;
   }
   if (url.pathname === "/login/github/callback") {

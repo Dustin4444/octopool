@@ -4,7 +4,7 @@
 
 ### Fixes
 
-- Split browser hosts so `octopool.openclaw.ai` owns website login while `octopool.dev` stays a Homebrew-install landing page.
+- Split browser hosts so `octopool.openclaw.ai` owns website login through an OpenClaw proxy while `octopool.dev` stays a Homebrew-install landing page.
 
 ## 0.2.1 - 2026-05-28
 

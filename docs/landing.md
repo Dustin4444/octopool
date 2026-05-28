@@ -1,16 +1,18 @@
 # Landing Page & GitHub Login
 
-Octopool has two browser hosts on the same Worker and data plane:
+Octopool has two browser hosts on the same backing Worker and data plane:
 
 - `octopool.openclaw.ai` is the authoritative website. It serves the animated angry
-  octopus, GitHub sign-in, dashboard link, and docs link.
+  octopus, GitHub sign-in, dashboard link, and docs link. This host is served by a thin
+  OpenClaw-account proxy Worker that forwards into the backing `octopool.dev` Worker.
 - `octopool.dev` is the mysterious public/download face. It serves the same angry
   octopus, but the primary action is `brew install openclaw/tap/octopool`; web login and
   dashboard paths redirect to `octopool.openclaw.ai`.
 
 API clients can still request JSON from either host.
 
-Source: `src/landing.ts`, `src/index.ts` (`/`, `githubLoginRedirect`).
+Source: `src/landing.ts`, `src/index.ts` (`/`, `githubLoginRedirect`),
+`src/openclaw-proxy.ts`.
 
 ## Content negotiation at `/`
 

@@ -1,9 +1,6 @@
 import { jsonResponse } from "./http";
+import { APP_ORIGIN, isPublicRequest } from "./hosts";
 import { wantsJson } from "./web-error";
-
-export const APP_HOST = "octopool.openclaw.ai";
-export const APP_ORIGIN = `https://${APP_HOST}`;
-export const PUBLIC_HOST = "octopool.dev";
 
 const INSTALL_COMMAND = "brew install openclaw/tap/octopool";
 
@@ -263,12 +260,8 @@ const APP_LINKS = '<a href="/dashboard">Dashboard</a><a href="https://docs.octop
 const PUBLIC_LINKS =
   '<a href="https://docs.octopool.dev/">Docs</a><a href="https://github.com/openclaw/octopool">GitHub</a>';
 
-export function isPublicHost(hostname: string): boolean {
-  return hostname.toLowerCase() === PUBLIC_HOST;
-}
-
-export function landingResponse(request: Request): Response {
-  const appSite = !isPublicHost(new URL(request.url).hostname);
+export function landingResponse(request: Request, env?: unknown): Response {
+  const appSite = !isPublicRequest(request, env);
   return new Response(landingHTML(appSite), {
     headers: {
       "content-type": "text/html; charset=utf-8",
@@ -278,13 +271,13 @@ export function landingResponse(request: Request): Response {
   });
 }
 
-export function rootResponse(request: Request, requestId: string): Response {
+export function rootResponse(request: Request, requestId: string, env?: unknown): Response {
   if (wantsJson(request)) {
     return jsonResponse({ ok: true, service: "octopool", request_id: requestId }, 200, {
       vary: "Accept",
     });
   }
-  return landingResponse(request);
+  return landingResponse(request, env);
 }
 
 function landingHTML(appSite: boolean): string {

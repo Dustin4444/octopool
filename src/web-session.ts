@@ -7,6 +7,7 @@ import {
   verifyGitHubOrgMember,
 } from "./auth";
 import { queries } from "./generated/sql";
+import { effectiveOrigin } from "./hosts";
 import { HttpError, jsonResponse } from "./http";
 import type { WebSession } from "./types";
 
@@ -16,7 +17,7 @@ const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
 const STATE_TTL_SECONDS = 60 * 10;
 const MAX_NEXT_PATH_LENGTH = 256;
 
-export async function startGitHubWebLogin(env: Env, url: URL): Promise<Response> {
+export async function startGitHubWebLogin(request: Request, env: Env, url: URL): Promise<Response> {
   const clientId = envSecret(env, "GITHUB_OAUTH_CLIENT_ID")?.trim();
   if (clientId === undefined || clientId === "") {
     return Response.redirect("https://github.com/login", 302);
@@ -25,8 +26,9 @@ export async function startGitHubWebLogin(env: Env, url: URL): Promise<Response>
   const state = await signedOAuthState(env, next);
 
   const authorize = new URL("https://github.com/login/oauth/authorize");
+  const origin = effectiveOrigin(request, env);
   authorize.searchParams.set("client_id", clientId);
-  authorize.searchParams.set("redirect_uri", `${url.origin}/login/github/callback`);
+  authorize.searchParams.set("redirect_uri", `${origin}/login/github/callback`);
   authorize.searchParams.set("scope", "read:org");
   authorize.searchParams.set("state", state);
   authorize.searchParams.set("allow_signup", "false");
@@ -63,7 +65,7 @@ export async function finishGitHubWebLogin(
 
   const nextPath = await verifyOAuthState(env, state);
 
-  const githubToken = await exchangeGitHubCode(env, url, code);
+  const githubToken = await exchangeGitHubCode(request, env, code);
   const user = await githubUserFromToken(githubToken);
   const verifiedAt = await verifyGitHubOrgMember(env, user.login);
   const pool = loginPool(env);
@@ -147,10 +149,10 @@ export async function requireDashboardAdmin(
   return session;
 }
 
-export function webLoginRedirect(request: Request): Response {
+export function webLoginRedirect(request: Request, env: Env): Response {
   const url = new URL(request.url);
   return Response.redirect(
-    `${url.origin}/login/github?next=${encodeURIComponent(url.pathname)}`,
+    `${effectiveOrigin(request, env)}/login/github?next=${encodeURIComponent(url.pathname)}`,
     302,
   );
 }
@@ -173,7 +175,7 @@ function loginPool(env: Env): string {
   return configured === undefined || configured.trim() === "" ? "maintainers" : configured.trim();
 }
 
-async function exchangeGitHubCode(env: Env, url: URL, code: string): Promise<string> {
+async function exchangeGitHubCode(request: Request, env: Env, code: string): Promise<string> {
   const clientId = envSecret(env, "GITHUB_OAUTH_CLIENT_ID")?.trim();
   const clientSecret = envSecret(env, "GITHUB_OAUTH_CLIENT_SECRET")?.trim();
   if (
@@ -195,7 +197,7 @@ async function exchangeGitHubCode(env: Env, url: URL, code: string): Promise<str
       client_id: clientId,
       client_secret: clientSecret,
       code,
-      redirect_uri: `${url.origin}/login/github/callback`,
+      redirect_uri: `${effectiveOrigin(request, env)}/login/github/callback`,
     }),
   });
   const body: unknown = await response.json().catch(() => undefined);

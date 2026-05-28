@@ -1,18 +1,22 @@
 # Deployment & Operations
 
-Octopool is a single Cloudflare Worker plus a Durable Object and a D1 database, served on
-two custom domains. `octopool.openclaw.ai` is the authoritative website/login host;
-`octopool.dev` is the public install/download host. The Go CLI is a separate binary.
+Octopool is a Cloudflare Worker plus a Durable Object and a D1 database, served directly
+on `octopool.dev`. `octopool.openclaw.ai` is the authoritative website/login host via a
+thin OpenClaw-account proxy Worker that forwards to the same backing Worker/data plane.
+The Go CLI is a separate binary.
 
-Source: `wrangler.jsonc`, `migrations/`, `package.json`, `test/e2e.sh`.
+Source: `wrangler.jsonc`, `wrangler.openclaw-proxy.jsonc`, `migrations/`, `package.json`,
+`test/e2e.sh`.
 
 ## Cloudflare resources
 
 - Worker `octopool` — entry `src/index.ts`, `nodejs_compat`, observability on.
+- Worker `octopool-openclaw-proxy` — entry `src/openclaw-proxy.ts`, OpenClaw account
+  custom-domain proxy for `octopool.openclaw.ai`.
 - Durable Object `PoolCoordinator` (binding `POOL_COORDINATOR`, SQLite-backed,
   migration tag `v1`).
 - D1 database `octopool` (binding `DB`).
-- Custom domain routes `octopool.openclaw.ai` and `octopool.dev`.
+- Custom domain route `octopool.dev` on the backing Worker.
 
 ## Configuration
 
@@ -32,6 +36,8 @@ Secrets (via `wrangler secret put`, never in D1/KV/logs):
 
 - `OCTOPOOL_ADMIN_TOKEN` — admin API auth.
 - `GITHUB_OAUTH_CLIENT_SECRET` — website GitHub login.
+- `OCTOPOOL_PROXY_SECRET` — shared secret on both Workers so only the OpenClaw proxy can
+  assert the authoritative app host.
 - `OCTOPOOL_GITHUB_ORG_TOKEN` — background org-membership verifier and public-repo
   proof fetcher.
 - `OCTOPOOL_GITHUB_APP_ID` — GitHub App id (for App identities).
@@ -60,7 +66,7 @@ Apply with `wrangler d1 migrations apply octopool` (add `--remote` for productio
 pnpm install
 pnpm check     # format:check + lint + vitest + build + go test + go vet
 pnpm test      # vitest only
-pnpm deploy    # wrangler deploy
+pnpm deploy    # deploy backing Worker, then octopool.openclaw.ai proxy Worker
 pnpm e2e       # smoke-test the live deployment
 ```
 
