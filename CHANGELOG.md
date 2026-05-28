@@ -2,6 +2,10 @@
 
 ## 0.2.4 - Unreleased
 
+### Fixes
+
+- Add pnpm build-script approvals for esbuild, sharp, and workerd so `pnpm test` and `pnpm check` run without generating placeholder approval config.
+
 ## 0.2.3 - 2026-05-28
 
 ### Fixes
