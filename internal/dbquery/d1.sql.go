@@ -483,17 +483,6 @@ func (q *Queries) DeleteIdentityScopes(ctx context.Context, identityID string) e
 	return err
 }
 
-const deleteOAuthStateAndExpired = `-- name: DeleteOAuthStateAndExpired :exec
-DELETE FROM oauth_states
-WHERE state_hash = ?1
-   OR expires_at <= CURRENT_TIMESTAMP
-`
-
-func (q *Queries) DeleteOAuthStateAndExpired(ctx context.Context, stateHash string) error {
-	_, err := q.db.ExecContext(ctx, deleteOAuthStateAndExpired, stateHash)
-	return err
-}
-
 const deleteWebSession = `-- name: DeleteWebSession :exec
 DELETE FROM web_sessions
 WHERE session_hash = ?1
@@ -600,20 +589,6 @@ func (q *Queries) GetIdentityPoolKind(ctx context.Context, id string) (GetIdenti
 	var i GetIdentityPoolKindRow
 	err := row.Scan(&i.PoolID, &i.Kind)
 	return i, err
-}
-
-const getOAuthState = `-- name: GetOAuthState :one
-SELECT next_path
-FROM oauth_states
-WHERE state_hash = ?1
-  AND expires_at > CURRENT_TIMESTAMP
-`
-
-func (q *Queries) GetOAuthState(ctx context.Context, stateHash string) (string, error) {
-	row := q.db.QueryRowContext(ctx, getOAuthState, stateHash)
-	var next_path string
-	err := row.Scan(&next_path)
-	return next_path, err
 }
 
 const getPoolPolicy = `-- name: GetPoolPolicy :one
@@ -775,22 +750,6 @@ func (q *Queries) InsertIdentityScope(ctx context.Context, arg InsertIdentitySco
 		arg.Repo,
 		arg.AllowPrivate,
 	)
-	return err
-}
-
-const insertOAuthState = `-- name: InsertOAuthState :exec
-INSERT INTO oauth_states (state_hash, next_path, expires_at)
-VALUES (?1, ?2, datetime(CURRENT_TIMESTAMP, ?3))
-`
-
-type InsertOAuthStateParams struct {
-	StateHash string      `json:"state_hash"`
-	NextPath  string      `json:"next_path"`
-	Datetime  interface{} `json:"datetime"`
-}
-
-func (q *Queries) InsertOAuthState(ctx context.Context, arg InsertOAuthStateParams) error {
-	_, err := q.db.ExecContext(ctx, insertOAuthState, arg.StateHash, arg.NextPath, arg.Datetime)
 	return err
 }
 

@@ -327,9 +327,13 @@ function sanitizeGitHubResponse(
   route: RouteInfo,
   response: GitHubRelayResponse,
 ): GitHubRelayResponse {
-  if (route.kind !== "repo_view" || !isRecord(response.body)) {
-    return response;
+  if (route.kind === "repo_view" && isRecord(response.body)) {
+    return { ...response, body: sanitizeRepoView(response.body) };
   }
+  return { ...response, body: stripTokenScopedGitHubFields(response.body) };
+}
+
+function sanitizeRepoView(input: Record<string, unknown>): Record<string, unknown> {
   const allowed = new Set([
     "id",
     "node_id",
@@ -374,12 +378,44 @@ function sanitizeGitHubResponse(
     "organization",
   ]);
   const body: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(response.body)) {
+  for (const [key, value] of Object.entries(input)) {
     if (allowed.has(key)) {
-      body[key] = value;
+      body[key] = stripTokenScopedGitHubFields(value);
     }
   }
-  return { ...response, body };
+  return body;
+}
+
+function stripTokenScopedGitHubFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stripTokenScopedGitHubFields);
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  if (isGitHubRepoObject(value) && value.private !== false) {
+    return null;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (tokenScopedGitHubField(key)) {
+      continue;
+    }
+    out[key] = stripTokenScopedGitHubFields(item);
+  }
+  return out;
+}
+
+function isGitHubRepoObject(value: Record<string, unknown>): boolean {
+  return (
+    typeof value.full_name === "string" &&
+    typeof value.html_url === "string" &&
+    typeof value.private === "boolean"
+  );
+}
+
+function tokenScopedGitHubField(key: string): boolean {
+  return key === "permissions" || key === "role_name" || key === "temp_clone_token";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -425,6 +461,7 @@ async function relayGitHub(
             : activeIdentities.find((candidate) => candidate.id === cached.identity?.id);
         if (cached.identity !== undefined && cachedIdentity !== undefined) {
           await ensurePublicGitHubRepo(env, route, cached.created_at);
+          const sanitizedCached = sanitizeGitHubResponse(route, cached);
           ctx.waitUntil(
             insertAudit(env, {
               requestId,
@@ -440,10 +477,10 @@ async function relayGitHub(
             }),
           );
           return jsonResponse({
-            status: cached.status,
-            headers: cached.headers,
-            body: cached.body,
-            body_encoding: cached.body_encoding,
+            status: sanitizedCached.status,
+            headers: sanitizedCached.headers,
+            body: sanitizedCached.body,
+            body_encoding: sanitizedCached.body_encoding,
             identity: cached.identity,
             relay: {
               pool: relayRequest.pool,
@@ -457,6 +494,7 @@ async function relayGitHub(
         }
       }
     }
+    await ensurePublicGitHubRepo(env, route);
     const identities = await loadIdentities(env, relayRequest.pool, route);
     if (identities.length === 0) {
       throw new HttpError(503, "no_identity", "No active identity can serve this route");
@@ -470,7 +508,6 @@ async function relayGitHub(
     const coordinator = env.POOL_COORDINATOR.getByName(`pool:${relayRequest.pool}`);
     const selection = await selectIdentity(coordinator, selectionRequest);
     identity = findIdentity(identities, selection.identityId);
-    await ensurePublicGitHubRepo(env, route);
     const rawGitHub = await callGitHub(env, identity, relayRequest, route);
     const github = sanitizeGitHubResponse(route, rawGitHub);
     const rate = rateFromHeaders(github.headers);

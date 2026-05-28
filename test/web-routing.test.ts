@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { errorResponse, HttpError } from "../src/http";
 import { rootResponse } from "../src/landing";
+import { startGitHubWebLogin } from "../src/web-session";
 import { shouldUseWebError, webErrorResponse } from "../src/web-error";
 
 describe("web routing helpers", () => {
@@ -64,4 +65,29 @@ describe("web routing helpers", () => {
       },
     });
   });
+
+  it("starts GitHub OAuth with stateless signed state", async () => {
+    const env = oauthEnv();
+    const response = await startGitHubWebLogin(
+      env,
+      new URL("https://octopool.dev/login/github?next=/" + "x".repeat(300)),
+    );
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("location") ?? "");
+    const state = location.searchParams.get("state") ?? "";
+    expect(location.origin).toBe("https://github.com");
+    expect(state).toMatch(/^state\.[-_A-Za-z0-9]+\.[-_A-Za-z0-9]+$/);
+    expect(response.headers.get("set-cookie")).toContain(encodeURIComponent(state));
+    expect(env.DB.prepare).not.toHaveBeenCalled();
+  });
 });
+
+function oauthEnv(): Env & { DB: { prepare: ReturnType<typeof vi.fn> } } {
+  const prepare = vi.fn();
+  return {
+    GITHUB_OAUTH_CLIENT_ID: "client-id",
+    GITHUB_OAUTH_CLIENT_SECRET: "client-secret",
+    DB: { prepare },
+  } as unknown as Env & { DB: { prepare: ReturnType<typeof vi.fn> } };
+}

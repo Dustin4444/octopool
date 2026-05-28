@@ -142,7 +142,7 @@ function stableRecord(
   for (const key of Object.keys(input).sort()) {
     const value = input[key];
     if (value !== undefined) {
-      out[key] = Array.isArray(value) ? [...value].sort() : value;
+      out[key] = Array.isArray(value) ? [...value] : value;
     }
   }
   return out;

@@ -233,21 +233,6 @@ WHERE identity_id = ?1;
 INSERT INTO identity_scopes (identity_id, owner, repo, permission, allow_private)
 VALUES (?1, ?2, ?3, 'read', ?4);
 
--- name: InsertOAuthState :exec
-INSERT INTO oauth_states (state_hash, next_path, expires_at)
-VALUES (?1, ?2, datetime(CURRENT_TIMESTAMP, ?3));
-
--- name: GetOAuthState :one
-SELECT next_path
-FROM oauth_states
-WHERE state_hash = ?1
-  AND expires_at > CURRENT_TIMESTAMP;
-
--- name: DeleteOAuthStateAndExpired :exec
-DELETE FROM oauth_states
-WHERE state_hash = ?1
-   OR expires_at <= CURRENT_TIMESTAMP;
-
 -- name: WebLoginCaller :one
 SELECT callers.id, callers.dashboard_role
 FROM callers

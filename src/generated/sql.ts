@@ -74,12 +74,6 @@ export const queries = {
   deleteIdentityScopes: "DELETE FROM identity_scopes\nWHERE identity_id = ?1",
   insertIdentityScope:
     "INSERT INTO identity_scopes (identity_id, owner, repo, permission, allow_private)\nVALUES (?1, ?2, ?3, 'read', ?4)",
-  insertOAuthState:
-    "INSERT INTO oauth_states (state_hash, next_path, expires_at)\nVALUES (?1, ?2, datetime(CURRENT_TIMESTAMP, ?3))",
-  getOAuthState:
-    "SELECT next_path\nFROM oauth_states\nWHERE state_hash = ?1\n  AND expires_at > CURRENT_TIMESTAMP",
-  deleteOAuthStateAndExpired:
-    "DELETE FROM oauth_states\nWHERE state_hash = ?1\n   OR expires_at <= CURRENT_TIMESTAMP",
   webLoginCaller:
     "SELECT callers.id, callers.dashboard_role\nFROM callers\nJOIN caller_pools ON caller_pools.caller_id = callers.id\nWHERE callers.github_user_id = ?1\n  AND callers.org_login = ?2\n  AND callers.status = 'active'\n  AND caller_pools.pool_id = ?3\nLIMIT 1",
   updateCallerWebLogin:

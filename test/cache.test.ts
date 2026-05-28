@@ -26,6 +26,25 @@ describe("github cache policy", () => {
     );
   });
 
+  it("preserves duplicate query value order in cache keys", async () => {
+    const left = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/issues",
+      query: { state: ["open", "closed"] },
+    });
+    const right = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/issues",
+      query: { state: ["closed", "open"] },
+    });
+    const route = classifyRoute(left, policy);
+    await expect(githubCacheKey("maintainers", left, route)).resolves.not.toBe(
+      await githubCacheKey("maintainers", right, route),
+    );
+  });
+
   it("bypasses conditional and rate-limit reads", () => {
     const pr = validateRelayRequest({
       pool: "maintainers",

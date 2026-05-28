@@ -14,17 +14,15 @@ const SESSION_COOKIE = "octopool_session";
 const STATE_COOKIE = "octopool_oauth_state";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
 const STATE_TTL_SECONDS = 60 * 10;
+const MAX_NEXT_PATH_LENGTH = 256;
 
 export async function startGitHubWebLogin(env: Env, url: URL): Promise<Response> {
   const clientId = envSecret(env, "GITHUB_OAUTH_CLIENT_ID")?.trim();
   if (clientId === undefined || clientId === "") {
     return Response.redirect("https://github.com/login", 302);
   }
-  const state = newToken("state");
   const next = safeNextPath(url.searchParams.get("next"));
-  await env.DB.prepare(queries.insertOAuthState)
-    .bind(await hashToken(state), next, `+${STATE_TTL_SECONDS} seconds`)
-    .run();
+  const state = await signedOAuthState(env, next);
 
   const authorize = new URL("https://github.com/login/oauth/authorize");
   authorize.searchParams.set("client_id", clientId);
@@ -63,14 +61,7 @@ export async function finishGitHubWebLogin(
     throw new HttpError(401, "github_state_invalid", "GitHub login state is invalid");
   }
 
-  const stateHash = await hashToken(state);
-  const stateRow = await env.DB.prepare(queries.getOAuthState)
-    .bind(stateHash)
-    .first<{ next_path: string }>();
-  await env.DB.prepare(queries.deleteOAuthStateAndExpired).bind(stateHash).run();
-  if (stateRow === null) {
-    throw new HttpError(401, "github_state_expired", "GitHub login state expired");
-  }
+  const nextPath = await verifyOAuthState(env, state);
 
   const githubToken = await exchangeGitHubCode(env, url, code);
   const user = await githubUserFromToken(githubToken);
@@ -96,7 +87,7 @@ export async function finishGitHubWebLogin(
     env.DB.prepare(queries.insertWebSession).bind(await hashToken(session), caller.id, expires),
   ]);
 
-  return redirectWithCookies(safeNextPath(stateRow.next_path), [
+  return redirectWithCookies(nextPath, [
     expiredCookie(STATE_COOKIE, "/login/github"),
     cookie(SESSION_COOKIE, session, {
       maxAge: SESSION_TTL_SECONDS,
@@ -222,6 +213,9 @@ function safeNextPath(value: string | null): string {
   if (value === null || value.trim() === "") {
     return "/dashboard";
   }
+  if (value.length > MAX_NEXT_PATH_LENGTH) {
+    return "/dashboard";
+  }
   if (
     !value.startsWith("/") ||
     value.startsWith("//") ||
@@ -231,6 +225,96 @@ function safeNextPath(value: string | null): string {
     return "/dashboard";
   }
   return value;
+}
+
+async function signedOAuthState(env: Env, nextPath: string): Promise<string> {
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const nonce = newToken("nonce");
+  const payload = base64UrlJSON({ iat: issuedAt, next: nextPath, nonce });
+  const signature = await oauthStateSignature(env, payload);
+  return `state.${payload}.${signature}`;
+}
+
+async function verifyOAuthState(env: Env, state: string): Promise<string> {
+  const parts = state.split(".");
+  if (parts.length !== 3 || parts[0] !== "state") {
+    throw new HttpError(401, "github_state_invalid", "GitHub login state is invalid");
+  }
+  const payload = parts[1] ?? "";
+  const signature = parts[2] ?? "";
+  const expected = await oauthStateSignature(env, payload);
+  if (!constantTimeEqual(signature, expected)) {
+    throw new HttpError(401, "github_state_invalid", "GitHub login state is invalid");
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(new TextDecoder().decode(base64UrlToBytes(payload)));
+  } catch {
+    throw new HttpError(401, "github_state_invalid", "GitHub login state is invalid");
+  }
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new HttpError(401, "github_state_invalid", "GitHub login state is invalid");
+  }
+  const issuedAt = (body as { iat?: unknown }).iat;
+  if (typeof issuedAt !== "number" || Date.now() / 1000 - issuedAt > STATE_TTL_SECONDS) {
+    throw new HttpError(401, "github_state_expired", "GitHub login state expired");
+  }
+  const next = (body as { next?: unknown }).next;
+  return safeNextPath(typeof next === "string" ? next : null);
+}
+
+async function oauthStateSignature(env: Env, payload: string): Promise<string> {
+  const secret = envSecret(env, "GITHUB_OAUTH_CLIENT_SECRET")?.trim();
+  if (secret === undefined || secret === "") {
+    throw new HttpError(503, "github_oauth_unconfigured", "GitHub OAuth is not configured");
+  }
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return base64Url(new Uint8Array(signature));
+}
+
+function base64UrlJSON(value: unknown): string {
+  return base64Url(new TextEncoder().encode(JSON.stringify(value)));
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+
+function base64UrlToBytes(value: string): Uint8Array {
+  const padded = value
+    .replaceAll("-", "+")
+    .replaceAll("_", "/")
+    .padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  const leftBytes = new TextEncoder().encode(left);
+  const rightBytes = new TextEncoder().encode(right);
+  if (leftBytes.length !== rightBytes.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let index = 0; index < leftBytes.length; index += 1) {
+    diff |= leftBytes[index]! ^ rightBytes[index]!;
+  }
+  return diff === 0;
 }
 
 function sqliteTimestamp(epochMs: number): string {

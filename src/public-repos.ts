@@ -18,9 +18,8 @@ export async function ensurePublicGitHubRepo(
   const owner = route.owner.toLowerCase();
   const repo = route.repo.toLowerCase();
   if (
-    cacheCreatedAt === undefined
-      ? await cachedPublicGitHubRepoIsFresh(env, owner, repo)
-      : await cachedPublicGitHubRepoCovers(env, route, cacheCreatedAt, true)
+    cacheCreatedAt !== undefined &&
+    (await cachedPublicGitHubRepoCovers(env, route, cacheCreatedAt, true))
   ) {
     return;
   }
@@ -77,17 +76,6 @@ function publicRepoCheckHeaders(env: Env): Record<string, string> {
 function publicCheckMayUseHistoricalProof(response: Response): boolean {
   const remaining = response.headers.get("x-ratelimit-remaining");
   return response.status >= 500 || (response.status === 403 && remaining === "0");
-}
-
-async function cachedPublicGitHubRepoIsFresh(
-  env: Env,
-  owner: string,
-  repo: string,
-): Promise<boolean> {
-  const row = await env.DB.prepare(queries.freshPublicRepoProof)
-    .bind(owner, repo)
-    .first<{ "1": number }>();
-  return row !== null;
 }
 
 async function cachedPublicGitHubRepoCovers(

@@ -24,8 +24,8 @@ click-to-rage shake. It respects `prefers-reduced-motion`. App icon artwork live
 
 ## `GET /login/github`
 
-The sign-in button links here. The Worker creates a short-lived OAuth state, stores only a
-hash in D1, sets an `HttpOnly` state cookie, and issues a 302 redirect:
+The sign-in button links here. The Worker creates a short-lived signed OAuth state, mirrors
+it in an `HttpOnly` state cookie, and issues a 302 redirect:
 
 - If `GITHUB_OAUTH_CLIENT_ID` is configured, it redirects to GitHub's OAuth authorize URL
   with `scope=read:org`, `allow_signup=false`, and

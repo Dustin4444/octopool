@@ -35,7 +35,8 @@ callers can never reach admin routes.
 The browser dashboard uses GitHub OAuth and an opaque cookie session:
 
 1. `/login/github` redirects to GitHub with `read:org`, `allow_signup=false`, and a
-   random state stored as a D1 hash plus an `HttpOnly` state cookie.
+   short-lived signed state mirrored in an `HttpOnly` state cookie. The state payload
+   only carries issue time, nonce, and the sanitized dashboard return path.
 2. `/login/github/callback` exchanges the code with GitHub, resolves the user, verifies
    OpenClaw membership with the configured org verifier token, and finds the
    pre-provisioned caller by immutable GitHub user id.

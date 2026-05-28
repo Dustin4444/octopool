@@ -40,6 +40,44 @@ describe("public repo guard", () => {
       code: "repo_not_public",
     });
   });
+
+  it("does not reuse fresh public proof for new upstream fetches", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ private: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    const database = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({
+          first: vi.fn(async () => ({ "1": 1 })),
+          run: vi.fn(async () => ({})),
+        })),
+      })),
+    };
+
+    await ensurePublicGitHubRepo({ ...env(), DB: database } as unknown as Env, route());
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("uses fresh covering proof for existing cache entries", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ private: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    const database = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({
+          first: vi.fn(async () => ({ "1": 1 })),
+          run: vi.fn(async () => ({})),
+        })),
+      })),
+    };
+
+    await ensurePublicGitHubRepo(
+      { ...env(), DB: database } as unknown as Env,
+      route(),
+      "2026-05-28 00:00:00",
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 function env(): Env {
