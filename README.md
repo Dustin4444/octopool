@@ -1,5 +1,3 @@
-![Octopool banner](docs/assets/readme-banner.jpg)
-
 <div align="center">
 
 <img src="docs/assets/octopool-github-app-512.png" alt="octopool" width="128" height="128">
@@ -13,6 +11,8 @@ A self-hosted GitHub read relay. One Cloudflare Worker holds your team's PATs an
 [App](https://octopool.openclaw.ai) · [Docs](https://docs.octopool.dev) · [Relay API](https://docs.octopool.dev/relay.html) · [CLI](https://docs.octopool.dev/cli.html) · [Spec](https://docs.octopool.dev/spec.html)
 
 </div>
+
+![Octopool banner](docs/assets/readme-banner.jpg)
 
 ---
 
