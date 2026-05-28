@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HttpError } from "../src/http";
+import { errorResponse, HttpError } from "../src/http";
 import { rootResponse } from "../src/landing";
 import { shouldUseWebError, webErrorResponse } from "../src/web-error";
 
@@ -42,5 +42,26 @@ describe("web routing helpers", () => {
       headers: { accept: "text/html,application/json" },
     });
     expect(shouldUseWebError(request)).toBe(false);
+  });
+
+  it("includes safe error details in API error responses", async () => {
+    const response = errorResponse(
+      new HttpError(401, "github_auth_failed", "GitHub token check failed with 403", {
+        github_rate_limit_reset: "1779928316",
+        github_rate_limit_remaining: "0",
+      }),
+      "req-rate",
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "github_auth_failed",
+        request_id: "req-rate",
+        details: {
+          github_rate_limit_reset: "1779928316",
+          github_rate_limit_remaining: "0",
+        },
+      },
+    });
   });
 });

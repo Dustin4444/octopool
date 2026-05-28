@@ -5,6 +5,7 @@
 ### Fixes
 
 - Explain `octopool login` GitHub token verification failures without dumping raw JSON.
+- Include GitHub rate-limit reset details when login token verification is rate-limited.
 
 ## 0.2.0 - 2026-05-28
 

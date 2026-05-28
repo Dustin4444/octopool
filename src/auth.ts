@@ -73,6 +73,7 @@ export async function githubUserFromToken(token: string): Promise<{
       401,
       "github_auth_failed",
       `GitHub token check failed with ${response.status}`,
+      githubRateLimitDetails(response.headers),
     );
   }
   const body: unknown = await response.json();
@@ -90,6 +91,24 @@ export async function githubUserFromToken(token: string): Promise<{
     login,
     ...(typeof name === "string" && name.trim() !== "" ? { name } : {}),
   };
+}
+
+function githubRateLimitDetails(headers: Headers): Record<string, string> | undefined {
+  const details: Record<string, string> = {};
+  for (const [detailKey, headerKey] of [
+    ["github_rate_limit_limit", "x-ratelimit-limit"],
+    ["github_rate_limit_remaining", "x-ratelimit-remaining"],
+    ["github_rate_limit_reset", "x-ratelimit-reset"],
+    ["github_rate_limit_resource", "x-ratelimit-resource"],
+    ["github_rate_limit_used", "x-ratelimit-used"],
+    ["github_retry_after", "retry-after"],
+  ] as const) {
+    const value = headers.get(headerKey);
+    if (value !== null && value.trim() !== "") {
+      details[detailKey] = value;
+    }
+  }
+  return Object.keys(details).length === 0 ? undefined : details;
 }
 
 export async function githubUserByLogin(login: string): Promise<{

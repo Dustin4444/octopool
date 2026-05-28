@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,6 +30,12 @@ type apiErrorResponse struct {
 		Code      string `json:"code"`
 		Message   string `json:"message"`
 		RequestID string `json:"request_id"`
+		Details   struct {
+			GitHubRateLimitReset     string `json:"github_rate_limit_reset"`
+			GitHubRateLimitRemaining string `json:"github_rate_limit_remaining"`
+			GitHubRateLimitResource  string `json:"github_rate_limit_resource"`
+			GitHubRetryAfter         string `json:"github_retry_after"`
+		} `json:"details"`
 	} `json:"error"`
 }
 
@@ -98,12 +105,52 @@ func formatLoginFailure(status int, body []byte, ghPath string) error {
 		if resolved, err := resolveGHPath(ghPath); err == nil {
 			resolvedGHPath = resolved
 		}
-		if strings.Contains(message, "403") {
-			return fmt.Errorf("login failed: GitHub rejected the local gh token while Octopool verified it (%s).\nLikely cause: the GitHub API rate limit for this token is exhausted, or the token needs re-auth.\nCheck reset: %s api rate_limit --jq '.resources.core'\nRetry after reset: octopool login --gh-path %s%s", message, resolvedGHPath, resolvedGHPath, requestID)
+		if isRateLimitedLoginFailure(message, response) {
+			return fmt.Errorf("login failed: GitHub rejected the local gh token while Octopool verified it (%s).\nLikely cause: the GitHub API rate limit for this token is exhausted, or the token needs re-auth.%s\nCheck reset: %s api rate_limit --jq '.resources.core'\nRetry after reset: octopool login --gh-path %s%s", message, rateLimitHint(response), resolvedGHPath, resolvedGHPath, requestID)
 		}
 		return fmt.Errorf("login failed: GitHub rejected the local gh token while Octopool verified it (%s).\nRefresh GitHub CLI auth: %s auth login\nThen retry: octopool login --gh-path %s%s", message, resolvedGHPath, resolvedGHPath, requestID)
 	}
 	return fmt.Errorf("login failed: %s: %s%s", response.Error.Code, message, requestID)
+}
+
+func isRateLimitedLoginFailure(message string, response apiErrorResponse) bool {
+	if strings.Contains(message, "429") || strings.Contains(strings.ToLower(message), "rate limit") {
+		return true
+	}
+	details := response.Error.Details
+	return details.GitHubRateLimitRemaining == "0" ||
+		details.GitHubRetryAfter != ""
+}
+
+func rateLimitHint(response apiErrorResponse) string {
+	parts := []string{}
+	if reset := githubResetTime(response.Error.Details.GitHubRateLimitReset); reset != "" {
+		parts = append(parts, "GitHub reset: "+reset)
+	}
+	if remaining := response.Error.Details.GitHubRateLimitRemaining; remaining != "" {
+		parts = append(parts, "remaining: "+remaining)
+	}
+	if resource := response.Error.Details.GitHubRateLimitResource; resource != "" {
+		parts = append(parts, "resource: "+resource)
+	}
+	if retryAfter := response.Error.Details.GitHubRetryAfter; retryAfter != "" {
+		parts = append(parts, "retry-after: "+retryAfter+"s")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "\n" + strings.Join(parts, "; ")
+}
+
+func githubResetTime(value string) string {
+	if value == "" {
+		return ""
+	}
+	epoch, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || epoch <= 0 {
+		return ""
+	}
+	return time.Unix(epoch, 0).Local().Format(time.RFC1123)
 }
 
 func validateLoginURL(rawURL string) error {

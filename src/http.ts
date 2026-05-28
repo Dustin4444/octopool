@@ -5,6 +5,7 @@ export class HttpError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    readonly details?: JsonObject,
   ) {
     super(message);
   }
@@ -28,6 +29,7 @@ export function errorResponse(error: unknown, requestId?: string): Response {
           code: error.code,
           message: error.message,
           request_id: requestId,
+          ...(error.details === undefined ? {} : { details: error.details }),
         },
       },
       error.status,
