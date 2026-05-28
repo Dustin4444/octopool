@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Soften the public Homebrew install CTA colors and add a dedicated copy button.
 - Add `/.well-known/octopool` server discovery, self-host login UX (`octopool login [server]` / `--server`), and `octopool whoami`.
 - Split browser hosts so `octopool.openclaw.ai` owns website login through an OpenClaw proxy while `octopool.dev` stays a Homebrew-install landing page.
 

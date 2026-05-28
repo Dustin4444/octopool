@@ -70,6 +70,8 @@ describe("web routing helpers", () => {
       proxyEnv,
     ).text();
     expect(publicHtml).toContain("brew install openclaw/tap/octopool");
+    expect(publicHtml).toContain('class="copy-command"');
+    expect(publicHtml).toContain('aria-label="Copy install command"');
     expect(publicHtml).not.toContain("Sign in with GitHub");
     expect(publicHtml).not.toContain('href="/dashboard"');
 

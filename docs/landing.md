@@ -27,8 +27,8 @@ almost nothing about what Octopool is, and both pages are marked `noindex`.
 
 The page is a single self-contained HTML string: an inline SVG octopus with CSS
 animations (bobbing, swaying tentacles, an anger glow), pointer-tracking eyes/tilt, and a
-click-to-rage shake. It respects `prefers-reduced-motion`. App icon artwork lives in
-`docs/assets/`.
+click-to-rage shake. The public install command includes a dedicated copy button. It
+respects `prefers-reduced-motion`. App icon artwork lives in `docs/assets/`.
 
 ## `GET /login/github`
 

@@ -114,6 +114,60 @@ const LANDING_HTML = `<!doctype html>
   .login svg{flex:0 0 auto}
   .login code{font:700 15px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:inherit;background:transparent}
   .prompt{font:800 17px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:#d61f5c}
+  .install-command{
+    position:relative;
+    z-index:2;
+    display:grid;
+    grid-template-columns:auto minmax(0,1fr) 44px;
+    align-items:center;
+    gap:13px;
+    width:min(742px,calc(100vw - 48px));
+    min-height:72px;
+    padding:13px 14px 13px 22px;
+    border:1px solid rgba(255,255,255,.13);
+    border-radius:18px;
+    background:linear-gradient(180deg,rgba(25,18,29,.88),rgba(9,9,14,.94));
+    color:#f7edf2;
+    box-shadow:0 18px 54px rgba(0,0,0,.52),0 0 38px rgba(255,40,90,.11),inset 0 1px 0 rgba(255,255,255,.08);
+    backdrop-filter:blur(14px);
+  }
+  .install-command code{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font:800 19px/1.15 ui-monospace,SFMono-Regular,Menlo,monospace;
+    color:#fff6fa;
+    background:transparent;
+  }
+  .install-command .prompt{
+    width:20px;
+    color:#ff4d82;
+    text-shadow:0 0 16px rgba(255,40,90,.52);
+  }
+  .copy-command{
+    display:grid;
+    place-items:center;
+    width:44px;
+    height:44px;
+    border:1px solid rgba(255,255,255,.13);
+    border-radius:12px;
+    background:rgba(255,255,255,.07);
+    color:#ffd7e3;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
+    cursor:pointer;
+    transition:background .18s ease,border-color .18s ease,color .18s ease,transform .18s ease,box-shadow .18s ease;
+  }
+  .copy-command:hover{
+    transform:translateY(-1px);
+    border-color:rgba(255,77,130,.42);
+    background:rgba(255,77,130,.14);
+    color:#fff;
+    box-shadow:0 8px 24px rgba(255,40,90,.18),inset 0 1px 0 rgba(255,255,255,.12);
+  }
+  .copy-command:active{transform:translateY(0) scale(.98)}
+  .copy-command[data-copied="true"]{color:#8fffd2;border-color:rgba(143,255,210,.42);background:rgba(143,255,210,.12)}
+  .copy-command svg{width:19px;height:19px}
   .quick-links{
     position:relative;
     z-index:2;
@@ -235,7 +289,10 @@ const LANDING_HTML = `<!doctype html>
       if (copyButton) {
         copyButton.addEventListener("click", function () {
           if (navigator.clipboard) {
-            navigator.clipboard.writeText(copyButton.getAttribute("data-copy") || "").catch(function () {});
+            navigator.clipboard.writeText(copyButton.getAttribute("data-copy") || "").then(function () {
+              copyButton.setAttribute("data-copied", "true");
+              setTimeout(function () { copyButton.removeAttribute("data-copied"); }, 1100);
+            }).catch(function () {});
           }
         });
       }
@@ -251,10 +308,16 @@ const GITHUB_LOGIN_ACTION = `<a class="login" href="/login/github" rel="nofollow
       Sign in with GitHub
     </a>`;
 
-const BREW_INSTALL_ACTION = `<button class="login" type="button" data-copy="${INSTALL_COMMAND}">
+const BREW_INSTALL_ACTION = `<div class="install-command">
       <span class="prompt">$</span>
       <code>${INSTALL_COMMAND}</code>
-    </button>`;
+      <button class="copy-command" type="button" data-copy="${INSTALL_COMMAND}" aria-label="Copy install command" title="Copy">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2"/>
+          <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 10a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>
+        </svg>
+      </button>
+    </div>`;
 
 const APP_LINKS = '<a href="/dashboard">Dashboard</a><a href="https://docs.octopool.dev/">Docs</a>';
 const PUBLIC_LINKS =
