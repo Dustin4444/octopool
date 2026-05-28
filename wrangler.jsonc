@@ -22,6 +22,10 @@
       "pattern": "octopool.dev",
       "custom_domain": true,
     },
+    {
+      "pattern": "octopool.openclaw.ai",
+      "custom_domain": true,
+    },
   ],
   "d1_databases": [
     {

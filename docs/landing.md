@@ -1,8 +1,14 @@
 # Landing Page & GitHub Login
 
-`octopool.dev` serves a deliberately minimal landing page — an animated angry octopus, a
-"Sign in with GitHub" button, a dashboard link, and a docs link — while API clients can
-still request JSON.
+Octopool has two browser hosts on the same Worker and data plane:
+
+- `octopool.openclaw.ai` is the authoritative website. It serves the animated angry
+  octopus, GitHub sign-in, dashboard link, and docs link.
+- `octopool.dev` is the mysterious public/download face. It serves the same angry
+  octopus, but the primary action is `brew install openclaw/tap/octopool`; web login and
+  dashboard paths redirect to `octopool.openclaw.ai`.
+
+API clients can still request JSON from either host.
 
 Source: `src/landing.ts`, `src/index.ts` (`/`, `githubLoginRedirect`).
 
@@ -13,9 +19,9 @@ Source: `src/landing.ts`, `src/index.ts` (`/`, `githubLoginRedirect`).
 - default or `Accept: text/html` → the landing page (`text/html`, `cache-control: public, max-age=300`).
 - explicit `Accept: application/json` without `text/html` → the JSON health response with `cache-control: no-store`.
 
-This keeps the public page friendly for browser and chat-link clients while preserving a
-root health response for explicit JSON probes. The page intentionally says nothing about
-what Octopool is, and is marked `noindex`.
+This keeps the browser pages friendly for chat-link clients while preserving a root health
+response for explicit JSON probes. The public `octopool.dev` page intentionally says
+almost nothing about what Octopool is, and both pages are marked `noindex`.
 
 The page is a single self-contained HTML string: an inline SVG octopus with CSS
 animations (bobbing, swaying tentacles, an anger glow), pointer-tracking eyes/tilt, and a
@@ -24,8 +30,8 @@ click-to-rage shake. It respects `prefers-reduced-motion`. App icon artwork live
 
 ## `GET /login/github`
 
-The sign-in button links here. The Worker creates a short-lived signed OAuth state, mirrors
-it in an `HttpOnly` state cookie, and issues a 302 redirect:
+The authoritative website's sign-in button links here. The Worker creates a short-lived
+signed OAuth state, mirrors it in an `HttpOnly` state cookie, and issues a 302 redirect:
 
 - If `GITHUB_OAUTH_CLIENT_ID` is configured, it redirects to GitHub's OAuth authorize URL
   with `scope=read:org`, `allow_signup=false`, and
@@ -34,6 +40,11 @@ it in an `HttpOnly` state cookie, and issues a 302 redirect:
 
 The `read:org` scope and `allow_signup=false` reflect that Octopool access is gated on
 OpenClaw org membership (see [Auth](auth.md)).
+
+On `octopool.dev`, `/login/github`, `/login/github/callback`, and `/dashboard` redirect
+to `https://octopool.openclaw.ai/...`; `/logout` stays local long enough to clear any
+old host-scoped cookie, then returns to the public page. `octopool.dev` does not issue new
+website sessions, and dashboard JSON endpoints are not served there.
 
 ## `GET /login/github/callback`
 

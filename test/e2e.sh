@@ -12,11 +12,36 @@ fi
 
 root_html="$(curl --resolve "$host:443:$ip" -fsS "https://$host/")"
 printf "%s" "$root_html" | grep -q '<title>octopool</title>'
+if [ "$host" = "octopool.dev" ]; then
+  printf "%s" "$root_html" | grep -q 'brew install openclaw/tap/octopool'
+  if printf "%s" "$root_html" | grep -q 'Sign in with GitHub'; then
+    echo "octopool.dev should not expose website login CTA" >&2
+    exit 1
+  fi
+else
+  printf "%s" "$root_html" | grep -q 'Sign in with GitHub'
+fi
 
 curl --resolve "$host:80:$ip" -sS -o /tmp/octopool-http.txt -D /tmp/octopool-http.headers \
   "http://$host/dashboard"
 grep -q '^HTTP/1.1 308' /tmp/octopool-http.headers
 grep -qi '^location: https://'"$host"'/dashboard' /tmp/octopool-http.headers
+
+dashboard_code="$(
+  curl --resolve "$host:443:$ip" -sS -o /tmp/octopool-dashboard.txt -D /tmp/octopool-dashboard.headers -w "%{http_code}" \
+    "https://$host/dashboard"
+)"
+test "$dashboard_code" = "302"
+if [ "$host" = "octopool.dev" ]; then
+  grep -qi '^location: https://octopool.openclaw.ai/dashboard' /tmp/octopool-dashboard.headers
+  dashboard_api_code="$(
+    curl --resolve "$host:443:$ip" -sS -o /tmp/octopool-dashboard-api.json -w "%{http_code}" \
+      "https://$host/v1/dashboard"
+  )"
+  test "$dashboard_api_code" = "404"
+else
+  grep -qi '^location: https://'"$host"'/login/github?next=%2Fdashboard' /tmp/octopool-dashboard.headers
+fi
 
 curl --resolve "$host:443:$ip" -sS -o /tmp/octopool-https.txt -D /tmp/octopool-https.headers \
   "https://$host/"

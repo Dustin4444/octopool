@@ -6,10 +6,21 @@ import { shouldUseWebError, webErrorResponse } from "../src/web-error";
 
 describe("web routing helpers", () => {
   it("serves the landing page by default and JSON only when requested", async () => {
-    const html = rootResponse(new Request("https://octopool.dev/"), "req-html");
+    const html = rootResponse(new Request("https://octopool.openclaw.ai/"), "req-html");
     expect(html.headers.get("content-type")).toContain("text/html");
     expect(html.headers.get("vary")).toBe("Accept");
-    expect(await html.text()).toContain("<title>octopool</title>");
+    const app = await html.text();
+    expect(app).toContain("<title>octopool</title>");
+    expect(app).toContain("Sign in with GitHub");
+    expect(app).toContain('href="/dashboard"');
+
+    const publicHtml = await rootResponse(
+      new Request("https://octopool.dev/"),
+      "req-public",
+    ).text();
+    expect(publicHtml).toContain("brew install openclaw/tap/octopool");
+    expect(publicHtml).not.toContain("Sign in with GitHub");
+    expect(publicHtml).not.toContain('href="/dashboard"');
 
     const json = rootResponse(
       new Request("https://octopool.dev/", { headers: { accept: "application/json" } }),
@@ -70,7 +81,7 @@ describe("web routing helpers", () => {
     const env = oauthEnv();
     const response = await startGitHubWebLogin(
       env,
-      new URL("https://octopool.dev/login/github?next=/" + "x".repeat(300)),
+      new URL("https://octopool.openclaw.ai/login/github?next=/" + "x".repeat(300)),
     );
 
     expect(response.status).toBe(302);

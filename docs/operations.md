@@ -1,7 +1,8 @@
 # Deployment & Operations
 
 Octopool is a single Cloudflare Worker plus a Durable Object and a D1 database, served on
-the `octopool.dev` custom domain. The Go CLI is a separate binary.
+two custom domains. `octopool.openclaw.ai` is the authoritative website/login host;
+`octopool.dev` is the public install/download host. The Go CLI is a separate binary.
 
 Source: `wrangler.jsonc`, `migrations/`, `package.json`, `test/e2e.sh`.
 
@@ -11,7 +12,7 @@ Source: `wrangler.jsonc`, `migrations/`, `package.json`, `test/e2e.sh`.
 - Durable Object `PoolCoordinator` (binding `POOL_COORDINATOR`, SQLite-backed,
   migration tag `v1`).
 - D1 database `octopool` (binding `DB`).
-- Custom domain route `octopool.dev`.
+- Custom domain routes `octopool.openclaw.ai` and `octopool.dev`.
 
 ## Configuration
 
@@ -79,9 +80,12 @@ first and fails if generated SQL artifacts are stale.
 
 ## Smoke test
 
-`test/e2e.sh` resolves `octopool.dev`, then asserts:
+`test/e2e.sh` resolves `octopool.dev` by default, then asserts:
 
-- `GET /` returns the landing page.
+- `GET /` returns the landing page. On `octopool.dev` it must show the Homebrew install
+  command, not the GitHub login CTA.
+- `GET /dashboard` redirects to the authoritative app host on `octopool.dev`, and to
+  GitHub login on `octopool.openclaw.ai`.
 - `GET /` with `Accept: application/json` returns the JSON health body (`"ok":true`, `"service":"octopool"`).
 - `GET /v1/pools/maintainers/health` without a token returns `401 missing_auth`.
 - `POST /v1/github/request` without a token returns `401 missing_auth`.

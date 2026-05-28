@@ -22,7 +22,7 @@ import {
   requireString,
   routeParam,
 } from "./http";
-import { rootResponse } from "./landing";
+import { APP_ORIGIN, isPublicHost, rootResponse } from "./landing";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import { PoolCoordinator } from "./pool-coordinator";
 import { ensurePublicGitHubRepo } from "./public-repos";
@@ -68,6 +68,16 @@ async function routeRequest(
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/") {
     return rootResponse(request, requestId);
+  }
+  const webHostRedirect = publicWebHostRedirect(url);
+  if (webHostRedirect !== undefined) {
+    return webHostRedirect;
+  }
+  if (
+    isPublicHost(url.hostname) &&
+    (url.pathname === "/v1/me" || url.pathname === "/v1/dashboard")
+  ) {
+    throw new HttpError(404, "not_found", "Route not found");
   }
   if (request.method === "GET" && url.pathname === "/login/github") {
     return startGitHubWebLogin(env, url);
@@ -127,6 +137,19 @@ async function routeRequest(
     return upsertIdentity(request, env, pool);
   }
   throw new HttpError(404, "not_found", "Route not found");
+}
+
+function publicWebHostRedirect(url: URL): Response | undefined {
+  if (!isPublicHost(url.hostname)) {
+    return undefined;
+  }
+  if (url.pathname === "/login/github/callback") {
+    return Response.redirect(`${APP_ORIGIN}/login/github?next=/dashboard`, 302);
+  }
+  if (url.pathname === "/login/github" || url.pathname === "/dashboard") {
+    return Response.redirect(`${APP_ORIGIN}${url.pathname}${url.search}`, 302);
+  }
+  return undefined;
 }
 
 async function dashboardData(request: Request, env: Env): Promise<Response> {

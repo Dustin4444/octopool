@@ -1,8 +1,14 @@
 import { jsonResponse } from "./http";
 import { wantsJson } from "./web-error";
 
-// Public landing page for octopool.dev. Intentionally says nothing about what
-// octopool is: just an angry octopus and a single GitHub sign-in button.
+export const APP_HOST = "octopool.openclaw.ai";
+export const APP_ORIGIN = `https://${APP_HOST}`;
+export const PUBLIC_HOST = "octopool.dev";
+
+const INSTALL_COMMAND = "brew install openclaw/tap/octopool";
+
+// Host-aware landing page: octopool.openclaw.ai is the app/login site;
+// octopool.dev stays mysterious and points at the Homebrew install.
 
 const LANDING_HTML = `<!doctype html>
 <html lang="en">
@@ -95,6 +101,7 @@ const LANDING_HTML = `<!doctype html>
     gap:11px;
     padding:14px 24px;
     border-radius:13px;
+    border:0;
     background:#fff;
     color:#0a0a0f;
     font-size:16px;
@@ -103,10 +110,13 @@ const LANDING_HTML = `<!doctype html>
     letter-spacing:-.01em;
     box-shadow:0 8px 30px rgba(0,0,0,.5);
     transition:transform .18s ease,box-shadow .18s ease;
+    cursor:pointer;
   }
   .login:hover{transform:translateY(-2px) scale(1.02);box-shadow:0 12px 40px rgba(255,40,90,.35)}
   .login:active{transform:translateY(0) scale(.99)}
   .login svg{flex:0 0 auto}
+  .login code{font:700 15px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:inherit;background:transparent}
+  .prompt{font:800 17px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:#d61f5c}
   .quick-links{
     position:relative;
     z-index:2;
@@ -196,16 +206,8 @@ const LANDING_HTML = `<!doctype html>
         </svg>
       </div>
     </div>
-    <a class="login" href="/login/github" rel="nofollow">
-      <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true">
-        <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
-      </svg>
-      Sign in with GitHub
-    </a>
-    <div class="quick-links">
-      <a href="/dashboard">Dashboard</a>
-      <a href="https://docs.octopool.dev/">Docs</a>
-    </div>
+    {{ACTION}}
+    <div class="quick-links">{{QUICK_LINKS}}</div>
     <div class="brand">octopool</div>
   </main>
   <script>
@@ -232,13 +234,42 @@ const LANDING_HTML = `<!doctype html>
         void octo.offsetWidth;
         octo.classList.add("rage");
       });
+      var copyButton = document.querySelector("[data-copy]");
+      if (copyButton) {
+        copyButton.addEventListener("click", function () {
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(copyButton.getAttribute("data-copy") || "").catch(function () {});
+          }
+        });
+      }
     })();
   </script>
 </body>
 </html>`;
 
-export function landingResponse(): Response {
-  return new Response(LANDING_HTML, {
+const GITHUB_LOGIN_ACTION = `<a class="login" href="/login/github" rel="nofollow">
+      <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true">
+        <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+      </svg>
+      Sign in with GitHub
+    </a>`;
+
+const BREW_INSTALL_ACTION = `<button class="login" type="button" data-copy="${INSTALL_COMMAND}">
+      <span class="prompt">$</span>
+      <code>${INSTALL_COMMAND}</code>
+    </button>`;
+
+const APP_LINKS = '<a href="/dashboard">Dashboard</a><a href="https://docs.octopool.dev/">Docs</a>';
+const PUBLIC_LINKS =
+  '<a href="https://docs.octopool.dev/">Docs</a><a href="https://github.com/openclaw/octopool">GitHub</a>';
+
+export function isPublicHost(hostname: string): boolean {
+  return hostname.toLowerCase() === PUBLIC_HOST;
+}
+
+export function landingResponse(request: Request): Response {
+  const appSite = !isPublicHost(new URL(request.url).hostname);
+  return new Response(landingHTML(appSite), {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "public, max-age=300",
@@ -253,5 +284,14 @@ export function rootResponse(request: Request, requestId: string): Response {
       vary: "Accept",
     });
   }
-  return landingResponse();
+  return landingResponse(request);
+}
+
+function landingHTML(appSite: boolean): string {
+  return LANDING_HTML.replace("{{ACTION}}", appSite ? GITHUB_LOGIN_ACTION : BREW_INSTALL_ACTION)
+    .replace("{{QUICK_LINKS}}", appSite ? APP_LINKS : PUBLIC_LINKS)
+    .replace(
+      '<meta property="og:url" content="https://octopool.dev/">',
+      `<meta property="og:url" content="${appSite ? APP_ORIGIN : "https://octopool.dev"}/">`,
+    );
 }

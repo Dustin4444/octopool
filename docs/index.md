@@ -17,7 +17,8 @@ caching, and safety policy centrally.
 - [Auth & org membership](auth.md) — caller auth, admin auth, website sessions, and the
   GitHub-CLI login exchange.
 - [Admin & provisioning](admin.md) — registering callers and identities.
-- [Landing page & GitHub login](landing.md) — `octopool.dev` and the OAuth entry.
+- [Landing page & GitHub login](landing.md) — `octopool.openclaw.ai`, `octopool.dev`,
+  and the OAuth entry.
 - [Dashboard](dashboard.md) — GitHub-login-gated limits, cache, identity, and caller usage
   views.
 - [Deployment & operations](operations.md) — Cloudflare resources, config, migrations,

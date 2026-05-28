@@ -1,6 +1,7 @@
 # Dashboard
 
-`/dashboard` is the browser view for Octopool operators.
+`/dashboard` is the browser view for Octopool operators. The authoritative browser host is
+`https://octopool.openclaw.ai`; `https://octopool.dev/dashboard` redirects there.
 
 Source: `src/dashboard.ts`, `src/index.ts` (`dashboardData`), `src/web-session.ts`.
 
