@@ -5,6 +5,7 @@
 ### Fixes
 
 - Add pnpm build-script approvals for esbuild, sharp, and workerd so `pnpm test` and `pnpm check` run without generating placeholder approval config.
+- Retry public-repository proof without the verifier token when the verifier is rate-limited, so safe `gh pr`, `gh issue`, and `gh run` reads can still route through Octopool.
 
 ## 0.2.3 - 2026-05-28
 

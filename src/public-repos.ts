@@ -23,20 +23,22 @@ export async function ensurePublicGitHubRepo(
   ) {
     return;
   }
-  const response = await fetch(
-    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
-    {
-      headers: publicRepoCheckHeaders(env),
-      signal: AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000)),
-    },
-  );
+  let response = await fetchPublicRepoProof(env, owner, repo, true);
+  let historicalProofEligibleResponse: Response | undefined;
+  if (!response.ok && publicCheckMayRetryUnauthenticated(response)) {
+    if (publicCheckMayUseHistoricalProof(response)) {
+      historicalProofEligibleResponse = response;
+    }
+    response = await fetchPublicRepoProof(env, owner, repo, false);
+  }
   if (response.status === 404) {
     throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
   }
   if (!response.ok) {
     if (
       cacheCreatedAt !== undefined &&
-      publicCheckMayUseHistoricalProof(response) &&
+      (publicCheckMayUseHistoricalProof(response) ||
+        historicalProofEligibleResponse !== undefined) &&
       (await cachedPublicGitHubRepoCovers(env, route, cacheCreatedAt))
     ) {
       return;
@@ -60,22 +62,45 @@ export async function ensurePublicGitHubRepo(
     .run();
 }
 
-function publicRepoCheckHeaders(env: Env): Record<string, string> {
+function fetchPublicRepoProof(
+  env: Env,
+  owner: string,
+  repo: string,
+  authenticated: boolean,
+): Promise<Response> {
+  return fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+    {
+      headers: publicRepoCheckHeaders(env, authenticated),
+      signal: AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000)),
+    },
+  );
+}
+
+function publicRepoCheckHeaders(env: Env, authenticated: boolean): Record<string, string> {
   const headers: Record<string, string> = {
     accept: "application/vnd.github+json",
     "user-agent": "octopool",
     "x-github-api-version": "2022-11-28",
   };
   const token = envSecret(env, "OCTOPOOL_GITHUB_ORG_TOKEN");
-  if (token !== undefined && token.trim() !== "") {
+  if (authenticated && token !== undefined && token.trim() !== "") {
     headers.authorization = `Bearer ${token}`;
   }
   return headers;
 }
 
+function publicCheckMayRetryUnauthenticated(response: Response): boolean {
+  return response.status === 401 || publicCheckMayUseHistoricalProof(response);
+}
+
 function publicCheckMayUseHistoricalProof(response: Response): boolean {
   const remaining = response.headers.get("x-ratelimit-remaining");
-  return response.status >= 500 || (response.status === 403 && remaining === "0");
+  return (
+    response.status >= 500 ||
+    response.status === 429 ||
+    (response.status === 403 && remaining === "0")
+  );
 }
 
 async function cachedPublicGitHubRepoCovers(

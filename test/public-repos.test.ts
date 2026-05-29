@@ -25,6 +25,43 @@ describe("public repo guard", () => {
     });
   });
 
+  it("retries public checks without the verifier token when the verifier is depleted", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "rate limited" }), {
+          status: 403,
+          headers: { "x-ratelimit-remaining": "0" },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ private: false }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await ensurePublicGitHubRepo(env(), route());
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, firstInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const [, secondInit] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(firstInit.headers).toMatchObject({ authorization: "Bearer verifier-token" });
+    expect(secondInit.headers).not.toHaveProperty("authorization");
+  });
+
+  it("retries public checks without the verifier token after 429 rate limits", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "rate limited" }), { status: 429 }),
+      )
+      .mockResolvedValueOnce(Response.json({ private: false }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await ensurePublicGitHubRepo(env(), route());
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, secondInit] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(secondInit.headers).not.toHaveProperty("authorization");
+  });
+
   it("does not cache token-visible private repositories", async () => {
     vi.stubGlobal(
       "fetch",
@@ -77,6 +114,33 @@ describe("public repo guard", () => {
     );
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps historical proof fallback when unauthenticated retry also fails", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "rate limited" }), {
+          status: 403,
+          headers: { "x-ratelimit-remaining": "0" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "abuse limited" }), { status: 429 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const first = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ "1": 1 });
+    const run = vi.fn(async () => ({}));
+    const bind = vi.fn(() => ({ first, run }));
+    const prepare = vi.fn(() => ({ bind }));
+
+    await ensurePublicGitHubRepo(
+      { ...env(), DB: { prepare } } as unknown as Env,
+      route(),
+      "2026-05-28 00:00:00",
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
