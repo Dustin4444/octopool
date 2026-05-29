@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -159,4 +160,117 @@ func TestNormalizeLoginArgsAllowsFlagsAfterServer(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("normalizeLoginArgs() = %#v", got)
 	}
+}
+
+func TestResolveGHPathSkipsOctopoolWrapper(t *testing.T) {
+	dir := t.TempDir()
+	wrapper := filepath.Join(dir, "gh")
+	realDir := filepath.Join(dir, "real")
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realGH := filepath.Join(realDir, "gh")
+	self := filepath.Join(dir, "octopool")
+	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nexec octopool gh \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(realGH, []byte("#!/bin/sh\necho gh version\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(self, []byte("octopool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveGHPathFrom(
+		"gh",
+		self,
+		ghPathCandidates(dir+string(os.PathListSeparator)+realDir, nil),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != realGH {
+		t.Fatalf("resolveGHPathFrom() = %q, want %q", got, realGH)
+	}
+}
+
+func TestResolveGHPathSkipsOctopoolSymlink(t *testing.T) {
+	dir := t.TempDir()
+	wrapperDir := filepath.Join(dir, "wrapper")
+	realDir := filepath.Join(dir, "real")
+	if err := os.Mkdir(wrapperDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	octopoolBinary := filepath.Join(dir, "octopool")
+	if err := os.WriteFile(octopoolBinary, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(octopoolBinary, filepath.Join(wrapperDir, "gh")); err != nil {
+		t.Fatal(err)
+	}
+	realGH := filepath.Join(realDir, "gh")
+	if err := os.WriteFile(realGH, []byte("#!/bin/sh\necho gh version\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveGHPathFrom(
+		"gh",
+		filepath.Join(dir, "current-octopool"),
+		ghPathCandidates(wrapperDir+string(os.PathListSeparator)+realDir, nil),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != realGH {
+		t.Fatalf("resolveGHPathFrom() = %q, want %q", got, realGH)
+	}
+}
+
+func TestResolveGHPathSkipsInvalidCandidates(t *testing.T) {
+	dir := t.TempDir()
+	nonExecutableDir := filepath.Join(dir, "nonexec")
+	realDir := filepath.Join(dir, "real")
+	if err := os.Mkdir(nonExecutableDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nonExecutableDir, "gh"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	realGH := filepath.Join(realDir, "gh")
+	if err := os.WriteFile(realGH, []byte("#!/bin/sh\necho gh version\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates := ghPathCandidates(
+		"relative-bin"+string(os.PathListSeparator)+nonExecutableDir+string(os.PathListSeparator)+realDir,
+		nil,
+	)
+	for _, candidate := range candidates {
+		if !filepath.IsAbs(candidate) {
+			t.Fatalf("relative candidate was included: %q", candidate)
+		}
+	}
+	got, err := resolveGHPathFrom("gh", filepath.Join(dir, "octopool"), candidates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != realGH {
+		t.Fatalf("resolveGHPathFrom() = %q, want %q", got, realGH)
+	}
+}
+
+func TestGHPathCandidatesIncludesWindowsExtensions(t *testing.T) {
+	names := ghExecutableNames("windows", ".COM;.EXE;.BAT;.CMD")
+	for _, name := range names {
+		if name == "gh.exe" {
+			return
+		}
+	}
+	t.Fatalf("expected gh.exe in names %#v", names)
 }

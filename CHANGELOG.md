@@ -2,6 +2,10 @@
 
 ## 0.2.5 - Unreleased
 
+### Fixes
+
+- Skip Octopool-backed `gh` wrapper scripts when falling back to the real GitHub CLI, avoiding duplicate fallback attempts and warnings.
+
 ## 0.2.4 - 2026-05-29
 
 ### Fixes

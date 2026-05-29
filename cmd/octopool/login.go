@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -273,22 +274,116 @@ func localGitHubToken(ctx context.Context, ghPath string) (string, error) {
 }
 
 func resolveGHPath(configured string) (string, error) {
+	self, _ := os.Executable()
+	return resolveGHPathFrom(configured, self, ghPathCandidates(os.Getenv("PATH"), defaultGHCandidates()))
+}
+
+func defaultGHCandidates() []string {
+	return []string{
+		"/opt/homebrew/opt/gh/bin/gh",
+		"/opt/homebrew/bin/gh",
+		"/usr/local/bin/gh",
+		"/usr/bin/gh",
+	}
+}
+
+func ghPathCandidates(pathEnv string, fallback []string) []string {
+	return ghPathCandidatesFor(pathEnv, fallback, runtime.GOOS, os.Getenv("PATHEXT"))
+}
+
+func ghPathCandidatesFor(pathEnv string, fallback []string, goos string, pathExt string) []string {
+	seen := map[string]struct{}{}
+	candidates := []string{}
+	add := func(path string) {
+		if path == "" {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		candidates = append(candidates, path)
+	}
+	names := ghExecutableNames(goos, pathExt)
+	for _, dir := range filepath.SplitList(pathEnv) {
+		if !filepath.IsAbs(dir) {
+			continue
+		}
+		for _, name := range names {
+			add(filepath.Join(dir, name))
+		}
+	}
+	for _, path := range fallback {
+		add(path)
+	}
+	return candidates
+}
+
+func ghExecutableNames(goos string, pathExt string) []string {
+	if goos != "windows" {
+		return []string{"gh"}
+	}
+	names := []string{"gh"}
+	extensions := strings.FieldsFunc(pathExt, func(r rune) bool {
+		return r == ';' || r == ':'
+	})
+	if len(extensions) == 0 || strings.TrimSpace(pathExt) == "" {
+		extensions = []string{".COM", ".EXE", ".BAT", ".CMD"}
+	}
+	for _, extension := range extensions {
+		extension = strings.TrimSpace(extension)
+		if extension == "" {
+			continue
+		}
+		if !strings.HasPrefix(extension, ".") {
+			extension = "." + extension
+		}
+		names = append(names, "gh"+strings.ToLower(extension))
+	}
+	return names
+}
+
+func resolveGHPathFrom(configured string, self string, candidates []string) (string, error) {
 	if configured != "" && configured != "gh" {
 		return configured, nil
 	}
-	self, _ := os.Executable()
-	path, err := exec.LookPath("gh")
-	if err == nil && !samePath(path, self) {
-		return path, nil
-	}
-	for _, candidate := range []string{"/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"} {
-		if !samePath(candidate, self) {
-			if _, statErr := os.Stat(candidate); statErr == nil {
-				return candidate, nil
-			}
+	for _, candidate := range candidates {
+		if usableGHPath(candidate, self) {
+			return candidate, nil
 		}
 	}
 	return "", errors.New("real gh not found; set OCTOPOOL_GH_PATH or install GitHub CLI")
+}
+
+func usableGHPath(path string, self string) bool {
+	if !filepath.IsAbs(path) {
+		return false
+	}
+	if samePath(path, self) {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+		return false
+	}
+	return !octopoolGHWrapper(path)
+}
+
+func octopoolGHWrapper(path string) bool {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		base := filepath.Base(resolved)
+		if base == "octopool" || base == "octopool-gh" {
+			return true
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 || len(data) > 8192 {
+		return false
+	}
+	return strings.Contains(string(data), "octopool gh")
 }
 
 func samePath(left string, right string) bool {
