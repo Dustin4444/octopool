@@ -7,6 +7,8 @@ describe("route policy", () => {
   it("allows priority OpenClaw PR and CI routes", () => {
     const routes = [
       "/repos/openclaw/openclaw",
+      "/repos/openclaw/openclaw/contents/README.md",
+      "/repos/openclaw/openclaw/compare/main...feature",
       "/repos/openclaw/openclaw/pulls?state=open",
       "/repos/openclaw/openclaw/issues?state=open",
       "/repos/openclaw/openclaw/pulls/85341",
@@ -31,13 +33,27 @@ describe("route policy", () => {
     }
   });
 
-  it("denies non-OpenClaw owners by default", () => {
+  it("allows non-OpenClaw public repo candidates by default", () => {
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
       path: "/repos/steipete/CodexBar/pulls/1",
     });
-    expect(() => classifyRoute(request, policy)).toThrow(/not allowed/);
+    expect(classifyRoute(request, policy)).toMatchObject({
+      owner: "steipete",
+      publicOnly: true,
+    });
+  });
+
+  it("denies non-OpenClaw owners when public pooling is disabled", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/steipete/CodexBar/pulls/1",
+    });
+    expect(() => classifyRoute(request, { ...policy, allow_public_repos: false })).toThrow(
+      /not allowed/,
+    );
   });
 
   it("denies mutations", () => {
@@ -100,5 +116,23 @@ describe("route policy", () => {
     expect(() => classifyRoute(request, { ...policy, allow_search: true })).toThrow(
       /Route is not enabled/,
     );
+  });
+
+  it("denies cross-repository compare refs", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/compare/main...steipete:feature",
+    });
+    expect(() => classifyRoute(request, policy)).toThrow(/Cross-repository compare/);
+  });
+
+  it("denies encoded cross-repository compare refs", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/compare/main...steipete%3Afeature",
+    });
+    expect(() => classifyRoute(request, policy)).toThrow(/Cross-repository compare/);
   });
 });

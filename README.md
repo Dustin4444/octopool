@@ -25,6 +25,7 @@ Octopool moves that traffic off individual machines and onto Cloudflare:
 - **One pool, one cache.** PATs and GitHub App private keys live as Cloudflare Worker secrets, not on laptops or in CI logs. The Worker routes each cache miss to one healthy identity and writes the result into a D1 read-through cache that every other caller hits next.
 - **Rate budgets add up.** Each identity keeps its own GitHub rate-limit bucket. Five PATs + one GitHub App ≈ five-plus-one combined headroom. A per-pool Durable Object picks the identity with the most remaining budget for the target resource and holds a short sticky lease so concurrent callers don't stampede the same one.
 - **Cache hits cost zero GitHub quota.** Fresh D1 hits return straight from Cloudflare without touching GitHub at all. Repeated maintainer reads stop consuming any pooled identity's budget.
+- **Public web reads spend no API quota.** Public PR diffs, commit/compare diff and patch media, and explicit-ref content files use GitHub's token-free web/raw endpoints before Octopool spends a pooled PAT or App token.
 - **Tokens stay server-side.** Callers authenticate to octopool with a short caller token (issued in exchange for their `gh auth token`). The underlying PATs and App private keys never leave the Worker — not into responses, not into audit rows, not into the cache.
 - **Org-gated, public-repo only.** Only verified members of one GitHub org can mint a caller token, and every repo route is checked against GitHub's public-visibility endpoint before a pooled identity or cache entry is used. Private-repo callers fall back to their own `gh`.
 - **Fails open to real `gh`.** The CLI is a drop-in `gh` shim. Safe read-shaped calls try Octopool first, so the server owns cache, app/PAT routing, and pool policy. Mutations and secret-bearing requests stay local; safe reads run your real `gh` only when Octopool explicitly returns `fallback_local`.
@@ -42,6 +43,7 @@ If you're not running a maintainer team and you don't care about GitHub rate lim
                                     ├── public-repo guard ─────────────▶ GET /repos/:o/:r
                                     ├── D1 cache lookup ─── hit ───────▶ return cached
                                     │                       miss
+                                    ├── web/raw fast path ─────────────▶ github.com / raw.githubusercontent.com
                                     ├── PoolCoordinator (Durable Object)
                                     │     picks one identity ──────────▶ GET /repos/.../pulls/N
                                     │     records rate + cooldowns       with pooled PAT/App token
@@ -107,7 +109,7 @@ Edit `wrangler.jsonc` for your account:
 
 - `account_id` — your Cloudflare account id.
 - `vars.ALLOWED_GITHUB_ORG` — the GitHub org whose members may mint caller tokens.
-- `vars.DEFAULT_ALLOWED_OWNERS` — comma-separated GitHub owners (orgs/users) whose repos this pool may read.
+- `vars.DEFAULT_ALLOWED_OWNERS` — comma-separated GitHub owners (orgs/users) with scoped identity routing. Other public repositories are allowed by the public-repo guard.
 - `vars.GITHUB_OAUTH_CLIENT_ID` — the OAuth client id of your GitHub App (for browser sign-in).
 - `vars.GITHUB_OAUTH_CALLBACK_ORIGIN` — optional HTTPS origin registered as the GitHub OAuth callback when browser sign-in starts on a different host.
 - `routes[]` — the custom domain you want octopool served on.
@@ -165,6 +167,13 @@ octopool admin identity \
   --secret-ref OCTOPOOL_PAT_ALICE \
   --scope your-org
 
+# Optional: let one PAT serve cache misses for any public repo after public proof:
+octopool admin identity \
+  --pool maintainers \
+  --id pat_public --login alice \
+  --secret-ref OCTOPOOL_PAT_ALICE \
+  --scope '*'
+
 # Or a GitHub App identity (PKCS#8 private key under secret-ref):
 octopool admin identity \
   --pool maintainers \
@@ -174,7 +183,7 @@ octopool admin identity \
   --scope your-org/core
 ```
 
-The first reference to a pool by name (here, `maintainers`) creates it with the default policy (owners = `DEFAULT_ALLOWED_OWNERS`, `allow_search: false`, `allow_logs: true`). Teammates can now `octopool login https://octopool.your-org.dev` and start using the relay; the identities you registered take turns serving cache misses.
+The first reference to a pool by name (here, `maintainers`) creates it with the default policy (owners = `DEFAULT_ALLOWED_OWNERS`, `allow_public_repos: true`, `allow_search: false`, `allow_logs: true`). Teammates can now `octopool login https://octopool.your-org.dev` and start using the relay; the identities you registered take turns serving cache misses.
 
 ### 6. Verify
 

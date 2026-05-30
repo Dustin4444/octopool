@@ -68,7 +68,7 @@ export async function writeGitHubCache(
   request: RelayRequest,
   route: RouteInfo,
   response: GitHubRelayResponse,
-  identity: Identity,
+  identity?: Identity,
 ): Promise<void> {
   if (response.status !== 200) {
     return;
@@ -89,8 +89,8 @@ export async function writeGitHubCache(
       JSON.stringify(response.headers),
       JSON.stringify(response.body),
       response.body_encoding ?? "json",
-      identity.id,
-      identity.kind,
+      identity?.id ?? null,
+      identity?.kind ?? null,
       expiresAt,
     )
     .run();

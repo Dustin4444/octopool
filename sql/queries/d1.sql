@@ -41,6 +41,16 @@ WHERE identities.pool_id = ?1
     OR identity_scopes.repo IS NULL
   );
 
+-- name: ListActivePublicIdentitiesForPool :many
+SELECT DISTINCT identities.id, identities.kind, identities.login, identities.secret_ref, identities.installation_id, identities.weight
+FROM identities
+JOIN identity_scopes ON identity_scopes.identity_id = identities.id
+WHERE identities.pool_id = ?1
+  AND identities.status = 'active'
+  AND identities.kind = 'pat'
+  AND identity_scopes.owner = '*'
+  AND identity_scopes.repo IS NULL;
+
 -- name: InsertAudit :exec
 INSERT INTO audit_events
   (request_id, caller_id, pool_id, route_key, route_kind, identity_id, status, error_code, duration_ms, cache_status, cacheable)

@@ -35,6 +35,8 @@ export const queries = {
     "SELECT id, kind, login, secret_ref, installation_id, weight\nFROM identities\nWHERE pool_id = ?1\n  AND status = 'active'",
   listActiveIdentitiesForRoute:
     "SELECT DISTINCT identities.id, identities.kind, identities.login, identities.secret_ref, identities.installation_id, identities.weight\nFROM identities\nJOIN identity_scopes ON identity_scopes.identity_id = identities.id\nWHERE identities.pool_id = ?1\n  AND identities.status = 'active'\n  AND lower(identity_scopes.owner) = lower(?2)\n  AND (\n    lower(identity_scopes.repo) = lower(?3)\n    OR identity_scopes.repo IS NULL\n  )",
+  listActivePublicIdentitiesForPool:
+    "SELECT DISTINCT identities.id, identities.kind, identities.login, identities.secret_ref, identities.installation_id, identities.weight\nFROM identities\nJOIN identity_scopes ON identity_scopes.identity_id = identities.id\nWHERE identities.pool_id = ?1\n  AND identities.status = 'active'\n  AND identities.kind = 'pat'\n  AND identity_scopes.owner = '*'\n  AND identity_scopes.repo IS NULL",
   insertAudit:
     "INSERT INTO audit_events\n  (request_id, caller_id, pool_id, route_key, route_kind, identity_id, status, error_code, duration_ms, cache_status, cacheable)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
   readGitHubCache:

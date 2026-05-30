@@ -34,8 +34,8 @@ Edit `wrangler.jsonc`:
 
 - `account_id` — your Cloudflare account id.
 - `vars.ALLOWED_GITHUB_ORG` — the GitHub org whose members may mint caller tokens.
-- `vars.DEFAULT_ALLOWED_OWNERS` — comma-separated GitHub owners (orgs/users) whose repos
-  the default pool may read.
+- `vars.DEFAULT_ALLOWED_OWNERS` — comma-separated GitHub owners (orgs/users) with scoped
+  identity routing. Other public repositories are allowed by the public-repo guard.
 - `vars.GITHUB_OAUTH_CLIENT_ID` — OAuth client id of your GitHub App, used for browser
   sign-in. Pair with the `GITHUB_OAUTH_CLIENT_SECRET` secret below.
 - `vars.GITHUB_OAUTH_CALLBACK_ORIGIN` — optional HTTPS origin registered as the GitHub
@@ -99,6 +99,13 @@ octopool admin identity \
   --id pat_alice --login alice \
   --secret-ref OCTOPOOL_PAT_ALICE \
   --scope your-org
+
+# Optional broad public-repo PAT identity:
+octopool admin identity \
+  --pool maintainers \
+  --id pat_public --login alice \
+  --secret-ref OCTOPOOL_PAT_ALICE \
+  --scope '*'
 ```
 
 The first reference to a pool by name (here, `maintainers`) creates it with the default
@@ -133,7 +140,7 @@ octopool stats
 Plain vars (in `wrangler.jsonc`):
 
 - `ALLOWED_GITHUB_ORG` — the only GitHub org that can mint caller tokens.
-- `DEFAULT_ALLOWED_OWNERS` — comma-separated owners served by the default pool policy.
+- `DEFAULT_ALLOWED_OWNERS` — comma-separated owners served by scoped identity routing.
 - `MAX_RESPONSE_BYTES` — 2 MiB default; large-payload routes use this cap.
 - `REQUEST_TIMEOUT_MS` — 15s default.
 - `ORG_VERIFY_TTL_SECONDS` — 24h default; how long an org-membership verification stays

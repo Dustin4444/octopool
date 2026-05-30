@@ -10,7 +10,8 @@ Source: `src/cache.ts`, `src/public-repos.ts`, migrations `0002`/`0003`.
 
 On a cacheable route the relay computes a stable cache key, checks
 `github_cache_entries`, and serves a fresh hit without touching GitHub. On a miss it
-performs the GitHub call and writes the result back.
+first tries a token-free public web/raw endpoint when one can produce the same shape,
+then falls through to a pooled GitHub API identity and writes the result back.
 
 ### Cache key
 
@@ -35,6 +36,21 @@ Only `200` responses on cacheable routes are stored. The cache is **bypassed** w
 - the route is a log route, large-payload route, or `rate_limit`, or
 - the request carries a conditional header (`if-none-match` / `if-modified-since`).
 
+### Token-free web reads
+
+After the public-repo guard passes and before a pooled identity is selected, Octopool
+serves these public shapes through GitHub web/raw endpoints:
+
+- PR diff/patch media requests (`gh pr diff`, or `GET /pulls/{number}` with a diff or
+  patch `Accept` header) via `github.com/{owner}/{repo}/pull/{number}.diff|patch`
+- commit diff/patch media requests via `github.com/{owner}/{repo}/commit/{sha}.diff|patch`
+- compare diff/patch media requests via `github.com/{owner}/{repo}/compare/{base...head}.diff|patch`
+- explicit-ref contents reads via `raw.githubusercontent.com`, returned as an
+  API-shaped JSON file payload
+
+Successful web reads are cached in the same D1 table with no source identity. A cached
+web hit still re-checks that public proof covers the entry before returning it.
+
 ### TTLs
 
 Per route kind and response state (`cacheTTLSeconds`):
@@ -52,8 +68,8 @@ Per route kind and response state (`cacheTTLSeconds`):
 
 A hit is only served if:
 
-- the source identity recorded on the entry is still an active candidate for the route,
-  and
+- the source identity recorded on the entry is still an active candidate for the route
+  (web-origin entries have no identity), and
 - the repo's public-visibility proof still covers the entry (re-checked, with a small
   historical-proof allowance during GitHub outages / secondary-rate-limit — see below).
 

@@ -21,6 +21,8 @@ const rules: RouteRule[] = [
   route(`/repos/${owner}/${repo}`, "repo_view", "core"),
   route(`/repos/${owner}/${repo}/commits`, "commit_list", "core"),
   route(`/repos/${owner}/${repo}/commits/${sha}`, "commit_view", "core"),
+  route(`/repos/${owner}/${repo}/compare/(?<compare>[^/?#]+)`, "compare", "core"),
+  route(`/repos/${owner}/${repo}/contents/(?<contentPath>.+)`, "contents", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}`, "pr_view", "core"),
   route(`/repos/${owner}/${repo}/pulls`, "pr_list", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}/files`, "pr_files", "core"),
@@ -74,6 +76,7 @@ export function defaultPolicy(owners: string): PoolPolicy {
       .split(",")
       .map((item) => item.trim().toLowerCase())
       .filter((item) => item !== ""),
+    allow_public_repos: true,
     allow_search: false,
     allow_logs: true,
   };
@@ -92,6 +95,10 @@ export function parsePolicy(raw: string, fallbackOwners: string): PoolPolicy {
             .filter((item): item is string => typeof item === "string")
             .map((item) => item.toLowerCase())
         : fallback.allowed_owners,
+      allow_public_repos:
+        typeof value.allow_public_repos === "boolean"
+          ? value.allow_public_repos
+          : fallback.allow_public_repos,
       allow_search:
         typeof value.allow_search === "boolean" ? value.allow_search : fallback.allow_search,
       allow_logs: typeof value.allow_logs === "boolean" ? value.allow_logs : fallback.allow_logs,
@@ -115,8 +122,7 @@ export function validateRelayRequest(value: unknown): RelayRequest {
     path.includes("\\") ||
     path.includes("?") ||
     path.includes("#") ||
-    path.includes("..") ||
-    /(^|\/)\.(\/|$)/.test(path) ||
+    /(^|\/)\.{1,2}(\/|$)/.test(path) ||
     lowerPath.includes("%2e") ||
     lowerPath.includes("%5c")
   ) {
@@ -153,8 +159,21 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
     if (rule.logs === true && !policy.allow_logs) {
       throw new HttpError(403, "logs_denied", "Log routes are disabled for this pool");
     }
+    if (rule.kind === "compare") {
+      const compareRef = match.groups?.compare;
+      let decodedCompareRef = compareRef;
+      try {
+        decodedCompareRef = compareRef === undefined ? undefined : decodeURIComponent(compareRef);
+      } catch {
+        throw new HttpError(400, "invalid_path", "Path must be a valid GitHub API path");
+      }
+      if (decodedCompareRef?.includes(":") === true) {
+        throw new HttpError(403, "route_denied", "Cross-repository compare routes are not enabled");
+      }
+    }
     const routeOwner = match.groups?.owner?.toLowerCase();
-    if (routeOwner !== undefined && !policy.allowed_owners.includes(routeOwner)) {
+    const allowedOwner = routeOwner === undefined || policy.allowed_owners.includes(routeOwner);
+    if (routeOwner !== undefined && !allowedOwner && !policy.allow_public_repos) {
       throw new HttpError(403, "owner_denied", `Owner ${routeOwner} is not allowed for this pool`);
     }
     const routeRepo = match.groups?.repo;
@@ -162,6 +181,7 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
       kind: rule.kind,
       resource: rule.resource,
       routeKey: normalizeRouteKey(request.method, request.path),
+      publicOnly: !allowedOwner,
       cacheable: rule.cacheable,
       largePayload: rule.largePayload === true,
       logs: rule.logs === true,

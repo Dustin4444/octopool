@@ -82,6 +82,8 @@ traversal (`%2e`, `%5c`). The relay only ever talks to `api.github.com`.
 - Release routes are not relayed because authenticated draft visibility changes
   list, lookup, and not-found semantics.
 - `cache` is `hit`, `miss`, or `bypass` (route not cacheable).
+- `backend` is present as `web` when a cache miss or identity-less cache hit was served by a
+  token-free GitHub web/raw endpoint instead of a pooled API identity.
 - `lease_reason` is `sticky`, `highest_remaining`, or `fallback` — see
   [Identities & routing](identities.md).
 
@@ -92,7 +94,7 @@ enabled; anything else returns `403 route_denied`:
 
 - `pr_view`, `pr_files`, `pr_review_comments`, `pr_reviews`
 - `pr_list`
-- `commit_list`, `commit_view`, `commit_check_runs`, `commit_status`
+- `commit_list`, `commit_view`, `compare`, `contents`, `commit_check_runs`, `commit_status`
 - `run_list`, `run_view`, `run_jobs`, `run_artifacts`
 - `job_view`, `job_logs`, `check_run_annotations`
 - `issue_list`, `issue_view`, `issue_comments`, `issue_timeline`
@@ -109,8 +111,11 @@ gated by the pool's `allow_logs` policy.
 
 `classifyRoute` enforces, per pool:
 
-- `allowed_owners` — the route owner must be allowlisted, else `403 owner_denied`.
-  Defaults to `DEFAULT_ALLOWED_OWNERS` (`openclaw`).
+- `allowed_owners` — owners with scoped identity routing. Defaults to
+  `DEFAULT_ALLOWED_OWNERS` (`openclaw`).
+- `allow_public_repos` — public repositories from other owners are allowed after the
+  public-repo guard proves `private: false` (default `true`). These routes use broad PAT
+  identities from the pool rather than repo-scoped GitHub App installation tokens.
 - `allow_logs` — log routes require it (default `true`), else `403 logs_denied`.
 - `allow_search` — search routes require it (default `false`), else `403 search_denied`.
 

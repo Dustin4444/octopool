@@ -100,6 +100,7 @@ octopool gh issue list -R openclaw/openclaw --state open --label bug --limit 20 
 octopool gh run list -R openclaw/openclaw --branch main --limit 10 --json databaseId,workflowName,status,conclusion,url
 octopool gh run view 26360397003 -R openclaw/openclaw --json databaseId,workflowName,status,conclusion,url
 octopool gh repo view openclaw/openclaw --json nameWithOwner,defaultBranchRef,url
+octopool gh api repos/openclaw/octopool/contents/README.md?ref=main --jq .content
 ```
 
 Top-level commands are relayed only for machine-readable `--json` shapes; normal human
@@ -121,10 +122,11 @@ hold:
 - a top-level subcommand or flag is not one of the supported read-only shapes.
 
 Safe read-shaped requests are sent to Octopool first. Octopool owns the route and pool
-policy decision; on a cache miss it uses the configured app/PAT identity pool, writes
-eligible public responses to the shared cache, and returns the GitHub-shaped body. If the
-server says the read should run locally — unsupported route, owner denied by pool policy,
-private/unverified repository, no usable identity, or identity pool depleted — the CLI
+policy decision; on a cache miss it first uses token-free GitHub web/raw endpoints for
+supported public shapes, then the configured app/PAT identity pool, writes eligible
+public responses to the shared cache, and returns the GitHub-shaped body. If the
+server says the read should run locally — unsupported route, public pooling disabled by
+policy, private/unverified repository, no usable identity, or identity pool depleted — the CLI
 runs the original command with the real `gh` and your local GitHub token.
 
 Any other `gh` subcommand (`gh pr create`, `gh auth`, unusual formatting flags, …) is

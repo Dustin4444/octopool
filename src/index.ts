@@ -12,6 +12,7 @@ import { githubCacheKey, readGitHubCache, shouldUseGitHubCache, writeGitHubCache
 import { dashboardResponse } from "./dashboard";
 import { ensurePool, insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, rateFromHeaders } from "./github";
+import { callGitHubWeb } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { queries } from "./generated/sql";
 import {
@@ -371,15 +372,7 @@ async function relayGitHub(
     if (cacheKey !== undefined) {
       const cached = await readGitHubCache(env, cacheKey);
       if (cached !== undefined) {
-        const activeIdentities = await loadIdentities(env, relayRequest.pool, route);
-        if (activeIdentities.length === 0) {
-          throw new HttpError(503, "no_identity", "No active identity can serve this route");
-        }
-        const cachedIdentity =
-          cached.identity === undefined
-            ? undefined
-            : activeIdentities.find((candidate) => candidate.id === cached.identity?.id);
-        if (cached.identity !== undefined && cachedIdentity !== undefined) {
+        if (await cachedIdentityAvailable(env, relayRequest.pool, route, cached.identity)) {
           await ensurePublicGitHubRepo(env, route, cached.created_at);
           const sanitizedCached = sanitizeGitHubResponse(route, cached);
           ctx.waitUntil(
@@ -391,7 +384,7 @@ async function relayGitHub(
               routeKind: route.kind,
               status: cached.status,
               durationMs: Date.now() - started,
-              identityId: cached.identity.id,
+              ...(cached.identity === undefined ? {} : { identityId: cached.identity.id }),
               cacheStatus: "hit",
               cacheable: true,
             }),
@@ -409,6 +402,7 @@ async function relayGitHub(
               cache: "hit",
               stale_ok: false,
               route_kind: route.kind,
+              ...(cached.identity === undefined ? { backend: "web" } : {}),
             },
           });
         }
@@ -424,15 +418,7 @@ async function relayGitHub(
       if (cacheKey !== undefined) {
         const cached = await readGitHubCache(env, cacheKey);
         if (cached !== undefined) {
-          const activeIdentities = await loadIdentities(env, relayRequest.pool, route);
-          if (activeIdentities.length === 0) {
-            throw new HttpError(503, "no_identity", "No active identity can serve this route");
-          }
-          const cachedIdentity =
-            cached.identity === undefined
-              ? undefined
-              : activeIdentities.find((candidate) => candidate.id === cached.identity?.id);
-          if (cached.identity !== undefined && cachedIdentity !== undefined) {
+          if (await cachedIdentityAvailable(env, relayRequest.pool, route, cached.identity)) {
             await ensurePublicGitHubRepo(env, route, cached.created_at);
             const sanitizedCached = sanitizeGitHubResponse(route, cached);
             ctx.waitUntil(
@@ -444,7 +430,7 @@ async function relayGitHub(
                 routeKind: route.kind,
                 status: cached.status,
                 durationMs: Date.now() - started,
-                identityId: cached.identity.id,
+                ...(cached.identity === undefined ? {} : { identityId: cached.identity.id }),
                 cacheStatus: "hit",
                 cacheable: true,
               }),
@@ -462,17 +448,54 @@ async function relayGitHub(
                 cache: "hit",
                 stale_ok: false,
                 route_kind: route.kind,
+                ...(cached.identity === undefined ? { backend: "web" } : {}),
               },
             });
           }
         }
       }
     }
+    await ensurePublicGitHubRepo(env, route);
+    if (cacheKey !== undefined) {
+      const webGitHub = await callGitHubWeb(env, relayRequest, route);
+      if (webGitHub !== undefined) {
+        ctx.waitUntil(
+          Promise.all([
+            insertAudit(env, {
+              requestId,
+              callerId: caller.id,
+              pool: relayRequest.pool,
+              routeKey: route.routeKey,
+              routeKind: route.kind,
+              status: webGitHub.status,
+              durationMs: Date.now() - started,
+              cacheStatus: auditCacheStatus,
+              cacheable: auditCacheable,
+            }),
+            writeGitHubCache(env, cacheKey, relayRequest, route, webGitHub),
+          ]),
+        );
+        return jsonResponse({
+          status: webGitHub.status,
+          headers: webGitHub.headers,
+          body: webGitHub.body,
+          body_encoding: webGitHub.body_encoding,
+          relay: {
+            pool: relayRequest.pool,
+            request_id: requestId,
+            cacheable: route.cacheable,
+            cache: "miss",
+            stale_ok: false,
+            route_kind: route.kind,
+            backend: "web",
+          },
+        });
+      }
+    }
     const identities = await loadIdentities(env, relayRequest.pool, route);
     if (identities.length === 0) {
       throw new HttpError(503, "no_identity", "No active identity can serve this route");
     }
-    await ensurePublicGitHubRepo(env, route);
     const coordinator = env.POOL_COORDINATOR.getByName(`pool:${relayRequest.pool}`);
     const attemptedIdentityIds = new Set<string>();
     let fallbackReason = "identity_pool_depleted";
@@ -601,6 +624,22 @@ async function selectIdentity(
     }
     throw error;
   }
+}
+
+async function cachedIdentityAvailable(
+  env: Env,
+  pool: string,
+  route: ReturnType<typeof classifyRoute>,
+  identity: Pick<Identity, "id" | "kind"> | undefined,
+): Promise<boolean> {
+  if (identity === undefined) {
+    return true;
+  }
+  const activeIdentities = await loadIdentities(env, pool, route);
+  if (activeIdentities.length === 0) {
+    throw new HttpError(503, "no_identity", "No active identity can serve this route");
+  }
+  return activeIdentities.some((candidate) => candidate.id === identity.id);
 }
 
 async function poolHealth(env: Env, pool: string): Promise<Response> {

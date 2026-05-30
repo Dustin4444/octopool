@@ -20,11 +20,11 @@ export async function callGitHub(
   });
   if (response.status >= 300 && response.status < 400 && response.status !== 304) {
     if (route.logs) {
-      return fetchGitHubLogRedirect(response, capBytes(env, route), timeoutMs);
+      return fetchGitHubLogRedirect(response, responseCapBytes(env, route), timeoutMs);
     }
     throw new HttpError(502, "github_redirect_denied", "GitHub returned a redirect");
   }
-  const bodyBytes = await readBodyCapped(response, capBytes(env, route));
+  const bodyBytes = await readBodyCapped(response, responseCapBytes(env, route));
   const contentType = response.headers.get("content-type") ?? "";
   const { body, encoding } = decodeBody(bodyBytes, contentType);
   return {
@@ -182,7 +182,7 @@ async function fetchGitHubLogRedirect(
   };
 }
 
-function capBytes(env: Env, route: RouteInfo): number {
+export function responseCapBytes(env: Env, route: RouteInfo): number {
   const cap = parsePositiveInt(env.MAX_RESPONSE_BYTES, 2_097_152);
   return route.largePayload ? cap : Math.min(cap, 1_048_576);
 }

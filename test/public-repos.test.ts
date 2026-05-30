@@ -177,6 +177,7 @@ function route(): RouteInfo {
     resource: "repo:openclaw/octopool",
     owner: "openclaw",
     repo: "octopool",
+    publicOnly: false,
     cacheable: true,
     logs: false,
     largePayload: false,

@@ -20,6 +20,8 @@ var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits/[0-9A-Fa-f]{7,64}$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/compare/[^/?#]+$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/contents/.+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/[0-9]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/[0-9]+/(files|comments|reviews)$`),
@@ -289,14 +291,15 @@ func safeRelayPath(path string) bool {
 		!strings.Contains(path, "\\") &&
 		!strings.Contains(path, "?") &&
 		!strings.Contains(path, "#") &&
-		!strings.Contains(path, "..") &&
 		!hasDotSegment(path) &&
 		!strings.Contains(lower, "%2e") &&
 		!strings.Contains(lower, "%5c")
 }
 
 func hasDotSegment(path string) bool {
-	return path == "." || strings.Contains(path, "/./") || strings.HasSuffix(path, "/.")
+	return path == "." || path == ".." ||
+		strings.Contains(path, "/./") || strings.Contains(path, "/../") ||
+		strings.HasSuffix(path, "/.") || strings.HasSuffix(path, "/..")
 }
 
 func relayQueryPath(path string) bool {

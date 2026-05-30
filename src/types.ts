@@ -19,6 +19,7 @@ export type RelayRequest = {
 
 export type PoolPolicy = {
   allowed_owners: string[];
+  allow_public_repos: boolean;
   allow_search: boolean;
   allow_logs: boolean;
 };
@@ -49,6 +50,7 @@ export type RouteInfo = {
   kind: string;
   owner?: string;
   repo?: string;
+  publicOnly: boolean;
   resource: string;
   routeKey: string;
   state_hint?: string;
@@ -63,6 +65,7 @@ export type GitHubRelayResponse = {
   headers: Record<string, string>;
   body: unknown;
   body_encoding?: "json" | "text" | "base64";
+  backend?: "github" | "web";
 };
 
 export type SelectionCandidate = {

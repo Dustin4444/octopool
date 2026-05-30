@@ -903,6 +903,56 @@ func (q *Queries) ListActiveIdentitiesForRoute(ctx context.Context, arg ListActi
 	return items, nil
 }
 
+const listActivePublicIdentitiesForPool = `-- name: ListActivePublicIdentitiesForPool :many
+SELECT DISTINCT identities.id, identities.kind, identities.login, identities.secret_ref, identities.installation_id, identities.weight
+FROM identities
+JOIN identity_scopes ON identity_scopes.identity_id = identities.id
+WHERE identities.pool_id = ?1
+  AND identities.status = 'active'
+  AND identities.kind = 'pat'
+  AND identity_scopes.owner = '*'
+  AND identity_scopes.repo IS NULL
+`
+
+type ListActivePublicIdentitiesForPoolRow struct {
+	ID             string        `json:"id"`
+	Kind           string        `json:"kind"`
+	Login          string        `json:"login"`
+	SecretRef      string        `json:"secret_ref"`
+	InstallationID sql.NullInt64 `json:"installation_id"`
+	Weight         int64         `json:"weight"`
+}
+
+func (q *Queries) ListActivePublicIdentitiesForPool(ctx context.Context, poolID string) ([]ListActivePublicIdentitiesForPoolRow, error) {
+	rows, err := q.db.QueryContext(ctx, listActivePublicIdentitiesForPool, poolID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActivePublicIdentitiesForPoolRow
+	for rows.Next() {
+		var i ListActivePublicIdentitiesForPoolRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Login,
+			&i.SecretRef,
+			&i.InstallationID,
+			&i.Weight,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const loginExistingCaller = `-- name: LoginExistingCaller :one
 SELECT callers.id
 FROM callers

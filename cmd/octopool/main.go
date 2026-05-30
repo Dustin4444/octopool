@@ -259,7 +259,7 @@ func runAdminIdentity(ctx context.Context, args []string, stdout io.Writer) erro
 	installationID := fs.Int64("installation-id", 0, "GitHub App installation id")
 	privateScopes := fs.Bool("private-scopes", false, "allow owner-wide scopes to access private repositories")
 	scopeValues := multiFlag{}
-	fs.Var(&scopeValues, "scope", "owner/repo or owner, repeatable")
+	fs.Var(&scopeValues, "scope", "owner/repo, owner, or * for public repos; repeatable")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

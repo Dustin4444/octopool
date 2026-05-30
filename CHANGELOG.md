@@ -2,6 +2,11 @@
 
 ## 0.2.6 - Unreleased
 
+### Changes
+
+- Pool safe reads for public repositories from any GitHub owner by default, using explicitly broad `--scope '*'` PAT identities after the public-repo guard while keeping scoped PAT/App identities on their configured owners.
+- Fetch public PR diffs, commit/compare diff and patch media, and explicit-ref content files through token-free GitHub web/raw endpoints before spending pooled GitHub API budget, while still writing the shared D1 cache.
+
 ### Fixes
 
 - Fall back to the real GitHub CLI when a safe `gh` shim read finds a stale or invalid Octopool caller token.

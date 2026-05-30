@@ -70,6 +70,11 @@ OCTOPOOL_ADMIN_TOKEN=… octopool admin identity \
   --id pat_steipete --login steipete --secret-ref OCTOPOOL_PAT_STEIPETE \
   --scope openclaw
 
+# PAT, broad public-repo cache identity
+OCTOPOOL_ADMIN_TOKEN=… octopool admin identity \
+  --id pat_public --login steipete --secret-ref OCTOPOOL_PAT_STEIPETE \
+  --scope '*'
+
 # GitHub App, single repo scope
 OCTOPOOL_ADMIN_TOKEN=… octopool admin identity \
   --kind github_app --installation-id 135990630 \
@@ -80,9 +85,11 @@ OCTOPOOL_ADMIN_TOKEN=… octopool admin identity \
 
 Notes:
 
-- `--scope owner/repo` grants a single repo; `--scope owner` grants the owner. A bare
-  `--scope owner` only allows private access when `--private-scopes` is set, and a
-  `owner/repo` scope always allows that repo (subject to the public-repo guard).
+- `--scope owner/repo` grants a single repo; `--scope owner` grants the owner; `--scope '*'`
+  marks a PAT identity as broad enough for any public repository after the public-repo
+  guard passes. A bare `--scope owner` only allows private access when `--private-scopes`
+  is set, and a `owner/repo` scope always allows that repo (subject to the public-repo
+  guard).
 - `kind` must be `pat` or `github_app`. `github_app` requires a positive
   `installation_id`.
 - Re-registering an existing id updates login, secret ref, installation id, weight, and
@@ -94,5 +101,6 @@ Notes:
 
 Pools are created implicitly the first time they are referenced (caller provisioning,
 identity registration, or login). A new pool gets the default policy:
-owners = `DEFAULT_ALLOWED_OWNERS` (`openclaw`), `allow_search: false`, `allow_logs: true`.
+owners = `DEFAULT_ALLOWED_OWNERS` (`openclaw`), `allow_public_repos: true`,
+`allow_search: false`, `allow_logs: true`.
 There is no pool-creation endpoint; edit `pools.policy_json` in D1 to change a policy.

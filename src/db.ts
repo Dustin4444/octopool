@@ -39,6 +39,12 @@ export async function loadIdentities(
       .all<IdentityRow>();
     return rows.results;
   }
+  if (route.publicOnly) {
+    const rows = await env.DB.prepare(queries.listActivePublicIdentitiesForPool)
+      .bind(pool)
+      .all<IdentityRow>();
+    return rows.results;
+  }
   const owner = route.owner ?? "";
   const repo = route.repo ?? "";
   const rows = await env.DB.prepare(queries.listActiveIdentitiesForRoute)

@@ -82,6 +82,8 @@ func TestSafeRelayRequest(t *testing.T) {
 		"/repos/openclaw/octopool",
 		"/repos/openclaw/octopool/pulls?state=open",
 		"/repos/openclaw/octopool/issues?state=open",
+		"/repos/openclaw/octopool/contents/README.md?ref=main",
+		"/repos/openclaw/octopool/compare/main...feature",
 		"/repos/openclaw/octopool/actions/workflows/ci.yml",
 		"/repos/openclaw/octopool/actions/workflows/ci.yml/runs",
 	} {
@@ -134,7 +136,7 @@ func TestSafeRelayRequest(t *testing.T) {
 		t.Fatal("secret query should fall back")
 	}
 
-	request, fallback, err = parseGHAPIArgs([]string{"/repos/openclaw/openclaw/compare/main...feature"})
+	request, fallback, err = parseGHAPIArgs([]string{"/repos/openclaw/openclaw/contents/../secret?ref=main"})
 	if err != nil || fallback {
 		t.Fatalf("parse fallback=%v err=%v", fallback, err)
 	}

@@ -56,6 +56,7 @@ function route(kind: string): RouteInfo {
     kind,
     owner: "openclaw",
     repo: "openclaw",
+    publicOnly: false,
     resource: "core",
     routeKey: "GET /repos/openclaw/openclaw/check-runs",
     cacheable: true,
