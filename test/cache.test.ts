@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { cacheTTLSeconds, githubCacheKey, shouldUseGitHubCache } from "../src/cache";
+import {
+  cacheTTLSeconds,
+  githubCacheKey,
+  readStaleGitHubCache,
+  shouldUseGitHubCache,
+  staleCacheSeconds,
+} from "../src/cache";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 import type { GitHubRelayResponse } from "../src/types";
 
@@ -142,7 +148,7 @@ describe("github cache policy", () => {
       }),
       policy,
     );
-    expect(cacheTTLSeconds(run, response({ status: "completed" }))).toBe(15);
+    expect(cacheTTLSeconds(run, response({ status: "completed" }))).toBe(300);
     expect(cacheTTLSeconds(run, response({ status: "in_progress" }))).toBe(15);
 
     const runList = classifyRoute(
@@ -154,8 +160,9 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(runList, response({ workflow_runs: [{ status: "completed" }] }))).toBe(
-      15,
+      120,
     );
+    expect(cacheTTLSeconds(runList, response({ workflow_runs: [] }))).toBe(15);
 
     const checks = classifyRoute(
       validateRelayRequest({
@@ -165,7 +172,8 @@ describe("github cache policy", () => {
       }),
       policy,
     );
-    expect(cacheTTLSeconds(checks, response({ check_runs: [{ status: "completed" }] }))).toBe(15);
+    expect(cacheTTLSeconds(checks, response({ check_runs: [{ status: "completed" }] }))).toBe(300);
+    expect(cacheTTLSeconds(checks, response({ check_runs: [] }))).toBe(15);
 
     const files = classifyRoute(
       validateRelayRequest({
@@ -201,6 +209,66 @@ describe("github cache policy", () => {
     expect(cacheTTLSeconds(pr, response({ state: "closed", merged_at: null }))).toBe(3_600);
     expect(cacheTTLSeconds(pr, response({ state: "open" }))).toBe(120);
   });
+
+  it("keeps bounded stale windows per route family", () => {
+    const run = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/actions/runs/123",
+      }),
+      policy,
+    );
+    expect(staleCacheSeconds(run)).toBe(300);
+
+    const pr = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/pulls/42",
+      }),
+      policy,
+    );
+    expect(staleCacheSeconds(pr)).toBe(3_600);
+  });
+
+  it("serves only stale cache rows inside the route grace window", async () => {
+    const route = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/pulls/42",
+      }),
+      policy,
+    );
+    let expiresAt = sqliteUTC(Date.now() - 60_000);
+    const env = {
+      DB: {
+        prepare: () => ({
+          bind: () => ({
+            first: async () => ({
+              status: 200,
+              response_headers_json: "{}",
+              body_json: '{"number":42}',
+              body_encoding: "json",
+              identity_id: null,
+              identity_kind: null,
+              created_at: sqliteUTC(Date.now() - 120_000),
+              expires_at: expiresAt,
+            }),
+          }),
+        }),
+      },
+    } as unknown as Env;
+
+    await expect(readStaleGitHubCache(env, "cache-key", route)).resolves.toMatchObject({
+      status: 200,
+      body: { number: 42 },
+    });
+
+    expiresAt = sqliteUTC(Date.now() - 7_200_000);
+    await expect(readStaleGitHubCache(env, "cache-key", route)).resolves.toBeUndefined();
+  });
 });
 
 function response(body: unknown): GitHubRelayResponse {
@@ -209,4 +277,11 @@ function response(body: unknown): GitHubRelayResponse {
     headers: {},
     body,
   };
+}
+
+function sqliteUTC(ms: number): string {
+  return new Date(ms)
+    .toISOString()
+    .replace("T", " ")
+    .replace(/\.\d{3}Z$/, "");
 }

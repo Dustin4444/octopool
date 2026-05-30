@@ -106,7 +106,7 @@ function webRequest(
       url: string;
       headers: Record<string, string>;
       capBytes: number;
-      payload: (body: Uint8Array, headers: Headers) => GitHubRelayResponse;
+      payload: (body: Uint8Array, headers: Headers) => GitHubRelayResponse | undefined;
     }
   | undefined {
   if (request.method !== "GET" || route.owner === undefined || route.repo === undefined) {
@@ -133,7 +133,7 @@ function webRequest(
     };
   }
   if (route.kind !== "contents" || !defaultJSONAccept(request.headers?.accept)) {
-    return undefined;
+    return releaseRequest(env, request, route);
   }
   const ref = stringQuery(request.query, "ref");
   if (ref === undefined || !safeGitRefPath(ref)) {
@@ -179,6 +179,91 @@ function webRequest(
       };
     },
   };
+}
+
+function releaseRequest(
+  env: Env,
+  request: RelayRequest,
+  route: RouteInfo,
+):
+  | {
+      url: string;
+      headers: Record<string, string>;
+      capBytes: number;
+      payload: (body: Uint8Array, headers: Headers) => GitHubRelayResponse | undefined;
+    }
+  | undefined {
+  if (!releaseRoute(route) || !defaultJSONAccept(request.headers?.accept)) {
+    return undefined;
+  }
+  const url = new URL(`https://api.github.com${request.path}`);
+  appendQuery(url, request.query);
+  const ref = stringQuery(request.query, "ref");
+  if (ref !== undefined) {
+    return undefined;
+  }
+  return {
+    url: url.toString(),
+    headers: {
+      accept: "application/vnd.github+json",
+      "user-agent": "octopool",
+      "x-github-api-version": "2022-11-28",
+    },
+    capBytes: responseCapBytes(env, route),
+    payload: (body, headers) => {
+      const parsed = parsePublicReleaseBody(body, route);
+      if (parsed === undefined) {
+        return undefined;
+      }
+      return {
+        status: 200,
+        headers: webHeaders(headers, "application/json"),
+        body: parsed,
+        body_encoding: "json",
+        backend: "web",
+      };
+    },
+  };
+}
+
+function releaseRoute(route: RouteInfo): boolean {
+  return (
+    route.kind === "release_list" ||
+    route.kind === "release_latest" ||
+    route.kind === "release_view"
+  );
+}
+
+function appendQuery(url: URL, query: Record<string, string | string[]> | undefined): void {
+  for (const [key, value] of Object.entries(query ?? {})) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        url.searchParams.append(key, item);
+      }
+    } else {
+      url.searchParams.set(key, value);
+    }
+  }
+}
+
+function parsePublicReleaseBody(body: Uint8Array, route: RouteInfo): unknown | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(body)) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (route.kind === "release_list") {
+    if (!Array.isArray(parsed)) {
+      return undefined;
+    }
+    return parsed.filter((item) => !releaseDraft(item));
+  }
+  return releaseDraft(parsed) ? undefined : parsed;
+}
+
+function releaseDraft(value: unknown): boolean {
+  return typeof value === "object" && value !== null && "draft" in value && value.draft === true;
 }
 
 function mediaWebURL(

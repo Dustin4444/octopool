@@ -39,6 +39,10 @@ var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/workflows$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/workflows/[^/?#]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/workflows/[^/?#]+/runs$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/releases$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/releases/latest$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/releases/tags/[^/?#]+$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/releases/[0-9]+$`),
 	regexp.MustCompile(`^/rate_limit$`),
 }
 

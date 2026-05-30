@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -86,6 +88,10 @@ func TestSafeRelayRequest(t *testing.T) {
 		"/repos/openclaw/octopool/compare/main...feature",
 		"/repos/openclaw/octopool/actions/workflows/ci.yml",
 		"/repos/openclaw/octopool/actions/workflows/ci.yml/runs",
+		"/repos/openclaw/octopool/releases",
+		"/repos/openclaw/octopool/releases/latest",
+		"/repos/openclaw/octopool/releases/tags/v0.2.5",
+		"/repos/openclaw/octopool/releases/123",
 	} {
 		request, fallback, err = parseGHAPIArgs([]string{path})
 		if err != nil || fallback {
@@ -195,6 +201,140 @@ func TestParseGHTopOptions(t *testing.T) {
 	if len(opts.positionals) != 1 || opts.positionals[0] != "85341" {
 		t.Fatalf("opts = %#v", opts)
 	}
+}
+
+func TestRunGHReleaseListRelays(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		if body["path"] != "/repos/openclaw/octopool/releases" {
+			t.Fatalf("path = %v", body["path"])
+		}
+		query, ok := body["query"].(map[string]any)
+		if !ok || query["per_page"] != "10" {
+			t.Fatalf("query = %#v", body["query"])
+		}
+		return []map[string]any{{
+			"tag_name": "v0.2.5",
+			"name":     "0.2.5",
+			"html_url": "https://github.com/openclaw/octopool/releases/tag/v0.2.5",
+		}}
+	})
+	var out bytes.Buffer
+	handled, err := runGHRelease(t.Context(), []string{
+		"list",
+		"-R", "openclaw/octopool",
+		"--limit", "10",
+		"--json", "tagName,name,url",
+	}, &out)
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	if got := out.String(); !strings.Contains(got, `"tagName":"v0.2.5"`) || !strings.Contains(got, `"url":"https://github.com/openclaw/octopool/releases/tag/v0.2.5"`) {
+		t.Fatalf("out = %s", got)
+	}
+}
+
+func TestRunGHReleaseViewRelaysTag(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		if body["path"] != "/repos/openclaw/octopool/releases/tags/v0.2.5" {
+			t.Fatalf("path = %v", body["path"])
+		}
+		return map[string]any{
+			"tag_name": "v0.2.5",
+			"name":     "0.2.5",
+		}
+	})
+	var out bytes.Buffer
+	handled, err := runGHRelease(t.Context(), []string{
+		"view",
+		"v0.2.5",
+		"-R", "openclaw/octopool",
+		"--json", "tagName,name",
+	}, &out)
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	if got := out.String(); !strings.Contains(got, `"tagName":"v0.2.5"`) {
+		t.Fatalf("out = %s", got)
+	}
+}
+
+func TestRunGHReleaseViewKeepsNumericTags(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		if body["path"] != "/repos/openclaw/octopool/releases/tags/20240530" {
+			t.Fatalf("path = %v", body["path"])
+		}
+		return map[string]any{"tag_name": "20240530"}
+	})
+	var out bytes.Buffer
+	handled, err := runGHRelease(t.Context(), []string{
+		"view",
+		"20240530",
+		"-R", "openclaw/octopool",
+		"--json", "tagName",
+	}, &out)
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	if got := out.String(); !strings.Contains(got, `"tagName":"20240530"`) {
+		t.Fatalf("out = %s", got)
+	}
+}
+
+func TestRunGHReleaseViewEscapesSlashTagsOnce(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		if body["path"] != "/repos/openclaw/octopool/releases/tags/release%2F1.0" {
+			t.Fatalf("path = %v", body["path"])
+		}
+		return map[string]any{"tag_name": "release/1.0"}
+	})
+	var out bytes.Buffer
+	handled, err := runGHRelease(t.Context(), []string{
+		"view",
+		"release/1.0",
+		"-R", "openclaw/octopool",
+		"--json", "tagName",
+	}, &out)
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	if got := out.String(); !strings.Contains(got, `"tagName":"release/1.0"`) {
+		t.Fatalf("out = %s", got)
+	}
+}
+
+func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OCTOPOOL_TOKEN", "test-token")
+	t.Setenv("OCTOPOOL_POOL", "maintainers")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/github/request" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Fatalf("auth = %q", r.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		envelope := relayEnvelope{
+			Status:       200,
+			Headers:      map[string]string{"content-type": "application/json"},
+			BodyEncoding: "json",
+		}
+		raw, err := json.Marshal(responseBody(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		envelope.Body = raw
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(envelope); err != nil {
+			t.Fatal(err)
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("OCTOPOOL_URL", server.URL)
 }
 
 func TestFilterJSONFieldsUsesGHNames(t *testing.T) {

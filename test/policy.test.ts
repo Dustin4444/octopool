@@ -107,6 +107,22 @@ describe("route policy", () => {
     expect(classifyRoute(request, policy).kind).toBe("branch_view");
   });
 
+  it("allows release read routes", () => {
+    for (const [path, kind] of [
+      ["/repos/openclaw/octopool/releases", "release_list"],
+      ["/repos/openclaw/octopool/releases/latest", "release_latest"],
+      ["/repos/openclaw/octopool/releases/tags/v0.2.5", "release_view"],
+      ["/repos/openclaw/octopool/releases/123", "release_view"],
+    ]) {
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path,
+      });
+      expect(classifyRoute(request, policy).kind).toBe(kind);
+    }
+  });
+
   it("denies search routes until query scope parsing exists", () => {
     const request = validateRelayRequest({
       pool: "maintainers",

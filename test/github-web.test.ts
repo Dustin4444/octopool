@@ -137,6 +137,70 @@ describe("github web provider", () => {
     );
   });
 
+  it("fetches releases through unauthenticated GitHub API reads", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify([{ tag_name: "v0.2.5", draft: false }]), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/releases",
+      query: { per_page: "10" },
+    });
+
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/openclaw/octopool/releases?per_page=10",
+      expect.objectContaining({
+        headers: expect.not.objectContaining({ authorization: expect.any(String) }),
+      }),
+    );
+    expect(response).toMatchObject({
+      status: 200,
+      body: [{ tag_name: "v0.2.5", draft: false }],
+      backend: "web",
+    });
+  });
+
+  it("drops draft releases from web-origin release responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify([
+              { tag_name: "v0.2.5", draft: false },
+              { tag_name: "draft", draft: true },
+            ]),
+          ),
+      ),
+    );
+    const list = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/releases",
+    });
+    await expect(callGitHubWeb(env(), list, classifyRoute(list, policy))).resolves.toMatchObject({
+      body: [{ tag_name: "v0.2.5", draft: false }],
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ draft: true }))),
+    );
+    const view = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/releases/tags/draft",
+    });
+    await expect(callGitHubWeb(env(), view, classifyRoute(view, policy))).resolves.toBe(undefined);
+  });
+
   it("falls through for content reads without an explicit ref", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

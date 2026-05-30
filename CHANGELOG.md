@@ -6,6 +6,8 @@
 
 - Pool safe reads for public repositories from any GitHub owner by default, using explicitly broad `--scope '*'` PAT identities after the public-repo guard while keeping scoped PAT/App identities on their configured owners.
 - Fetch public PR diffs, commit/compare diff and patch media, and explicit-ref content files through token-free GitHub web/raw endpoints before spending pooled GitHub API budget, while still writing the shared D1 cache.
+- Serve bounded stale cache entries when pooled identities are depleted, cooling down, or rate-limited, and count those responses as saved GitHub requests in stats and dashboard aggregates.
+- Route GitHub release list/view reads through Octopool for REST paths and top-level `gh release` JSON commands.
 
 ### Fixes
 

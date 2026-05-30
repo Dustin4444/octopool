@@ -10,11 +10,13 @@ type CacheRow = {
   identity_id: string | null;
   identity_kind: "pat" | "github_app" | null;
   created_at: string;
+  expires_at: string;
 };
 
 export type CachedGitHubResponse = GitHubRelayResponse & {
   identity?: Pick<Identity, "id" | "kind">;
   created_at: string;
+  expires_at: string;
 };
 
 export async function githubCacheKey(
@@ -47,6 +49,60 @@ export async function readGitHubCache(
   cacheKey: string,
 ): Promise<CachedGitHubResponse | undefined> {
   const row = await env.DB.prepare(queries.readGitHubCache).bind(cacheKey).first<CacheRow>();
+  return cacheRowResponse(row);
+}
+
+export async function readStaleGitHubCache(
+  env: Env,
+  cacheKey: string,
+  route: RouteInfo,
+): Promise<CachedGitHubResponse | undefined> {
+  const row = await env.DB.prepare(queries.readGitHubCacheAny).bind(cacheKey).first<CacheRow>();
+  if (row === null) {
+    return undefined;
+  }
+  if (!staleCacheAllowed(row, route)) {
+    return undefined;
+  }
+  return cacheRowResponse(row);
+}
+
+export function staleCacheSeconds(route: RouteInfo): number {
+  switch (route.kind) {
+    case "run_view":
+    case "run_list":
+    case "workflow_run_list":
+    case "run_jobs":
+    case "commit_check_runs":
+    case "commit_status":
+    case "job_view":
+      return 300;
+    case "pr_list":
+    case "issue_list":
+      return 600;
+    case "pr_view":
+    case "issue_view":
+    case "pr_files":
+    case "pr_commits":
+    case "pr_review_comments":
+    case "pr_reviews":
+      return 3_600;
+    case "repo_view":
+    case "commit_list":
+    case "compare":
+    case "contents":
+    case "release_list":
+    case "release_view":
+    case "release_latest":
+      return 7_200;
+    case "commit_view":
+      return 86_400;
+    default:
+      return 1_800;
+  }
+}
+
+function cacheRowResponse(row: CacheRow | null): CachedGitHubResponse | undefined {
   if (row === null) {
     return undefined;
   }
@@ -56,10 +112,20 @@ export async function readGitHubCache(
     body: JSON.parse(row.body_json) as unknown,
     body_encoding: row.body_encoding,
     created_at: row.created_at,
+    expires_at: row.expires_at,
     ...(row.identity_id === null || row.identity_kind === null
       ? {}
       : { identity: { id: row.identity_id, kind: row.identity_kind } }),
   };
+}
+
+function staleCacheAllowed(row: CacheRow, route: RouteInfo): boolean {
+  const expiresAt = Date.parse(`${row.expires_at}Z`);
+  if (!Number.isFinite(expiresAt)) {
+    return false;
+  }
+  const maxStaleMs = staleCacheSeconds(route) * 1000;
+  return Date.now() - expiresAt <= maxStaleMs;
 }
 
 export async function writeGitHubCache(
@@ -104,6 +170,15 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
       return 300;
     case "commit_view":
       return 86_400;
+    case "contents":
+      return 3_600;
+    case "compare":
+      return 300;
+    case "release_view":
+      return 3_600;
+    case "release_latest":
+    case "release_list":
+      return 300;
     case "workflow_list":
     case "workflow_view":
       return 3_600;
@@ -118,11 +193,16 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
     case "branch_view":
       return 120;
     case "run_view":
+      return completedRun(response) ? 300 : 15;
     case "run_list":
     case "workflow_run_list":
+      return completedRunList(response) ? 120 : 15;
     case "run_jobs":
+      return completedJobs(response) ? 300 : 15;
     case "commit_check_runs":
+      return completedChecks(response) ? 300 : 15;
     case "commit_status":
+      return completedStatus(response) ? 300 : 15;
     case "job_view":
       return 15;
     case "pr_files":
@@ -197,6 +277,50 @@ function closedPR(response?: GitHubRelayResponse): boolean {
 
 function closedIssue(response?: GitHubRelayResponse): boolean {
   return isRecord(response?.body) && response.body.state === "closed";
+}
+
+function completedRun(response?: GitHubRelayResponse): boolean {
+  return isRecord(response?.body) && response.body.status === "completed";
+}
+
+function completedRunList(response?: GitHubRelayResponse): boolean {
+  if (!isRecord(response?.body) || !Array.isArray(response.body.workflow_runs)) {
+    return false;
+  }
+  return (
+    response.body.workflow_runs.length > 0 &&
+    response.body.workflow_runs.every((item) => isRecord(item) && item.status === "completed")
+  );
+}
+
+function completedJobs(response?: GitHubRelayResponse): boolean {
+  if (!isRecord(response?.body) || !Array.isArray(response.body.jobs)) {
+    return false;
+  }
+  return (
+    response.body.jobs.length > 0 &&
+    response.body.jobs.every((item) => isRecord(item) && item.status === "completed")
+  );
+}
+
+function completedChecks(response?: GitHubRelayResponse): boolean {
+  if (!isRecord(response?.body) || !Array.isArray(response.body.check_runs)) {
+    return false;
+  }
+  return (
+    response.body.check_runs.length > 0 &&
+    response.body.check_runs.every((item) => isRecord(item) && item.status === "completed")
+  );
+}
+
+function completedStatus(response?: GitHubRelayResponse): boolean {
+  if (!isRecord(response?.body) || !Array.isArray(response.body.statuses)) {
+    return false;
+  }
+  return (
+    response.body.statuses.length > 0 &&
+    response.body.statuses.every((item) => isRecord(item) && item.state !== "pending")
+  );
 }
 
 function stateAwarePRSubresource(route: RouteInfo, response?: GitHubRelayResponse): boolean {

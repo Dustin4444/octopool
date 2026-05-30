@@ -79,9 +79,13 @@ traversal (`%2e`, `%5c`). The relay only ever talks to `api.github.com`.
 - `body_encoding` is `json`, `text`, or `base64`. Binary responses are base64-encoded.
 - `repo_view` returns a fixed public metadata subset before caching so token-specific
   repository fields such as identity permissions are not shared.
-- Release routes are not relayed because authenticated draft visibility changes
-  list, lookup, and not-found semantics.
-- `cache` is `hit`, `miss`, or `bypass` (route not cacheable).
+- Release list/latest/tag/id reads are relayed only through unauthenticated public GitHub API
+  reads; Octopool does not use pooled credentials for releases, so draft/private release
+  visibility is not shared.
+- `cache` is `hit`, `stale`, `miss`, or `bypass` (route not cacheable).
+- `stale_ok: true` means an expired public cache entry was served because all eligible
+  identities were depleted, cooling down, missing, or rate-limited. `stale_reason` and
+  `cache_expires_at` are included on those responses.
 - `backend` is present as `web` when a cache miss or identity-less cache hit was served by a
   token-free GitHub web/raw endpoint instead of a pooled API identity.
 - `lease_reason` is `sticky`, `highest_remaining`, or `fallback` — see
@@ -100,6 +104,7 @@ enabled; anything else returns `403 route_denied`:
 - `issue_list`, `issue_view`, `issue_comments`, `issue_timeline`
 - `branch_view`
 - `repo_view`
+- `release_list`, `release_latest`, `release_view`
 - `workflow_list`, `workflow_view`
 - `rate_limit`
 

@@ -57,10 +57,15 @@ INSERT INTO audit_events
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);
 
 -- name: ReadGitHubCache :one
-SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at
+SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at
 FROM github_cache_entries
 WHERE cache_key = ?1
   AND expires_at > CURRENT_TIMESTAMP;
+
+-- name: ReadGitHubCacheAny :one
+SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at
+FROM github_cache_entries
+WHERE cache_key = ?1;
 
 -- name: WriteGitHubCache :exec
 INSERT INTO github_cache_entries
@@ -82,6 +87,7 @@ SELECT
   COUNT(*) AS requests_24h,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors_24h,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits_24h,
+  SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale_24h,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses_24h,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass_24h,
   AVG(duration_ms) AS avg_duration_ms_24h,
@@ -158,6 +164,7 @@ SELECT
   COUNT(*) AS requests,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+  SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass
 FROM audit_events
@@ -353,6 +360,7 @@ SELECT
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+  SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
@@ -367,6 +375,7 @@ SELECT
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+  SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
@@ -383,6 +392,7 @@ SELECT
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+  SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
@@ -402,6 +412,7 @@ SELECT
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+  SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,

@@ -326,6 +326,7 @@ SELECT
   COUNT(*) AS requests,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+  SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass
 FROM audit_events
@@ -341,6 +342,7 @@ type DashboardRouteUsageRow struct {
 	Requests    int64           `json:"requests"`
 	Errors      sql.NullFloat64 `json:"errors"`
 	CacheHits   sql.NullFloat64 `json:"cache_hits"`
+	CacheStale  sql.NullFloat64 `json:"cache_stale"`
 	CacheMisses sql.NullFloat64 `json:"cache_misses"`
 	CacheBypass sql.NullFloat64 `json:"cache_bypass"`
 }
@@ -359,6 +361,7 @@ func (q *Queries) DashboardRouteUsage(ctx context.Context, poolID string) ([]Das
 			&i.Requests,
 			&i.Errors,
 			&i.CacheHits,
+			&i.CacheStale,
 			&i.CacheMisses,
 			&i.CacheBypass,
 		); err != nil {
@@ -380,6 +383,7 @@ SELECT
   COUNT(*) AS requests_24h,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors_24h,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits_24h,
+  SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale_24h,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses_24h,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass_24h,
   AVG(duration_ms) AS avg_duration_ms_24h,
@@ -393,6 +397,7 @@ type DashboardUsageRow struct {
 	Requests24h      int64           `json:"requests_24h"`
 	Errors24h        sql.NullFloat64 `json:"errors_24h"`
 	CacheHits24h     sql.NullFloat64 `json:"cache_hits_24h"`
+	CacheStale24h    sql.NullFloat64 `json:"cache_stale_24h"`
 	CacheMisses24h   sql.NullFloat64 `json:"cache_misses_24h"`
 	CacheBypass24h   sql.NullFloat64 `json:"cache_bypass_24h"`
 	AvgDurationMs24h sql.NullFloat64 `json:"avg_duration_ms_24h"`
@@ -406,6 +411,7 @@ func (q *Queries) DashboardUsage(ctx context.Context, poolID string) (DashboardU
 		&i.Requests24h,
 		&i.Errors24h,
 		&i.CacheHits24h,
+		&i.CacheStale24h,
 		&i.CacheMisses24h,
 		&i.CacheBypass24h,
 		&i.AvgDurationMs24h,
@@ -998,7 +1004,7 @@ func (q *Queries) PoolHealth(ctx context.Context, poolID string) (PoolHealthRow,
 }
 
 const readGitHubCache = `-- name: ReadGitHubCache :one
-SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at
+SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at
 FROM github_cache_entries
 WHERE cache_key = ?1
   AND expires_at > CURRENT_TIMESTAMP
@@ -1012,6 +1018,7 @@ type ReadGitHubCacheRow struct {
 	IdentityID          sql.NullString `json:"identity_id"`
 	IdentityKind        sql.NullString `json:"identity_kind"`
 	CreatedAt           string         `json:"created_at"`
+	ExpiresAt           string         `json:"expires_at"`
 }
 
 func (q *Queries) ReadGitHubCache(ctx context.Context, cacheKey string) (ReadGitHubCacheRow, error) {
@@ -1025,6 +1032,40 @@ func (q *Queries) ReadGitHubCache(ctx context.Context, cacheKey string) (ReadGit
 		&i.IdentityID,
 		&i.IdentityKind,
 		&i.CreatedAt,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
+const readGitHubCacheAny = `-- name: ReadGitHubCacheAny :one
+SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at
+FROM github_cache_entries
+WHERE cache_key = ?1
+`
+
+type ReadGitHubCacheAnyRow struct {
+	Status              int64          `json:"status"`
+	ResponseHeadersJson string         `json:"response_headers_json"`
+	BodyJson            string         `json:"body_json"`
+	BodyEncoding        string         `json:"body_encoding"`
+	IdentityID          sql.NullString `json:"identity_id"`
+	IdentityKind        sql.NullString `json:"identity_kind"`
+	CreatedAt           string         `json:"created_at"`
+	ExpiresAt           string         `json:"expires_at"`
+}
+
+func (q *Queries) ReadGitHubCacheAny(ctx context.Context, cacheKey string) (ReadGitHubCacheAnyRow, error) {
+	row := q.db.QueryRowContext(ctx, readGitHubCacheAny, cacheKey)
+	var i ReadGitHubCacheAnyRow
+	err := row.Scan(
+		&i.Status,
+		&i.ResponseHeadersJson,
+		&i.BodyJson,
+		&i.BodyEncoding,
+		&i.IdentityID,
+		&i.IdentityKind,
+		&i.CreatedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
@@ -1035,6 +1076,7 @@ SELECT
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+  SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
@@ -1056,6 +1098,7 @@ type StatsAggregateCallerRow struct {
 	Errors            sql.NullFloat64 `json:"errors"`
 	AvgDurationMs     sql.NullFloat64 `json:"avg_duration_ms"`
 	CacheHits         sql.NullFloat64 `json:"cache_hits"`
+	CacheStale        sql.NullFloat64 `json:"cache_stale"`
 	CacheMisses       sql.NullFloat64 `json:"cache_misses"`
 	CacheBypass       sql.NullFloat64 `json:"cache_bypass"`
 	CacheUnknown      sql.NullFloat64 `json:"cache_unknown"`
@@ -1070,6 +1113,7 @@ func (q *Queries) StatsAggregateCaller(ctx context.Context, arg StatsAggregateCa
 		&i.Errors,
 		&i.AvgDurationMs,
 		&i.CacheHits,
+		&i.CacheStale,
 		&i.CacheMisses,
 		&i.CacheBypass,
 		&i.CacheUnknown,
@@ -1084,6 +1128,7 @@ SELECT
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+  SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
@@ -1103,6 +1148,7 @@ type StatsAggregatePoolRow struct {
 	Errors            sql.NullFloat64 `json:"errors"`
 	AvgDurationMs     sql.NullFloat64 `json:"avg_duration_ms"`
 	CacheHits         sql.NullFloat64 `json:"cache_hits"`
+	CacheStale        sql.NullFloat64 `json:"cache_stale"`
 	CacheMisses       sql.NullFloat64 `json:"cache_misses"`
 	CacheBypass       sql.NullFloat64 `json:"cache_bypass"`
 	CacheUnknown      sql.NullFloat64 `json:"cache_unknown"`
@@ -1117,6 +1163,7 @@ func (q *Queries) StatsAggregatePool(ctx context.Context, arg StatsAggregatePool
 		&i.Errors,
 		&i.AvgDurationMs,
 		&i.CacheHits,
+		&i.CacheStale,
 		&i.CacheMisses,
 		&i.CacheBypass,
 		&i.CacheUnknown,
@@ -1161,6 +1208,7 @@ SELECT
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+  SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
@@ -1187,6 +1235,7 @@ type StatsRoutesCallerRow struct {
 	Errors            sql.NullFloat64 `json:"errors"`
 	AvgDurationMs     sql.NullFloat64 `json:"avg_duration_ms"`
 	CacheHits         sql.NullFloat64 `json:"cache_hits"`
+	CacheStale        sql.NullFloat64 `json:"cache_stale"`
 	CacheMisses       sql.NullFloat64 `json:"cache_misses"`
 	CacheBypass       sql.NullFloat64 `json:"cache_bypass"`
 	CacheUnknown      sql.NullFloat64 `json:"cache_unknown"`
@@ -1209,6 +1258,7 @@ func (q *Queries) StatsRoutesCaller(ctx context.Context, arg StatsRoutesCallerPa
 			&i.Errors,
 			&i.AvgDurationMs,
 			&i.CacheHits,
+			&i.CacheStale,
 			&i.CacheMisses,
 			&i.CacheBypass,
 			&i.CacheUnknown,
@@ -1235,6 +1285,7 @@ SELECT
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+  SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
@@ -1259,6 +1310,7 @@ type StatsRoutesPoolRow struct {
 	Errors            sql.NullFloat64 `json:"errors"`
 	AvgDurationMs     sql.NullFloat64 `json:"avg_duration_ms"`
 	CacheHits         sql.NullFloat64 `json:"cache_hits"`
+	CacheStale        sql.NullFloat64 `json:"cache_stale"`
 	CacheMisses       sql.NullFloat64 `json:"cache_misses"`
 	CacheBypass       sql.NullFloat64 `json:"cache_bypass"`
 	CacheUnknown      sql.NullFloat64 `json:"cache_unknown"`
@@ -1281,6 +1333,7 @@ func (q *Queries) StatsRoutesPool(ctx context.Context, arg StatsRoutesPoolParams
 			&i.Errors,
 			&i.AvgDurationMs,
 			&i.CacheHits,
+			&i.CacheStale,
 			&i.CacheMisses,
 			&i.CacheBypass,
 			&i.CacheUnknown,

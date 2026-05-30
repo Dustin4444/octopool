@@ -24,8 +24,8 @@ Octopool moves that traffic off individual machines and onto Cloudflare:
 
 - **One pool, one cache.** PATs and GitHub App private keys live as Cloudflare Worker secrets, not on laptops or in CI logs. The Worker routes each cache miss to one healthy identity and writes the result into a D1 read-through cache that every other caller hits next.
 - **Rate budgets add up.** Each identity keeps its own GitHub rate-limit bucket. Five PATs + one GitHub App ≈ five-plus-one combined headroom. A per-pool Durable Object picks the identity with the most remaining budget for the target resource and holds a short sticky lease so concurrent callers don't stampede the same one.
-- **Cache hits cost zero GitHub quota.** Fresh D1 hits return straight from Cloudflare without touching GitHub at all. Repeated maintainer reads stop consuming any pooled identity's budget.
-- **Public web reads spend no API quota.** Public PR diffs, commit/compare diff and patch media, and explicit-ref content files use GitHub's token-free web/raw endpoints before Octopool spends a pooled PAT or App token.
+- **Cache hits cost zero GitHub quota.** Fresh D1 hits return straight from Cloudflare without touching GitHub at all. When every pooled identity is depleted, rate-limited, or cooling down, Octopool can also serve a bounded stale public cache entry instead of forcing the caller back to GitHub.
+- **Public web reads spend no API quota.** Public PR diffs, commit/compare diff and patch media, explicit-ref content files, and release reads use GitHub's token-free public endpoints before Octopool spends a pooled PAT or App token.
 - **Tokens stay server-side.** Callers authenticate to octopool with a short caller token (issued in exchange for their `gh auth token`). The underlying PATs and App private keys never leave the Worker — not into responses, not into audit rows, not into the cache.
 - **Org-gated, public-repo only.** Only verified members of one GitHub org can mint a caller token, and every repo route is checked against GitHub's public-visibility endpoint before a pooled identity or cache entry is used. Private-repo callers fall back to their own `gh`.
 - **Fails open to real `gh`.** The CLI is a drop-in `gh` shim. Safe read-shaped calls try Octopool first, so the server owns cache, app/PAT routing, and pool policy. Mutations and secret-bearing requests stay local; safe reads run your real `gh` only when Octopool explicitly returns `fallback_local`.
@@ -76,6 +76,7 @@ octopool gh pr view 85341 -R openclaw/openclaw --json number,title,url
 octopool gh pr checks 85341 -R openclaw/openclaw --json name,state,bucket
 octopool gh issue list -R openclaw/openclaw --state open --json number,title,url
 octopool gh run list -R openclaw/openclaw --branch main --limit 10 --json databaseId,status
+octopool gh release view v0.2.5 -R openclaw/octopool --json tagName,name,url
 octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 octopool stats
 ```

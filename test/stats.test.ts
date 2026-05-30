@@ -29,6 +29,7 @@ describe("stats aggregates", () => {
       errors: 0,
       avg_duration_ms: null,
       cache_hits: 0,
+      cache_stale: 0,
       cache_misses: 0,
       cache_bypass: 0,
       cache_unknown: 0,
@@ -41,13 +42,14 @@ describe("stats aggregates", () => {
     });
   });
 
-  it("computes hit rate from hits and misses only", () => {
+  it("counts stale cache serves as saved GitHub requests", () => {
     expect(
       normalizeAggregate({
         requests: 13,
         errors: 1,
         avg_duration_ms: 12.5,
         cache_hits: 7,
+        cache_stale: 2,
         cache_misses: 3,
         cache_bypass: 2,
         cache_unknown: 1,
@@ -58,14 +60,15 @@ describe("stats aggregates", () => {
       errors: 1,
       avg_duration_ms: 12.5,
       cache_hits: 7,
+      cache_stale: 2,
       cache_misses: 3,
       cache_bypass: 2,
       cache_unknown: 1,
       cacheable_requests: 10,
-      cache_hit_rate: 0.7,
-      cacheable_hit_rate: 0.7,
+      cache_hit_rate: 0.75,
+      cacheable_hit_rate: 0.9,
       bypass_rate: 2 / 13,
-      saved_github_requests: 7,
+      saved_github_requests: 9,
       backend_requests: 5,
     });
   });

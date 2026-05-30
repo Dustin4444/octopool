@@ -47,6 +47,8 @@ serves these public shapes through GitHub web/raw endpoints:
 - compare diff/patch media requests via `github.com/{owner}/{repo}/compare/{base...head}.diff|patch`
 - explicit-ref contents reads via `raw.githubusercontent.com`, returned as an
   API-shaped JSON file payload
+- release list/latest/tag/id reads via unauthenticated `api.github.com` requests so pooled
+  credentials never expose draft releases
 
 Successful web reads are cached in the same D1 table with no source identity. A cached
 web hit still re-checks that public proof covers the entry before returning it.
@@ -55,27 +57,35 @@ web hit still re-checks that public proof covers the entry before returning it.
 
 Per route kind and response state (`cacheTTLSeconds`):
 
-- workflow runs, run lists, job lists, checks, and commit statuses → 15s because
-  completed CI can still change after a rerun
+- workflow runs, run lists, job lists, checks, and commit statuses → 15s while active;
+  completed runs/checks get short extended TTLs
 - PR files with a validated state discriminator → 5m; PR reviews/comments and
   undiscriminated PR files → 1m
 - closed PRs/issues → 1h; open PRs → 2m; open issues → 5m
-- immutable commit objects → 24h; commit lists → 5m
+- release lists/latest → 5m; release by tag/id → 1h
+- immutable commit objects → 24h; commit lists → 5m; contents → 1h
 - repo metadata → 10m; workflow metadata → 1h
 - large logs, explicit log routes, `rate_limit`, and conditional requests still bypass
 
 ### Cache-hit integrity
 
-A hit is only served if:
+A fresh or bounded-stale hit is only served if:
 
 - the source identity recorded on the entry is still an active candidate for the route
   (web-origin entries have no identity), and
 - the repo's public-visibility proof still covers the entry (re-checked, with a small
   historical-proof allowance during GitHub outages / secondary-rate-limit — see below).
 
+If every eligible identity is depleted, cooling down, missing, or rate-limited, Octopool may
+serve an expired public cache entry for a short route-specific grace window. Mutable CI
+routes get only minutes; PR/issue detail routes get up to an hour; immutable-ish commit
+views can get up to a day. Stale serves still run the public-repo guard and active-identity
+check before returning.
+
 Hits are still audited, with the cached identity attributed. Each audit row records cache
-status as `hit`, `miss`, `bypass`, or `unknown`, which powers `octopool stats` and the
-dashboard hit-rate/top-route views.
+status as `hit`, `stale`, `miss`, `bypass`, or `unknown`, which powers `octopool stats` and
+the dashboard hit-rate/top-route views. Stats count both fresh and stale hits as saved
+GitHub requests.
 
 ## Public-repo guard
 

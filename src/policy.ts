@@ -6,6 +6,7 @@ const repo = "(?<repo>[A-Za-z0-9_.-]+)";
 const number = "[0-9]+";
 const sha = "[0-9A-Fa-f]{7,64}";
 const id = "[0-9]+";
+const tag = "(?<tag>[^/?#]+)";
 
 type RouteRule = {
   pattern: RegExp;
@@ -52,6 +53,10 @@ const rules: RouteRule[] = [
     "workflow_run_list",
     "core",
   ),
+  route(`/repos/${owner}/${repo}/releases`, "release_list", "core"),
+  route(`/repos/${owner}/${repo}/releases/latest`, "release_latest", "core"),
+  route(`/repos/${owner}/${repo}/releases/tags/${tag}`, "release_view", "core"),
+  route(`/repos/${owner}/${repo}/releases/${id}`, "release_view", "core"),
   route("/rate_limit", "rate_limit", "core"),
 ];
 

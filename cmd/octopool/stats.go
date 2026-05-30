@@ -36,6 +36,7 @@ type statsAggregate struct {
 	Errors            int      `json:"errors"`
 	AvgDurationMS     *float64 `json:"avg_duration_ms"`
 	CacheHits         int      `json:"cache_hits"`
+	CacheStale        int      `json:"cache_stale"`
 	CacheMisses       int      `json:"cache_misses"`
 	CacheBypass       int      `json:"cache_bypass"`
 	CacheUnknown      int      `json:"cache_unknown"`
@@ -119,9 +120,10 @@ func renderStats(w io.Writer, stats statsResponse) error {
 		fmt.Sprintf("operator: %s", firstNonEmpty(stats.Operator.GitHubLogin, "unknown")),
 		fmt.Sprintf("requests: %s (%s errors)", intFmt(stats.PoolUsage.Requests), intFmt(stats.PoolUsage.Errors)),
 		fmt.Sprintf(
-			"cache: %s hit (%s hits, %s misses, %s bypass, %s unknown)",
+			"cache: %s hit (%s hits, %s stale, %s misses, %s bypass, %s unknown)",
 			percent(stats.PoolUsage.CacheHitRate),
 			intFmt(stats.PoolUsage.CacheHits),
+			intFmt(stats.PoolUsage.CacheStale),
 			intFmt(stats.PoolUsage.CacheMisses),
 			intFmt(stats.PoolUsage.CacheBypass),
 			intFmt(stats.PoolUsage.CacheUnknown),
@@ -164,10 +166,11 @@ func renderStats(w io.Writer, stats statsResponse) error {
 	for _, route := range stats.Routes {
 		if _, err := fmt.Fprintf(
 			w,
-			"  %s: %s req, %s hit, %s miss, %s bypass, %s errors\n",
+			"  %s: %s req, %s hit, %s stale, %s miss, %s bypass, %s errors\n",
 			route.RouteKind,
 			intFmt(route.Requests),
 			percent(route.CacheHitRate),
+			intFmt(route.CacheStale),
 			intFmt(route.CacheMisses),
 			intFmt(route.CacheBypass),
 			intFmt(route.Errors),

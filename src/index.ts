@@ -8,7 +8,13 @@ import {
   verifyGitHubOrgMember,
   verifyGitHubOrgMemberWithToken,
 } from "./auth";
-import { githubCacheKey, readGitHubCache, shouldUseGitHubCache, writeGitHubCache } from "./cache";
+import {
+  githubCacheKey,
+  readGitHubCache,
+  readStaleGitHubCache,
+  shouldUseGitHubCache,
+  writeGitHubCache,
+} from "./cache";
 import { dashboardResponse } from "./dashboard";
 import { ensurePool, insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, rateFromHeaders } from "./github";
@@ -43,7 +49,7 @@ import {
 } from "./web-session";
 import { publicWebHostRedirect } from "./web-routing";
 import { shouldUseWebError, webErrorResponse } from "./web-error";
-import type { Identity, SelectionRequest } from "./types";
+import type { GitHubRelayResponse, Identity, RouteInfo, SelectionRequest } from "./types";
 
 export { PoolCoordinator };
 
@@ -206,21 +212,24 @@ async function dashboardUsage(env: Env, pool: string) {
     requests_24h: number;
     errors_24h: number | null;
     cache_hits_24h: number | null;
+    cache_stale_24h: number | null;
     cache_misses_24h: number | null;
     cache_bypass_24h: number | null;
     avg_duration_ms_24h: number | null;
     latest_seen_at: string | null;
   }>();
   const cacheHits = row?.cache_hits_24h ?? 0;
+  const cacheStale = row?.cache_stale_24h ?? 0;
   const cacheMisses = row?.cache_misses_24h ?? 0;
-  const cacheDenominator = cacheHits + cacheMisses;
+  const cacheDenominator = cacheHits + cacheStale + cacheMisses;
   return {
     requests_24h: row?.requests_24h ?? 0,
     errors_24h: row?.errors_24h ?? 0,
     cache_hits_24h: cacheHits,
+    cache_stale_24h: cacheStale,
     cache_misses_24h: cacheMisses,
     cache_bypass_24h: row?.cache_bypass_24h ?? 0,
-    cache_hit_rate_24h: cacheDenominator === 0 ? null : cacheHits / cacheDenominator,
+    cache_hit_rate_24h: cacheDenominator === 0 ? null : (cacheHits + cacheStale) / cacheDenominator,
     avg_duration_ms_24h: row?.avg_duration_ms_24h ?? null,
     latest_seen_at: row?.latest_seen_at ?? null,
   };
@@ -305,20 +314,23 @@ async function dashboardRouteUsage(env: Env, pool: string) {
     requests: number;
     errors: number | null;
     cache_hits: number | null;
+    cache_stale: number | null;
     cache_misses: number | null;
     cache_bypass: number | null;
   }>();
   return rows.results.map((row) => {
     const cacheHits = row.cache_hits ?? 0;
+    const cacheStale = row.cache_stale ?? 0;
     const cacheMisses = row.cache_misses ?? 0;
-    const cacheDenominator = cacheHits + cacheMisses;
+    const cacheDenominator = cacheHits + cacheStale + cacheMisses;
     return {
       ...row,
       errors: row.errors ?? 0,
       cache_hits: cacheHits,
+      cache_stale: cacheStale,
       cache_misses: cacheMisses,
       cache_bypass: row.cache_bypass ?? 0,
-      cache_hit_rate: cacheDenominator === 0 ? null : cacheHits / cacheDenominator,
+      cache_hit_rate: cacheDenominator === 0 ? null : (cacheHits + cacheStale) / cacheDenominator,
     };
   });
 }
@@ -358,13 +370,14 @@ async function relayGitHub(
     throw new HttpError(404, "pool_not_found", "Pool not found");
   }
   let route: ReturnType<typeof classifyRoute> | undefined;
+  let cacheKey: string | undefined;
   let identity: Identity | undefined;
-  let auditCacheStatus: "hit" | "miss" | "bypass" | "unknown" = "unknown";
+  let auditCacheStatus: "hit" | "miss" | "bypass" | "stale" | "unknown" = "unknown";
   let auditCacheable = false;
   try {
     route = await verifyPRStateHint(env, relayRequest, classifyRoute(relayRequest, policy));
     const cacheEnabled = shouldUseGitHubCache(relayRequest, route);
-    let cacheKey = cacheEnabled
+    cacheKey = cacheEnabled
       ? await githubCacheKey(relayRequest.pool, relayRequest, route)
       : undefined;
     auditCacheable = cacheKey !== undefined;
@@ -373,37 +386,14 @@ async function relayGitHub(
       const cached = await readGitHubCache(env, cacheKey);
       if (cached !== undefined) {
         if (await cachedIdentityAvailable(env, relayRequest.pool, route, cached.identity)) {
-          await ensurePublicGitHubRepo(env, route, cached.created_at);
-          const sanitizedCached = sanitizeGitHubResponse(route, cached);
-          ctx.waitUntil(
-            insertAudit(env, {
-              requestId,
-              callerId: caller.id,
-              pool: relayRequest.pool,
-              routeKey: route.routeKey,
-              routeKind: route.kind,
-              status: cached.status,
-              durationMs: Date.now() - started,
-              ...(cached.identity === undefined ? {} : { identityId: cached.identity.id }),
-              cacheStatus: "hit",
-              cacheable: true,
-            }),
-          );
-          return jsonResponse({
-            status: sanitizedCached.status,
-            headers: sanitizedCached.headers,
-            body: sanitizedCached.body,
-            body_encoding: sanitizedCached.body_encoding,
-            identity: cached.identity,
-            relay: {
-              pool: relayRequest.pool,
-              request_id: requestId,
-              cacheable: route.cacheable,
-              cache: "hit",
-              stale_ok: false,
-              route_kind: route.kind,
-              ...(cached.identity === undefined ? { backend: "web" } : {}),
-            },
+          return serveCachedGitHubResponse(env, ctx, {
+            requestId,
+            callerId: caller.id,
+            pool: relayRequest.pool,
+            route,
+            cached,
+            started,
+            cacheStatus: "hit",
           });
         }
       }
@@ -419,43 +409,25 @@ async function relayGitHub(
         const cached = await readGitHubCache(env, cacheKey);
         if (cached !== undefined) {
           if (await cachedIdentityAvailable(env, relayRequest.pool, route, cached.identity)) {
-            await ensurePublicGitHubRepo(env, route, cached.created_at);
-            const sanitizedCached = sanitizeGitHubResponse(route, cached);
-            ctx.waitUntil(
-              insertAudit(env, {
-                requestId,
-                callerId: caller.id,
-                pool: relayRequest.pool,
-                routeKey: route.routeKey,
-                routeKind: route.kind,
-                status: cached.status,
-                durationMs: Date.now() - started,
-                ...(cached.identity === undefined ? {} : { identityId: cached.identity.id }),
-                cacheStatus: "hit",
-                cacheable: true,
-              }),
-            );
-            return jsonResponse({
-              status: sanitizedCached.status,
-              headers: sanitizedCached.headers,
-              body: sanitizedCached.body,
-              body_encoding: sanitizedCached.body_encoding,
-              identity: cached.identity,
-              relay: {
-                pool: relayRequest.pool,
-                request_id: requestId,
-                cacheable: route.cacheable,
-                cache: "hit",
-                stale_ok: false,
-                route_kind: route.kind,
-                ...(cached.identity === undefined ? { backend: "web" } : {}),
-              },
+            return serveCachedGitHubResponse(env, ctx, {
+              requestId,
+              callerId: caller.id,
+              pool: relayRequest.pool,
+              route,
+              cached,
+              started,
+              cacheStatus: "hit",
             });
           }
         }
       }
     }
     await ensurePublicGitHubRepo(env, route);
+    if (cacheKey === undefined && webOnlyRoute(route)) {
+      throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
+        reason: "web_only_unavailable",
+      });
+    }
     if (cacheKey !== undefined) {
       const webGitHub = await callGitHubWeb(env, relayRequest, route);
       if (webGitHub !== undefined) {
@@ -490,6 +462,16 @@ async function relayGitHub(
             backend: "web",
           },
         });
+      }
+      if (webOnlyRoute(route)) {
+        throw new HttpError(
+          424,
+          "fallback_local",
+          "Run this request with local GitHub credentials",
+          {
+            reason: "web_only_unavailable",
+          },
+        );
       }
     }
     const identities = await loadIdentities(env, relayRequest.pool, route);
@@ -576,11 +558,48 @@ async function relayGitHub(
         },
       });
     }
+    if (cacheKey !== undefined && staleFallbackReason(fallbackReason)) {
+      const cached = await readStaleGitHubCache(env, cacheKey, route);
+      if (
+        cached !== undefined &&
+        (await staleCachedIdentityAvailable(env, relayRequest.pool, route, cached.identity))
+      ) {
+        return serveCachedGitHubResponse(env, ctx, {
+          requestId,
+          callerId: caller.id,
+          pool: relayRequest.pool,
+          route,
+          cached,
+          started,
+          cacheStatus: "stale",
+          staleReason: fallbackReason,
+        });
+      }
+    }
     throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
       reason: fallbackReason,
     });
   } catch (error) {
     const reported = localFallbackError(error) ?? error;
+    const staleReason = staleFallbackReasonFromError(reported);
+    if (cacheKey !== undefined && route !== undefined && staleReason !== undefined) {
+      const cached = await readStaleGitHubCache(env, cacheKey, route);
+      if (
+        cached !== undefined &&
+        (await staleCachedIdentityAvailable(env, relayRequest.pool, route, cached.identity))
+      ) {
+        return serveCachedGitHubResponse(env, ctx, {
+          requestId,
+          callerId: caller.id,
+          pool: relayRequest.pool,
+          route,
+          cached,
+          started,
+          cacheStatus: "stale",
+          staleReason,
+        });
+      }
+    }
     const audit = auditError(reported);
     ctx.waitUntil(
       insertAudit(env, {
@@ -606,6 +625,94 @@ function auditError(error: unknown): { status: number; code: string } {
     return { status: error.status, code: error.code };
   }
   return { status: 500, code: "internal_error" };
+}
+
+async function serveCachedGitHubResponse(
+  env: Env,
+  ctx: ExecutionContext,
+  params: {
+    requestId: string;
+    callerId: string;
+    pool: string;
+    route: RouteInfo;
+    cached: GitHubRelayResponse & {
+      identity?: Pick<Identity, "id" | "kind">;
+      created_at: string;
+      expires_at?: string;
+    };
+    started: number;
+    cacheStatus: "hit" | "stale";
+    staleReason?: string;
+  },
+): Promise<Response> {
+  await ensurePublicGitHubRepo(env, params.route, params.cached.created_at);
+  const sanitizedCached = sanitizeGitHubResponse(params.route, params.cached);
+  ctx.waitUntil(
+    insertAudit(env, {
+      requestId: params.requestId,
+      callerId: params.callerId,
+      pool: params.pool,
+      routeKey: params.route.routeKey,
+      routeKind: params.route.kind,
+      status: params.cached.status,
+      durationMs: Date.now() - params.started,
+      ...(params.cached.identity === undefined ? {} : { identityId: params.cached.identity.id }),
+      cacheStatus: params.cacheStatus,
+      cacheable: true,
+    }),
+  );
+  return jsonResponse({
+    status: sanitizedCached.status,
+    headers: sanitizedCached.headers,
+    body: sanitizedCached.body,
+    body_encoding: sanitizedCached.body_encoding,
+    identity: params.cached.identity,
+    relay: {
+      pool: params.pool,
+      request_id: params.requestId,
+      cacheable: params.route.cacheable,
+      cache: params.cacheStatus,
+      stale_ok: params.cacheStatus === "stale",
+      ...(params.staleReason === undefined ? {} : { stale_reason: params.staleReason }),
+      ...(params.cached.expires_at === undefined
+        ? {}
+        : { cache_expires_at: params.cached.expires_at }),
+      route_kind: params.route.kind,
+      ...(params.cached.identity === undefined ? { backend: "web" } : {}),
+    },
+  });
+}
+
+function staleFallbackReason(reason: string): boolean {
+  switch (reason) {
+    case "github_identity_depleted":
+    case "github_rate_limited":
+    case "identities_cooling_down":
+    case "identity_pool_depleted":
+    case "no_identity":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function staleFallbackReasonFromError(error: unknown): string | undefined {
+  if (!(error instanceof HttpError)) {
+    return undefined;
+  }
+  if (error.code !== "fallback_local") {
+    return staleFallbackReason(error.code) ? error.code : undefined;
+  }
+  const reason = error.details?.reason;
+  return typeof reason === "string" && staleFallbackReason(reason) ? reason : undefined;
+}
+
+function webOnlyRoute(route: RouteInfo): boolean {
+  return (
+    route.kind === "release_list" ||
+    route.kind === "release_latest" ||
+    route.kind === "release_view"
+  );
 }
 
 async function selectIdentity(
@@ -640,6 +747,22 @@ async function cachedIdentityAvailable(
     throw new HttpError(503, "no_identity", "No active identity can serve this route");
   }
   return activeIdentities.some((candidate) => candidate.id === identity.id);
+}
+
+async function staleCachedIdentityAvailable(
+  env: Env,
+  pool: string,
+  route: ReturnType<typeof classifyRoute>,
+  identity: Pick<Identity, "id" | "kind"> | undefined,
+): Promise<boolean> {
+  try {
+    return await cachedIdentityAvailable(env, pool, route, identity);
+  } catch (error) {
+    if (error instanceof HttpError && error.code === "no_identity") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 async function poolHealth(env: Env, pool: string): Promise<Response> {

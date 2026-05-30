@@ -65,7 +65,7 @@ export async function insertAudit(
     status: number;
     errorCode?: string;
     durationMs: number;
-    cacheStatus?: "hit" | "miss" | "bypass" | "unknown";
+    cacheStatus?: "hit" | "miss" | "bypass" | "stale" | "unknown";
     cacheable?: boolean;
   },
 ): Promise<void> {

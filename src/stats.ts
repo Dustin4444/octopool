@@ -14,6 +14,7 @@ export type CacheAggregate = {
   errors: number;
   avg_duration_ms: number | null;
   cache_hits: number;
+  cache_stale: number;
   cache_misses: number;
   cache_bypass: number;
   cache_unknown: number;
@@ -30,6 +31,7 @@ export type AggregateRow = {
   errors: number | null;
   avg_duration_ms: number | null;
   cache_hits: number | null;
+  cache_stale: number | null;
   cache_misses: number | null;
   cache_bypass: number | null;
   cache_unknown: number | null;
@@ -138,8 +140,10 @@ async function cacheTotals(env: Env, pool: string) {
 
 export function normalizeAggregate(row: AggregateRow | null): CacheAggregate {
   const cacheHits = row?.cache_hits ?? 0;
+  const cacheStale = row?.cache_stale ?? 0;
   const cacheMisses = row?.cache_misses ?? 0;
-  const denominator = cacheHits + cacheMisses;
+  const saved = cacheHits + cacheStale;
+  const denominator = saved + cacheMisses;
   const requests = row?.requests ?? 0;
   const cacheBypass = row?.cache_bypass ?? 0;
   const cacheUnknown = row?.cache_unknown ?? 0;
@@ -149,14 +153,15 @@ export function normalizeAggregate(row: AggregateRow | null): CacheAggregate {
     errors: row?.errors ?? 0,
     avg_duration_ms: row?.avg_duration_ms ?? null,
     cache_hits: cacheHits,
+    cache_stale: cacheStale,
     cache_misses: cacheMisses,
     cache_bypass: cacheBypass,
     cache_unknown: cacheUnknown,
     cacheable_requests: cacheableRequests,
-    cache_hit_rate: denominator === 0 ? null : cacheHits / denominator,
-    cacheable_hit_rate: cacheableRequests === 0 ? null : cacheHits / cacheableRequests,
+    cache_hit_rate: denominator === 0 ? null : saved / denominator,
+    cacheable_hit_rate: cacheableRequests === 0 ? null : saved / cacheableRequests,
     bypass_rate: requests === 0 ? null : cacheBypass / requests,
-    saved_github_requests: cacheHits,
+    saved_github_requests: saved,
     backend_requests: cacheMisses + cacheBypass,
   };
 }

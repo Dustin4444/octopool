@@ -235,9 +235,23 @@ func runGHRelease(ctx context.Context, args []string, stdout io.Writer) (bool, e
 	}
 	switch args[0] {
 	case "list":
-		return false, nil
+		repo, ok := repoOnly(opts)
+		if !ok || !machineReadable(opts) || !supportedJSONFields(opts, supportedReleaseFields) || limitOverOnePage(opts) {
+			return false, nil
+		}
+		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "releases"), query: listQuery(opts)}, opts, fieldMapRelease)
 	case "view":
-		return false, nil
+		repo, ok := repoFromOptionOrCurrent(opts.repo)
+		if !ok || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedReleaseFields) {
+			return false, nil
+		}
+		path := repoPath(repo, "releases", "latest")
+		if len(opts.positionals) == 1 {
+			path = repoPath(repo, "releases", "tags", opts.positionals[0])
+		} else if len(opts.positionals) > 1 {
+			return false, nil
+		}
+		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: path}, opts, fieldMapRelease)
 	default:
 		return false, nil
 	}

@@ -85,7 +85,7 @@ octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 # 85341
 ```
 
-### `octopool gh pr|issue|run|repo ...`
+### `octopool gh pr|issue|run|repo|release ...`
 
 The shim also handles common top-level GitHub CLI read commands by translating them to
 safe relay routes:
@@ -100,6 +100,8 @@ octopool gh issue list -R openclaw/openclaw --state open --label bug --limit 20 
 octopool gh run list -R openclaw/openclaw --branch main --limit 10 --json databaseId,workflowName,status,conclusion,url
 octopool gh run view 26360397003 -R openclaw/openclaw --json databaseId,workflowName,status,conclusion,url
 octopool gh repo view openclaw/openclaw --json nameWithOwner,defaultBranchRef,url
+octopool gh release list -R openclaw/octopool --limit 10 --json tagName,name,url
+octopool gh release view v0.2.5 -R openclaw/octopool --json tagName,name,url
 octopool gh api repos/openclaw/octopool/contents/README.md?ref=main --jq .content
 ```
 
@@ -147,11 +149,11 @@ days.
 ```sh
 octopool stats
 # pool: maintainers
-# cache: 82.4% hit (42 hits, 9 misses, 3 bypass, 0 unknown)
+# cache: 82.4% hit (40 hits, 2 stale, 9 misses, 3 bypass, 0 unknown)
 # cacheable: 51/54 requests
 # github: 42 saved, 12 backend
 # top routes:
-#   pr_view: 31 req, 86.1% hit, 5 miss, 0 bypass, 0 errors
+#   pr_view: 31 req, 86.1% hit, 1 stale, 5 miss, 0 bypass, 0 errors
 ```
 
 Use `--json` for dashboards or scripts that want the raw aggregate:
