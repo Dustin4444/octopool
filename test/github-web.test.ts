@@ -35,6 +35,38 @@ describe("github web provider", () => {
     );
   });
 
+  it("follows GitHub public diff redirects to the patch host", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: {
+            location: "https://patch-diff.githubusercontent.com/raw/openclaw/octopool/pull/12.diff",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(new Response("diff --git a/README.md b/README.md\n"));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/pulls/12",
+      headers: { accept: "application/vnd.github.v3.diff" },
+    });
+
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+
+    expect(response).toMatchObject({ status: 200, backend: "web" });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://patch-diff.githubusercontent.com/raw/openclaw/octopool/pull/12.diff",
+      expect.objectContaining({
+        headers: expect.not.objectContaining({ authorization: expect.any(String) }),
+      }),
+    );
+  });
+
   it("returns API-shaped content JSON from raw.githubusercontent.com", async () => {
     const fetchMock = vi.fn(async () => new Response("hello\n"));
     vi.stubGlobal("fetch", fetchMock);

@@ -23,15 +23,23 @@ export async function callGitHubWeb(
     return undefined;
   }
   let response: Response;
+  const timeoutMs = parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000);
   try {
     response = await fetch(web.url, {
       method: "GET",
       headers: web.headers,
       redirect: "manual",
-      signal: AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000)),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     return undefined;
+  }
+  if (response.status >= 300 && response.status < 400 && response.status !== 304) {
+    const redirected = await fetchAllowedRedirect(response, web, timeoutMs);
+    if (redirected === undefined) {
+      return undefined;
+    }
+    response = redirected;
   }
   if (response.status < 200 || response.status >= 300) {
     return undefined;
@@ -42,6 +50,51 @@ export async function callGitHubWeb(
   } catch {
     return undefined;
   }
+}
+
+async function fetchAllowedRedirect(
+  response: Response,
+  web: {
+    headers: Record<string, string>;
+  },
+  timeoutMs: number,
+): Promise<Response | undefined> {
+  const location = response.headers.get("location");
+  if (location === null) {
+    return undefined;
+  }
+  let url: URL;
+  try {
+    url = new URL(location);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:" || !allowedWebRedirectHost(url.hostname)) {
+    return undefined;
+  }
+  try {
+    const redirected = await fetch(url.toString(), {
+      method: "GET",
+      headers: web.headers,
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (redirected.status >= 300 && redirected.status < 400) {
+      return undefined;
+    }
+    return redirected;
+  } catch {
+    return undefined;
+  }
+}
+
+function allowedWebRedirectHost(hostname: string): boolean {
+  const lower = hostname.toLowerCase();
+  return (
+    lower === "patch-diff.githubusercontent.com" ||
+    lower === "github.com" ||
+    lower === "raw.githubusercontent.com"
+  );
 }
 
 function webRequest(
