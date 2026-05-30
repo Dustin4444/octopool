@@ -147,6 +147,9 @@ func (client ghRelayClient) do(ctx context.Context, request ghAPIRequest) (relay
 		return relayEnvelope{}, err
 	}
 	if status >= 400 {
+		if fallback, ok := parseAuthFallback(out); ok {
+			return relayEnvelope{}, fallback
+		}
 		if fallback, ok := parseLocalFallback(out); ok {
 			return relayEnvelope{}, fallback
 		}
@@ -396,6 +399,19 @@ func parseLocalFallback(out []byte) (localFallbackError, bool) {
 		reason = response.Error.Message
 	}
 	return localFallbackError{Reason: reason}, true
+}
+
+func parseAuthFallback(out []byte) (localFallbackError, bool) {
+	var response apiErrorResponse
+	if err := json.Unmarshal(out, &response); err != nil {
+		return localFallbackError{}, false
+	}
+	switch response.Error.Code {
+	case "missing_auth", "invalid_auth":
+		return localFallbackError{Reason: "octopool auth unavailable"}, true
+	default:
+		return localFallbackError{}, false
+	}
 }
 
 func execRealGHAfterLocalFallback(

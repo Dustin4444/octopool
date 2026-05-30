@@ -2,6 +2,10 @@
 
 ## 0.2.6 - Unreleased
 
+### Fixes
+
+- Fall back to the real GitHub CLI when a safe `gh` shim read finds a stale or invalid Octopool caller token.
+
 ## 0.2.5 - 2026-05-29
 
 ### Fixes

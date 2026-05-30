@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -251,6 +253,20 @@ func TestParseLocalFallback(t *testing.T) {
 	}
 	if err.Reason != "route_denied" {
 		t.Fatalf("reason = %q", err.Reason)
+	}
+}
+
+func TestGHRelayClientInvalidAuthUsesLocalFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"code":"invalid_auth","message":"Invalid caller token"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := ghRelayClient{token: "stale", baseURL: server.URL, pool: "maintainers"}
+	_, err := client.do(t.Context(), ghAPIRequest{method: "GET", path: "/repos/openclaw/openclaw"})
+	if !isLocalFallback(err) {
+		t.Fatalf("expected local fallback, got %v", err)
 	}
 }
 
