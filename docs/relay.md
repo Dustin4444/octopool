@@ -86,8 +86,8 @@ traversal (`%2e`, `%5c`). The relay only ever talks to `api.github.com`.
 - `stale_ok: true` means an expired public cache entry was served because all eligible
   identities were depleted, cooling down, missing, or rate-limited. `stale_reason` and
   `cache_expires_at` are included on those responses.
-- `backend` is present as `web` when a cache miss or identity-less cache hit was served by a
-  token-free GitHub web/raw endpoint instead of a pooled API identity.
+- `backend` is present as `web` or `github_public` when a cache miss or identity-less cache hit
+  was served without a pooled API identity.
 - `lease_reason` is `sticky`, `highest_remaining`, or `fallback` — see
   [Identities & routing](identities.md).
 
@@ -103,6 +103,7 @@ enabled; anything else returns `403 route_denied`:
 - `job_view`, `job_logs`, `check_run_annotations`
 - `issue_list`, `issue_view`, `issue_comments`, `issue_events`, `issue_timeline`
 - `branch_view`
+- `user_view`
 - `repo_view`
 - `release_list`, `release_latest`, `release_view`
 - `workflow_list`, `workflow_view`

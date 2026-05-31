@@ -81,6 +81,9 @@ func TestSafeRelayRequest(t *testing.T) {
 	}
 
 	for _, path := range []string{
+		"/users/openperf",
+		"/users/dependabot%5Bbot%5D",
+		"/users/dependabot[bot]",
 		"/repos/openclaw/octopool",
 		"/repos/openclaw/octopool/pulls?state=open",
 		"/repos/openclaw/octopool/pulls/1/commits",

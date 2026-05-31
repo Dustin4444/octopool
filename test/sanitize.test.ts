@@ -49,6 +49,29 @@ describe("GitHub response sanitizer", () => {
     expect(repository).not.toHaveProperty("role_name");
     expect(repository).not.toHaveProperty("temp_clone_token");
   });
+
+  it("keeps only public user profile fields", () => {
+    const sanitized = sanitizeGitHubResponse(route("user_view"), {
+      status: 200,
+      headers: {},
+      body: {
+        login: "openperf",
+        id: 123,
+        html_url: "https://github.com/openperf",
+        public_repos: 42,
+        plan: { name: "pro" },
+        private_gists: 7,
+        total_private_repos: 3,
+      },
+    });
+
+    expect(sanitized.body).toEqual({
+      login: "openperf",
+      id: 123,
+      html_url: "https://github.com/openperf",
+      public_repos: 42,
+    });
+  });
 });
 
 function route(kind: string): RouteInfo {

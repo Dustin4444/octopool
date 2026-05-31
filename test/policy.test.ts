@@ -4,6 +4,38 @@ import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/polic
 describe("route policy", () => {
   const policy = defaultPolicy("openclaw");
 
+  it("allows public user reads", () => {
+    for (const path of [
+      "/users/openperf",
+      "/users/dependabot%5Bbot%5D",
+      "/users/dependabot[bot]",
+    ]) {
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path,
+      });
+      expect(classifyRoute(request, policy)).toMatchObject({
+        kind: "user_view",
+        publicOnly: false,
+        resource: "core",
+        routeKey: "GET /users/:login",
+      });
+    }
+  });
+
+  it("does not normalize repo names that match top-level routes", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/users/pulls/1",
+    });
+    expect(classifyRoute(request, policy)).toMatchObject({
+      kind: "pr_view",
+      routeKey: "GET /repos/openclaw/users/pulls/:number",
+    });
+  });
+
   it("allows priority OpenClaw PR and CI routes", () => {
     const routes = [
       "/repos/openclaw/openclaw",

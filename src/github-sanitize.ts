@@ -7,6 +7,9 @@ export function sanitizeGitHubResponse(
   if (route.kind === "repo_view" && isRecord(response.body)) {
     return { ...response, body: sanitizeRepoView(response.body) };
   }
+  if (route.kind === "user_view" && isRecord(response.body)) {
+    return { ...response, body: sanitizeUserView(response.body) };
+  }
   return { ...response, body: stripTokenScopedGitHubFields(response.body) };
 }
 
@@ -53,6 +56,50 @@ function sanitizeRepoView(input: Record<string, unknown>): Record<string, unknow
     "network_count",
     "subscribers_count",
     "organization",
+  ]);
+  const body: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (allowed.has(key)) {
+      body[key] = stripTokenScopedGitHubFields(value);
+    }
+  }
+  return body;
+}
+
+function sanitizeUserView(input: Record<string, unknown>): Record<string, unknown> {
+  const allowed = new Set([
+    "login",
+    "id",
+    "node_id",
+    "avatar_url",
+    "gravatar_id",
+    "url",
+    "html_url",
+    "followers_url",
+    "following_url",
+    "gists_url",
+    "starred_url",
+    "subscriptions_url",
+    "organizations_url",
+    "repos_url",
+    "events_url",
+    "received_events_url",
+    "type",
+    "site_admin",
+    "name",
+    "company",
+    "blog",
+    "location",
+    "email",
+    "hireable",
+    "bio",
+    "twitter_username",
+    "public_repos",
+    "public_gists",
+    "followers",
+    "following",
+    "created_at",
+    "updated_at",
   ]);
   const body: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {

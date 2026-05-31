@@ -91,6 +91,7 @@ export function staleCacheSeconds(route: RouteInfo): number {
     case "issue_timeline":
       return 3_600;
     case "repo_view":
+    case "user_view":
     case "commit_list":
     case "compare":
     case "contents":
@@ -167,6 +168,8 @@ export async function writeGitHubCache(
 
 export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): number {
   switch (route.kind) {
+    case "user_view":
+      return 3_600;
     case "repo_view":
       return 600;
     case "commit_list":

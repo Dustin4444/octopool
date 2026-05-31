@@ -17,6 +17,7 @@ import (
 )
 
 var relayQueryPathPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`^/users/[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?(?:\[bot\]|%5[Bb]bot%5[Dd])?$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits/[0-9A-Fa-f]{7,64}$`),

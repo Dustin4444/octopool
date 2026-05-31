@@ -3,6 +3,8 @@ import type { PoolPolicy, RelayRequest, RouteInfo } from "./types";
 
 const owner = "(?<owner>[A-Za-z0-9_.-]+)";
 const repo = "(?<repo>[A-Za-z0-9_.-]+)";
+const loginPath = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?(?:\\[bot\\]|%5[Bb]bot%5[Dd])?";
+const login = `(?<login>${loginPath})`;
 const number = "[0-9]+";
 const sha = "[0-9A-Fa-f]{7,64}";
 const id = "[0-9]+";
@@ -19,6 +21,7 @@ type RouteRule = {
 };
 
 const rules: RouteRule[] = [
+  route(`/users/${login}`, "user_view", "core"),
   route(`/repos/${owner}/${repo}`, "repo_view", "core"),
   route(`/repos/${owner}/${repo}/commits`, "commit_list", "core"),
   route(`/repos/${owner}/${repo}/commits/${sha}`, "commit_view", "core"),
@@ -238,7 +241,8 @@ function repoFromSearchQuery(query: Record<string, string | string[]> | undefine
 }
 
 export function normalizeRouteKey(method: string, path: string): string {
-  return `${method.toUpperCase()} ${path
+  const routePath = new RegExp(`^/users/${loginPath}$`).test(path) ? "/users/:login" : path;
+  return `${method.toUpperCase()} ${routePath
     .replace(/\/pulls\/[0-9]+/g, "/pulls/:number")
     .replace(/\/issues\/[0-9]+/g, "/issues/:number")
     .replace(/\/comments\/[0-9]+/g, "/comments/:id")

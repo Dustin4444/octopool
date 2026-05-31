@@ -2,6 +2,10 @@
 
 ## 0.3.1 - Unreleased
 
+### Fixes
+
+- Add `GET /users/:login` to the safe GitHub relay allowlist, including bot logins, and cache sanitized profiles fetched through unauthenticated public GitHub API reads.
+
 ## 0.3.0 - 2026-05-31
 
 ### Changes

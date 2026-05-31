@@ -10,6 +10,23 @@ export async function callGitHub(
   route: RouteInfo,
 ): Promise<GitHubRelayResponse> {
   const token = await githubToken(env, identity);
+  return callGitHubAPI(env, request, route, token);
+}
+
+export async function callPublicGitHub(
+  env: Env,
+  request: RelayRequest,
+  route: RouteInfo,
+): Promise<GitHubRelayResponse> {
+  return callGitHubAPI(env, request, route);
+}
+
+async function callGitHubAPI(
+  env: Env,
+  request: RelayRequest,
+  route: RouteInfo,
+  token?: string,
+): Promise<GitHubRelayResponse> {
   const url = githubUrl(request);
   const timeoutMs = parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000);
   const response = await fetch(url, {
@@ -265,10 +282,15 @@ function githubUrl(request: RelayRequest): string {
   return url.toString();
 }
 
-function githubHeaders(token: string, input: Record<string, string> | undefined): Headers {
+function githubHeaders(
+  token: string | undefined,
+  input: Record<string, string> | undefined,
+): Headers {
   const headers = new Headers();
   headers.set("accept", input?.accept ?? "application/vnd.github+json");
-  headers.set("authorization", `Bearer ${token}`);
+  if (token !== undefined) {
+    headers.set("authorization", `Bearer ${token}`);
+  }
   headers.set("user-agent", "octopool");
   headers.set("x-github-api-version", input?.["x-github-api-version"] ?? "2022-11-28");
   if (input?.["if-none-match"] !== undefined) {
