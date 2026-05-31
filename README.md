@@ -77,7 +77,7 @@ octopool gh search issues cache regression -R openclaw/openclaw --state open --j
 octopool gh pr checks 85341 -R openclaw/openclaw --json name,state,bucket
 octopool gh issue list -R openclaw/openclaw --state open --json number,title,url
 octopool gh run list -R openclaw/openclaw --branch main --limit 10 --json databaseId,status
-octopool gh release view v0.2.5 -R openclaw/octopool --json tagName,name,url
+octopool gh release view v0.3.0 -R openclaw/octopool --json tagName,name,url
 octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 octopool stats
 ```

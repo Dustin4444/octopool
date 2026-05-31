@@ -104,7 +104,7 @@ octopool gh run list -R openclaw/openclaw --branch main --limit 10 --json databa
 octopool gh run view 26360397003 -R openclaw/openclaw --json databaseId,workflowName,status,conclusion,url
 octopool gh repo view openclaw/openclaw --json nameWithOwner,defaultBranchRef,url
 octopool gh release list -R openclaw/octopool --limit 10 --json tagName,name,url
-octopool gh release view v0.2.5 -R openclaw/octopool --json tagName,name,url
+octopool gh release view v0.3.0 -R openclaw/octopool --json tagName,name,url
 octopool gh api repos/openclaw/octopool/contents/README.md?ref=main --jq .content
 ```
 
