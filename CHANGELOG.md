@@ -5,6 +5,7 @@
 ### Fixes
 
 - Add `GET /users/:login` to the safe GitHub relay allowlist, including bot logins, and cache sanitized profiles fetched through unauthenticated public GitHub API reads.
+- Expand token-free public GitHub API fallbacks across exact JSON read routes, including repo metadata, contents/README, PR and issue subresources, commits/comments, labels, milestones, checks/statuses, Actions run/workflow metadata, branches, tags, topics, community profiles, forks, stargazers, subscribers, Git object reads, languages, contributors, licenses, release assets, and repo-scoped issue/commit search.
 
 ## 0.3.0 - 2026-05-31
 

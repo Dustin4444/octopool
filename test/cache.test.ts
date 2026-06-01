@@ -227,6 +227,16 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(user, response({ login: "openperf" }))).toBe(3_600);
+
+    const gitRef = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/git/ref/heads/main",
+      }),
+      policy,
+    );
+    expect(cacheTTLSeconds(gitRef, response({ ref: "refs/heads/main" }))).toBe(120);
   });
 
   it("keeps bounded stale windows per route family", () => {
@@ -259,6 +269,16 @@ describe("github cache policy", () => {
       policy,
     );
     expect(staleCacheSeconds(user)).toBe(7_200);
+
+    const gitRef = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/git/ref/heads/main",
+      }),
+      policy,
+    );
+    expect(staleCacheSeconds(gitRef)).toBe(300);
   });
 
   it("serves only stale cache rows inside the route grace window", async () => {

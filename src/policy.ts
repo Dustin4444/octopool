@@ -25,8 +25,12 @@ const rules: RouteRule[] = [
   route(`/repos/${owner}/${repo}`, "repo_view", "core"),
   route(`/repos/${owner}/${repo}/commits`, "commit_list", "core"),
   route(`/repos/${owner}/${repo}/commits/${sha}`, "commit_view", "core"),
+  route(`/repos/${owner}/${repo}/commits/${sha}/comments`, "commit_comments", "core"),
+  route(`/repos/${owner}/${repo}/comments/${id}`, "repo_comment", "core"),
   route(`/repos/${owner}/${repo}/compare/(?<compare>[^/?#]+)`, "compare", "core"),
   route(`/repos/${owner}/${repo}/contents/(?<contentPath>.+)`, "contents", "core"),
+  route(`/repos/${owner}/${repo}/readme`, "repo_readme", "core"),
+  route(`/repos/${owner}/${repo}/readme/(?<readmeDir>.+)`, "repo_readme", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}`, "pr_view", "core"),
   route(`/repos/${owner}/${repo}/pulls`, "pr_list", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}/files`, "pr_files", "core"),
@@ -49,8 +53,28 @@ const rules: RouteRule[] = [
   route(`/repos/${owner}/${repo}/issues`, "issue_list", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/comments`, "issue_comments", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/events`, "issue_events", "core"),
+  route(`/repos/${owner}/${repo}/issues/${number}/labels`, "issue_labels", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/timeline`, "issue_timeline", "core"),
+  route(`/repos/${owner}/${repo}/labels`, "label_list", "core"),
+  route(`/repos/${owner}/${repo}/labels/(?<label>[^/?#]+)`, "label_view", "core"),
+  route(`/repos/${owner}/${repo}/milestones`, "milestone_list", "core"),
+  route(`/repos/${owner}/${repo}/milestones/${id}`, "milestone_view", "core"),
+  route(`/repos/${owner}/${repo}/branches`, "branch_list", "core"),
   route(`/repos/${owner}/${repo}/branches/(?<branch>[^/?#]+)`, "branch_view", "core"),
+  route(`/repos/${owner}/${repo}/tags`, "tag_list", "core"),
+  route(`/repos/${owner}/${repo}/languages`, "repo_languages", "core"),
+  route(`/repos/${owner}/${repo}/contributors`, "repo_contributors", "core"),
+  route(`/repos/${owner}/${repo}/license`, "repo_license", "core"),
+  route(`/repos/${owner}/${repo}/topics`, "repo_topics", "core"),
+  route(`/repos/${owner}/${repo}/community/profile`, "community_profile", "core"),
+  route(`/repos/${owner}/${repo}/forks`, "fork_list", "core"),
+  route(`/repos/${owner}/${repo}/stargazers`, "stargazer_list", "core"),
+  route(`/repos/${owner}/${repo}/subscribers`, "subscriber_list", "core"),
+  route(`/repos/${owner}/${repo}/git/blobs/${sha}`, "git_blob", "core"),
+  route(`/repos/${owner}/${repo}/git/commits/${sha}`, "git_commit", "core"),
+  route(`/repos/${owner}/${repo}/git/trees/${sha}`, "git_tree", "core"),
+  route(`/repos/${owner}/${repo}/git/ref/(?<gitRef>.+)`, "git_ref", "core"),
+  route(`/repos/${owner}/${repo}/git/matching-refs/(?<gitRef>.+)`, "git_matching_refs", "core"),
   route(`/repos/${owner}/${repo}/actions/workflows`, "workflow_list", "core"),
   route(`/repos/${owner}/${repo}/actions/workflows/(?<workflow>[^/?#]+)`, "workflow_view", "core"),
   route(
@@ -62,6 +86,8 @@ const rules: RouteRule[] = [
   route(`/repos/${owner}/${repo}/releases/latest`, "release_latest", "core"),
   route(`/repos/${owner}/${repo}/releases/tags/${tag}`, "release_view", "core"),
   route(`/repos/${owner}/${repo}/releases/${id}`, "release_view", "core"),
+  route(`/repos/${owner}/${repo}/releases/${id}/assets`, "release_assets", "core"),
+  route(`/repos/${owner}/${repo}/releases/assets/${id}`, "release_asset", "core"),
   route("/search/issues", "search_issues", "search", { search: true }),
   route("/search/code", "search_code", "search", { search: true }),
   route("/search/commits", "search_commits", "search", { search: true }),
@@ -247,11 +273,18 @@ export function normalizeRouteKey(method: string, path: string): string {
     .replace(/\/issues\/[0-9]+/g, "/issues/:number")
     .replace(/\/comments\/[0-9]+/g, "/comments/:id")
     .replace(/\/commits\/[0-9A-Fa-f]{7,64}/g, "/commits/:sha")
+    .replace(/\/comments\/[0-9]+/g, "/comments/:id")
     .replace(/\/actions\/runs\/[0-9]+/g, "/actions/runs/:id")
     .replace(/\/actions\/jobs\/[0-9]+/g, "/actions/jobs/:id")
     .replace(/\/check-runs\/[0-9]+/g, "/check-runs/:id")
+    .replace(/\/milestones\/[0-9]+/g, "/milestones/:id")
+    .replace(/\/git\/(blobs|commits|trees)\/[0-9A-Fa-f]{7,64}/g, "/git/$1/:sha")
+    .replace(/\/git\/ref\/.+/g, "/git/ref/:ref")
+    .replace(/\/git\/matching-refs\/.+/g, "/git/matching-refs/:ref")
     .replace(/\/actions\/workflows\/[^/]+\/runs/g, "/actions/workflows/:workflow/runs")
-    .replace(/\/actions\/workflows\/[^/]+/g, "/actions/workflows/:workflow")}`;
+    .replace(/\/actions\/workflows\/[^/]+/g, "/actions/workflows/:workflow")
+    .replace(/\/releases\/assets\/[0-9]+/g, "/releases/assets/:id")
+    .replace(/\/releases\/[0-9]+/g, "/releases/:id")}`;
 }
 
 function requireText(value: unknown, field: string): string {

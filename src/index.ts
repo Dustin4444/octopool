@@ -431,6 +431,7 @@ async function relayGitHub(
     if (cacheKey !== undefined) {
       const webGitHub = await callGitHubWeb(env, relayRequest, route);
       if (webGitHub !== undefined) {
+        const sanitizedWebGitHub = sanitizeGitHubResponse(route, webGitHub);
         ctx.waitUntil(
           Promise.all([
             insertAudit(env, {
@@ -439,19 +440,19 @@ async function relayGitHub(
               pool: relayRequest.pool,
               routeKey: route.routeKey,
               routeKind: route.kind,
-              status: webGitHub.status,
+              status: sanitizedWebGitHub.status,
               durationMs: Date.now() - started,
               cacheStatus: auditCacheStatus,
               cacheable: auditCacheable,
             }),
-            writeGitHubCache(env, cacheKey, relayRequest, route, webGitHub),
+            writeGitHubCache(env, cacheKey, relayRequest, route, sanitizedWebGitHub),
           ]),
         );
         return jsonResponse({
-          status: webGitHub.status,
-          headers: webGitHub.headers,
-          body: webGitHub.body,
-          body_encoding: webGitHub.body_encoding,
+          status: sanitizedWebGitHub.status,
+          headers: sanitizedWebGitHub.headers,
+          body: sanitizedWebGitHub.body,
+          body_encoding: sanitizedWebGitHub.body_encoding,
           relay: {
             pool: relayRequest.pool,
             request_id: requestId,
@@ -766,7 +767,9 @@ function webOnlyRoute(route: RouteInfo): boolean {
   return (
     route.kind === "release_list" ||
     route.kind === "release_latest" ||
-    route.kind === "release_view"
+    route.kind === "release_view" ||
+    route.kind === "release_assets" ||
+    route.kind === "release_asset"
   );
 }
 

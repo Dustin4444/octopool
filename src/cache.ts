@@ -76,6 +76,8 @@ export function staleCacheSeconds(route: RouteInfo): number {
     case "commit_check_runs":
     case "commit_status":
     case "job_view":
+    case "git_ref":
+    case "git_matching_refs":
       return 300;
     case "pr_list":
     case "issue_list":
@@ -86,20 +88,44 @@ export function staleCacheSeconds(route: RouteInfo): number {
     case "pr_commits":
     case "pr_review_comments":
     case "pr_reviews":
+    case "commit_comments":
+    case "repo_comment":
     case "issue_comments":
     case "issue_events":
+    case "issue_labels":
     case "issue_timeline":
+    case "label_list":
+    case "label_view":
+    case "milestone_list":
+    case "milestone_view":
       return 3_600;
     case "repo_view":
     case "user_view":
+    case "repo_readme":
+    case "branch_list":
+    case "branch_view":
+    case "tag_list":
+    case "repo_languages":
+    case "repo_contributors":
+    case "repo_license":
+    case "repo_topics":
+    case "community_profile":
+    case "fork_list":
+    case "stargazer_list":
+    case "subscriber_list":
     case "commit_list":
     case "compare":
     case "contents":
     case "release_list":
     case "release_view":
     case "release_latest":
+    case "release_assets":
+    case "release_asset":
       return 7_200;
     case "commit_view":
+    case "git_blob":
+    case "git_commit":
+    case "git_tree":
       return 86_400;
     default:
       return 1_800;
@@ -172,9 +198,14 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
       return 3_600;
     case "repo_view":
       return 600;
+    case "repo_readme":
+      return 3_600;
     case "commit_list":
       return 300;
     case "commit_view":
+    case "git_blob":
+    case "git_commit":
+    case "git_tree":
       return 86_400;
     case "contents":
       return 3_600;
@@ -196,7 +227,21 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
       return closedIssue(response) ? 3_600 : 300;
     case "issue_list":
       return 60;
+    case "branch_list":
     case "branch_view":
+      return 120;
+    case "tag_list":
+    case "repo_languages":
+    case "repo_contributors":
+    case "repo_license":
+    case "repo_topics":
+    case "community_profile":
+    case "fork_list":
+    case "stargazer_list":
+    case "subscriber_list":
+      return 3_600;
+    case "git_ref":
+    case "git_matching_refs":
       return 120;
     case "run_view":
       return completedRun(response) ? 300 : 15;
@@ -216,15 +261,25 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
     case "pr_commits":
     case "pr_review_comments":
     case "pr_reviews":
+    case "commit_comments":
+    case "repo_comment":
     case "issue_comments":
     case "issue_events":
+    case "issue_labels":
     case "issue_timeline":
+    case "label_list":
+    case "label_view":
+    case "milestone_list":
+    case "milestone_view":
       return 300;
     case "search_issues":
     case "search_code":
     case "search_commits":
     case "search_repositories":
       return 120;
+    case "release_assets":
+    case "release_asset":
+      return 3_600;
     default:
       return 60;
   }

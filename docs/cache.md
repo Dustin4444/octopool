@@ -45,9 +45,14 @@ serves these public shapes through GitHub web/raw endpoints:
   patch `Accept` header) via `github.com/{owner}/{repo}/pull/{number}.diff|patch`
 - commit diff/patch media requests via `github.com/{owner}/{repo}/commit/{sha}.diff|patch`
 - compare diff/patch media requests via `github.com/{owner}/{repo}/compare/{base...head}.diff|patch`
-- explicit-ref contents reads via `raw.githubusercontent.com`, returned as an
-  API-shaped JSON file payload
-- release list/latest/tag/id reads via unauthenticated `api.github.com` requests so pooled
+- exact public GitHub API reads without caller credentials for repo metadata, commits,
+  compare JSON, contents, README, PRs, issues, checks/statuses, Actions run/workflow
+  metadata, branches, tags, labels, milestones, topics, community profiles, forks,
+  stargazers, subscribers, Git object reads, languages, contributors, licenses, release
+  assets, and repo-scoped issue/commit search
+- explicit-ref contents reads can fall back to `raw.githubusercontent.com`, returned as an
+  API-shaped JSON file payload, if the public contents API is unavailable
+- release list/latest/tag/id/asset reads via unauthenticated `api.github.com` requests so pooled
   credentials never expose draft releases
 
 Successful web reads are cached in the same D1 table with no source identity. A cached

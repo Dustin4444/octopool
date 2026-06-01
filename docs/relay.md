@@ -98,15 +98,18 @@ enabled; anything else returns `403 route_denied`:
 
 - `pr_view`, `pr_files`, `pr_commits`, `pr_review_comments`, `pr_reviews`
 - `pr_list`
-- `commit_list`, `commit_view`, `compare`, `contents`, `commit_check_runs`, `commit_status`
+- `commit_list`, `commit_view`, `commit_comments`, `repo_comment`, `compare`, `contents`, `repo_readme`, `commit_check_runs`, `commit_status`
 - `run_list`, `run_view`, `run_jobs`, `run_artifacts`
 - `job_view`, `job_logs`, `check_run_annotations`
-- `issue_list`, `issue_view`, `issue_comments`, `issue_events`, `issue_timeline`
-- `branch_view`
+- `issue_list`, `issue_view`, `issue_comments`, `issue_events`, `issue_labels`, `issue_timeline`
+- `label_list`, `label_view`, `milestone_list`, `milestone_view`
+- `branch_list`, `branch_view`, `tag_list`, `repo_languages`, `repo_contributors`, `repo_license`
+- `repo_topics`, `community_profile`, `fork_list`, `stargazer_list`, `subscriber_list`
+- `git_blob`, `git_commit`, `git_tree`, `git_ref`, `git_matching_refs`
 - `user_view`
 - `repo_view`
-- `release_list`, `release_latest`, `release_view`
-- `workflow_list`, `workflow_view`
+- `release_list`, `release_latest`, `release_view`, `release_assets`, `release_asset`
+- `workflow_list`, `workflow_view`, `workflow_run_list`
 - `search_issues`, `search_code`, `search_commits` when `allow_search` is enabled
   and `q` contains exactly one `repo:owner/name` qualifier plus plain terms only
 - `rate_limit`

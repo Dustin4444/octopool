@@ -67,8 +67,20 @@ describe("github web provider", () => {
     );
   });
 
-  it("returns API-shaped content JSON from raw.githubusercontent.com", async () => {
-    const fetchMock = vi.fn(async () => new Response("hello\n"));
+  it("prefers exact unauthenticated contents API JSON", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            type: "file",
+            encoding: "base64",
+            name: "README.md",
+            path: "README.md",
+            content: "aGVsbG8K",
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -80,7 +92,7 @@ describe("github web provider", () => {
     const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://raw.githubusercontent.com/openclaw/octopool/main/README.md",
+      "https://api.github.com/repos/openclaw/octopool/contents/README.md?ref=main",
       expect.objectContaining({
         headers: expect.not.objectContaining({ authorization: expect.any(String) }),
       }),
@@ -90,14 +102,17 @@ describe("github web provider", () => {
       encoding: "base64",
       name: "README.md",
       path: "README.md",
-      sha: "ce013625030ba8dba906f756967f9e9ca394464a",
       content: "aGVsbG8K",
-      download_url: "https://raw.githubusercontent.com/openclaw/octopool/main/README.md",
     });
   });
 
-  it("decodes encoded content paths before fetching raw files", async () => {
-    const fetchMock = vi.fn(async () => new Response("hello\n"));
+  it("falls back to raw content extraction when the public contents API is unavailable", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "rate limited" }), { status: 403 }),
+      )
+      .mockResolvedValueOnce(new Response("hello\n"));
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -108,7 +123,8 @@ describe("github web provider", () => {
 
     const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
 
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
       "https://raw.githubusercontent.com/openclaw/octopool/main/docs/My%20File.md",
       expect.any(Object),
     );
@@ -201,8 +217,8 @@ describe("github web provider", () => {
     await expect(callGitHubWeb(env(), view, classifyRoute(view, policy))).resolves.toBe(undefined);
   });
 
-  it("falls through for content reads without an explicit ref", async () => {
-    const fetchMock = vi.fn();
+  it("fetches content reads without an explicit ref through the public contents API", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ name: "README.md" })));
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -210,14 +226,17 @@ describe("github web provider", () => {
       path: "/repos/openclaw/octopool/contents/README.md",
     });
 
-    await expect(callGitHubWeb(env(), request, classifyRoute(request, policy))).resolves.toBe(
-      undefined,
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({ body: { name: "README.md" }, backend: "web" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/openclaw/octopool/contents/README.md",
+      expect.any(Object),
     );
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("falls through for content reads with unsafe refs", async () => {
-    const fetchMock = vi.fn();
+  it("uses the public contents API but skips raw extraction for unsafe refs", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ name: "README.md" })));
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -226,10 +245,10 @@ describe("github web provider", () => {
       query: { ref: "../../steipete/ReleaseBar/main" },
     });
 
-    await expect(callGitHubWeb(env(), request, classifyRoute(request, policy))).resolves.toBe(
-      undefined,
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({ body: { name: "README.md" } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("falls through for non-default content media accepts", async () => {
@@ -247,6 +266,101 @@ describe("github web provider", () => {
       undefined,
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fetches repo metadata and branch lists through unauthenticated GitHub API reads", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ full_name: "openclaw/octopool" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ name: "main" }])));
+    vi.stubGlobal("fetch", fetchMock);
+    const repo = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool",
+    });
+    const branches = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/branches",
+      query: { per_page: "10" },
+    });
+
+    await expect(callGitHubWeb(env(), repo, classifyRoute(repo, policy))).resolves.toMatchObject({
+      body: { full_name: "openclaw/octopool" },
+      backend: "web",
+    });
+    await expect(
+      callGitHubWeb(env(), branches, classifyRoute(branches, policy)),
+    ).resolves.toMatchObject({
+      body: [{ name: "main" }],
+      backend: "web",
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.github.com/repos/openclaw/octopool/branches?per_page=10",
+      expect.objectContaining({
+        headers: expect.not.objectContaining({ authorization: expect.any(String) }),
+      }),
+    );
+  });
+
+  it("preserves GitHub pagination and rate headers on public API reads", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify([{ name: "main" }]), {
+          headers: {
+            link: '<https://api.github.com/repositories/1/branches?page=2>; rel="next"',
+            "x-ratelimit-remaining": "59",
+            "x-github-request-id": "req-1",
+          },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/branches",
+      query: { per_page: "1" },
+      headers: { "x-github-api-version": "2024-01-01" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({
+      headers: {
+        link: '<https://api.github.com/repositories/1/branches?page=2>; rel="next"',
+        "x-ratelimit-remaining": "59",
+        "x-github-request-id": "req-1",
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/openclaw/octopool/branches?per_page=1",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "x-github-api-version": "2024-01-01" }),
+      }),
+    );
+  });
+
+  it("returns empty successful public API responses without falling through", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 204 })),
+    );
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/contributors",
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({
+      status: 204,
+      body: null,
+      body_encoding: "text",
+      backend: "web",
+    });
   });
 
   it("falls through on oversized web bodies while streaming", async () => {
