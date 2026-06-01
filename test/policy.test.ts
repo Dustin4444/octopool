@@ -24,6 +24,24 @@ describe("route policy", () => {
     }
   });
 
+  it("allows public org, user collection, and gist reads", () => {
+    for (const [path, kind] of [
+      ["/orgs/openclaw", "org_view"],
+      ["/orgs/openclaw/repos", "org_repo_list"],
+      ["/users/openperf/repos", "user_repo_list"],
+      ["/users/openperf/orgs", "user_org_list"],
+      ["/users/openperf/gists", "user_gist_list"],
+      ["/gists/abc123", "gist_view"],
+    ]) {
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path,
+      });
+      expect(classifyRoute(request, policy).kind).toBe(kind);
+    }
+  });
+
   it("does not normalize repo names that match top-level routes", () => {
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -33,6 +51,15 @@ describe("route policy", () => {
     expect(classifyRoute(request, policy)).toMatchObject({
       kind: "pr_view",
       routeKey: "GET /repos/openclaw/users/pulls/:number",
+    });
+    const orgsRepo = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/orgs/labels",
+    });
+    expect(classifyRoute(orgsRepo, policy)).toMatchObject({
+      kind: "label_list",
+      routeKey: "GET /repos/openclaw/orgs/labels",
     });
   });
 
@@ -48,13 +75,18 @@ describe("route policy", () => {
       "/repos/openclaw/openclaw/issues?state=open",
       "/repos/openclaw/openclaw/pulls/85341",
       "/repos/openclaw/openclaw/pulls/85341/commits",
+      "/repos/openclaw/openclaw/pulls/comments/123/reactions",
       "/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351/comments",
       "/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351/check-runs",
       "/repos/openclaw/openclaw/actions/runs/26360397003/jobs",
       "/repos/openclaw/openclaw/actions/jobs/77594668516/logs",
       "/repos/openclaw/openclaw/issues/80490/comments",
+      "/repos/openclaw/openclaw/issues/comments/123/reactions",
       "/repos/openclaw/openclaw/issues/80490/events",
       "/repos/openclaw/openclaw/issues/80490/labels",
+      "/repos/openclaw/openclaw/issues/80490/reactions",
+      "/repos/openclaw/openclaw/assignees",
+      "/repos/openclaw/openclaw/assignees/openperf",
       "/repos/openclaw/openclaw/labels",
       "/repos/openclaw/openclaw/labels/good%20first%20issue",
       "/repos/openclaw/openclaw/milestones",
@@ -112,6 +144,53 @@ describe("route policy", () => {
     expect(() => classifyRoute(request, { ...policy, allow_public_repos: false })).toThrow(
       /not allowed/,
     );
+  });
+
+  it("applies owner policy to user repository lists", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/users/steipete/repos",
+    });
+    expect(() => classifyRoute(request, { ...policy, allow_public_repos: false })).toThrow(
+      /not allowed/,
+    );
+  });
+
+  it("only allows owner repositories for user repository lists", () => {
+    const ownerRequest = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/users/openclaw/repos",
+      query: { type: "owner" },
+    });
+    expect(classifyRoute(ownerRequest, policy)).toMatchObject({ kind: "user_repo_list" });
+
+    const memberRequest = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/users/openclaw/repos",
+      query: { type: "member" },
+    });
+    expect(() => classifyRoute(memberRequest, policy)).toThrow(/owner repositories/);
+  });
+
+  it("only allows public repositories for organization repository lists", () => {
+    const publicRequest = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/orgs/openclaw/repos",
+      query: { type: "public" },
+    });
+    expect(classifyRoute(publicRequest, policy)).toMatchObject({ kind: "org_repo_list" });
+
+    const privateRequest = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/orgs/openclaw/repos",
+      query: { type: "private" },
+    });
+    expect(() => classifyRoute(privateRequest, policy)).toThrow(/public repositories/);
   });
 
   it("denies mutations", () => {
@@ -197,6 +276,37 @@ describe("route policy", () => {
       repo: "openclaw",
       resource: "search",
     });
+  });
+
+  it("allows plain repository search when search is enabled", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/search/repositories",
+      query: { q: "octopool relay" },
+    });
+    expect(() => classifyRoute(request, policy)).toThrow(/Search routes are disabled/);
+    expect(classifyRoute(request, { ...policy, allow_search: true })).toMatchObject({
+      kind: "search_repositories",
+      resource: "search",
+    });
+    expect(() =>
+      classifyRoute(request, { ...policy, allow_search: true, allow_public_repos: false }),
+    ).toThrow(/public repository pooling/);
+  });
+
+  it("denies advanced repository search syntax", () => {
+    for (const q of ["octopool NOT relay", "octopool -relay"]) {
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/search/repositories",
+        query: { q },
+      });
+      expect(() => classifyRoute(request, { ...policy, allow_search: true })).toThrow(
+        /plain terms/,
+      );
+    }
   });
 
   it("denies unscoped search routes even when search is enabled", () => {

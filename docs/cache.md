@@ -49,7 +49,8 @@ serves these public shapes through GitHub web/raw endpoints:
   compare JSON, contents, README, PRs, issues, checks/statuses, Actions run/workflow
   metadata, branches, tags, labels, milestones, topics, community profiles, forks,
   stargazers, subscribers, Git object reads, languages, contributors, licenses, release
-  assets, and repo-scoped issue/commit search
+  assets, org/user/gist reads, reactions, assignees, repository search, and repo-scoped
+  issue/commit search
 - explicit-ref contents reads can fall back to `raw.githubusercontent.com`, returned as an
   API-shaped JSON file payload, if the public contents API is unavailable
 - release list/latest/tag/id/asset reads via unauthenticated `api.github.com` requests so pooled

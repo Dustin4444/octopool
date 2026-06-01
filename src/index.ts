@@ -769,7 +769,14 @@ function webOnlyRoute(route: RouteInfo): boolean {
     route.kind === "release_latest" ||
     route.kind === "release_view" ||
     route.kind === "release_assets" ||
-    route.kind === "release_asset"
+    route.kind === "release_asset" ||
+    route.kind === "org_view" ||
+    route.kind === "org_repo_list" ||
+    route.kind === "user_repo_list" ||
+    route.kind === "user_org_list" ||
+    route.kind === "user_gist_list" ||
+    route.kind === "gist_view" ||
+    route.kind === "search_repositories"
   );
 }
 

@@ -289,6 +289,9 @@ function publicApiRequest(
       } catch {
         return undefined;
       }
+      if (route.kind === "gist_view" && !publicGist(parsed)) {
+        return undefined;
+      }
       return {
         status,
         headers: webHeaders(headers, "application/json"),
@@ -311,6 +314,12 @@ function releaseRoute(route: RouteInfo): boolean {
 function publicApiRoute(route: RouteInfo): boolean {
   switch (route.kind) {
     case "repo_view":
+    case "user_repo_list":
+    case "user_org_list":
+    case "user_gist_list":
+    case "org_view":
+    case "org_repo_list":
+    case "gist_view":
     case "commit_list":
     case "commit_view":
     case "commit_comments":
@@ -323,6 +332,7 @@ function publicApiRoute(route: RouteInfo): boolean {
     case "pr_files":
     case "pr_commits":
     case "pr_review_comments":
+    case "pr_review_comment_reactions":
     case "pr_reviews":
     case "commit_check_runs":
     case "commit_status":
@@ -335,9 +345,13 @@ function publicApiRoute(route: RouteInfo): boolean {
     case "issue_view":
     case "issue_list":
     case "issue_comments":
+    case "issue_comment_reactions":
     case "issue_events":
     case "issue_labels":
+    case "issue_reactions":
     case "issue_timeline":
+    case "assignee_list":
+    case "assignee_view":
     case "label_list":
     case "label_view":
     case "milestone_list":
@@ -365,10 +379,15 @@ function publicApiRoute(route: RouteInfo): boolean {
     case "release_asset":
     case "search_issues":
     case "search_commits":
+    case "search_repositories":
       return true;
     default:
       return false;
   }
+}
+
+function publicGist(value: unknown): boolean {
+  return typeof value === "object" && value !== null && "public" in value && value.public === true;
 }
 
 function appendQuery(url: URL, query: Record<string, string | string[]> | undefined): void {

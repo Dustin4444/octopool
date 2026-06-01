@@ -18,6 +18,10 @@ import (
 
 var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/users/[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?(?:\[bot\]|%5[Bb]bot%5[Dd])?$`),
+	regexp.MustCompile(`^/users/[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?(?:\[bot\]|%5[Bb]bot%5[Dd])?/(repos|orgs|gists)$`),
+	regexp.MustCompile(`^/orgs/[^/]+$`),
+	regexp.MustCompile(`^/orgs/[^/]+/repos$`),
+	regexp.MustCompile(`^/gists/[0-9A-Fa-f]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits/[0-9A-Fa-f]{7,64}$`),
@@ -29,6 +33,7 @@ var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/[0-9]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/[0-9]+/(files|commits|comments|reviews)$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/comments/[0-9]+/reactions$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits/[0-9A-Fa-f]{7,64}/(check-runs|status)$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/runs$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/runs/[0-9]+$`),
@@ -38,7 +43,9 @@ var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/check-runs/[0-9]+/annotations$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues/[0-9]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues$`),
-	regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues/[0-9]+/(comments|events|labels|timeline)$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues/[0-9]+/(comments|events|labels|reactions|timeline)$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues/comments/[0-9]+/reactions$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/assignees(?:/[^/?#]+)?$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/labels(?:/[^/?#]+)?$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/milestones(?:/[0-9]+)?$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/branches$`),
@@ -56,7 +63,7 @@ var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/releases/[0-9]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/releases/[0-9]+/assets$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/releases/assets/[0-9]+$`),
-	regexp.MustCompile(`^/search/(issues|code|commits)$`),
+	regexp.MustCompile(`^/search/(issues|code|commits|repositories)$`),
 	regexp.MustCompile(`^/rate_limit$`),
 }
 
@@ -72,7 +79,7 @@ var errOctopoolNotLoggedIn = errors.New("not logged in; run: octopool login")
 func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprintln(stdout, "usage: octopool gh api <GET path> [--jq expr]")
-		fmt.Fprintln(stdout, "       octopool gh pr|issue|run|repo|release ...")
+		fmt.Fprintln(stdout, "       octopool gh pr|issue|run|repo|release|workflow|label|gist|search ...")
 		return nil
 	}
 	if args[0] != "api" {
@@ -294,12 +301,28 @@ func safeRelayRequest(request ghAPIRequest) bool {
 	if len(request.query) > 0 && !relayQueryPath(request.path) {
 		return false
 	}
+	if request.path == "/search/repositories" && !safeRepositorySearchQuery(request.query) {
+		return false
+	}
 	for key := range request.query {
 		if sensitiveQueryKey(key) {
 			return false
 		}
 	}
 	return true
+}
+
+func safeRepositorySearchQuery(query map[string]any) bool {
+	raw, ok := query["q"]
+	if !ok {
+		return false
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return false
+	}
+	terms, ok := searchTerms(value)
+	return ok && len(terms) > 0
 }
 
 func safeRelayPath(path string) bool {

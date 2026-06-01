@@ -103,6 +103,11 @@ octopool gh issue list -R openclaw/openclaw --state open --label bug --limit 20 
 octopool gh run list -R openclaw/openclaw --branch main --limit 10 --json databaseId,workflowName,status,conclusion,url
 octopool gh run view 26360397003 -R openclaw/openclaw --json databaseId,workflowName,status,conclusion,url
 octopool gh repo view openclaw/openclaw --json nameWithOwner,defaultBranchRef,url
+octopool gh workflow list -R openclaw/octopool --json id,name,path,state
+octopool gh workflow view ci.yml -R openclaw/octopool --json id,name,path,state
+octopool gh label list -R openclaw/octopool --json name,color,description
+octopool gh gist view abc123 --json id,url,isPublic
+octopool gh search repos octopool relay --json name,nameWithOwner,url
 octopool gh release list -R openclaw/octopool --limit 10 --json tagName,name,url
 octopool gh release view v0.3.0 -R openclaw/octopool --json tagName,name,url
 octopool gh api repos/openclaw/octopool/contents/README.md?ref=main --jq .content

@@ -305,6 +305,79 @@ describe("github web provider", () => {
     );
   });
 
+  it("fetches public org, user collection, gist, and repository search reads", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ login: "openclaw" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ full_name: "openclaw/octopool" }])))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "abc123", public: true })))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [{ full_name: "openclaw/octopool" }] })),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const searchPolicy = { ...policy, allow_search: true };
+    const org = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/orgs/openclaw",
+    });
+    const userRepos = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/users/openperf/repos",
+      query: { per_page: "1" },
+    });
+    const gist = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/gists/abc123",
+    });
+    const search = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/search/repositories",
+      query: { q: "octopool relay" },
+    });
+
+    await expect(callGitHubWeb(env(), org, classifyRoute(org, policy))).resolves.toMatchObject({
+      body: { login: "openclaw" },
+    });
+    await expect(
+      callGitHubWeb(env(), userRepos, classifyRoute(userRepos, policy)),
+    ).resolves.toMatchObject({
+      body: [{ full_name: "openclaw/octopool" }],
+    });
+    await expect(callGitHubWeb(env(), gist, classifyRoute(gist, policy))).resolves.toMatchObject({
+      body: { id: "abc123", public: true },
+    });
+    await expect(
+      callGitHubWeb(env(), search, classifyRoute(search, searchPolicy)),
+    ).resolves.toMatchObject({
+      body: { items: [{ full_name: "openclaw/octopool" }] },
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "https://api.github.com/search/repositories?q=octopool+relay",
+      expect.objectContaining({
+        headers: expect.not.objectContaining({ authorization: expect.any(String) }),
+      }),
+    );
+  });
+
+  it("does not serve secret gist bodies through the public web fallback", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ id: "abc123", public: false }))),
+    );
+    const gist = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/gists/abc123",
+    });
+
+    await expect(callGitHubWeb(env(), gist, classifyRoute(gist, policy))).resolves.toBe(undefined);
+  });
+
   it("preserves GitHub pagination and rate headers on public API reads", async () => {
     const fetchMock = vi.fn(
       async () =>

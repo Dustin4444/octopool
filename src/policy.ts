@@ -3,12 +3,14 @@ import type { PoolPolicy, RelayRequest, RouteInfo } from "./types";
 
 const owner = "(?<owner>[A-Za-z0-9_.-]+)";
 const repo = "(?<repo>[A-Za-z0-9_.-]+)";
+const org = "(?<org>[A-Za-z0-9_.-]+)";
 const loginPath = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?(?:\\[bot\\]|%5[Bb]bot%5[Dd])?";
 const login = `(?<login>${loginPath})`;
 const number = "[0-9]+";
 const sha = "[0-9A-Fa-f]{7,64}";
 const id = "[0-9]+";
 const tag = "(?<tag>[^/?#]+)";
+const gistId = "(?<gistId>[0-9A-Fa-f]+)";
 
 type RouteRule = {
   pattern: RegExp;
@@ -22,6 +24,12 @@ type RouteRule = {
 
 const rules: RouteRule[] = [
   route(`/users/${login}`, "user_view", "core"),
+  route(`/users/${login}/repos`, "user_repo_list", "core"),
+  route(`/users/${login}/orgs`, "user_org_list", "core"),
+  route(`/users/${login}/gists`, "user_gist_list", "core"),
+  route(`/orgs/${org}`, "org_view", "core"),
+  route(`/orgs/${org}/repos`, "org_repo_list", "core"),
+  route(`/gists/${gistId}`, "gist_view", "core"),
   route(`/repos/${owner}/${repo}`, "repo_view", "core"),
   route(`/repos/${owner}/${repo}/commits`, "commit_list", "core"),
   route(`/repos/${owner}/${repo}/commits/${sha}`, "commit_view", "core"),
@@ -36,6 +44,11 @@ const rules: RouteRule[] = [
   route(`/repos/${owner}/${repo}/pulls/${number}/files`, "pr_files", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}/commits`, "pr_commits", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}/comments`, "pr_review_comments", "core"),
+  route(
+    `/repos/${owner}/${repo}/pulls/comments/${id}/reactions`,
+    "pr_review_comment_reactions",
+    "core",
+  ),
   route(`/repos/${owner}/${repo}/pulls/${number}/reviews`, "pr_reviews", "core"),
   route(`/repos/${owner}/${repo}/commits/${sha}/check-runs`, "commit_check_runs", "core"),
   route(`/repos/${owner}/${repo}/commits/${sha}/status`, "commit_status", "core"),
@@ -52,9 +65,17 @@ const rules: RouteRule[] = [
   route(`/repos/${owner}/${repo}/issues/${number}`, "issue_view", "core"),
   route(`/repos/${owner}/${repo}/issues`, "issue_list", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/comments`, "issue_comments", "core"),
+  route(
+    `/repos/${owner}/${repo}/issues/comments/${id}/reactions`,
+    "issue_comment_reactions",
+    "core",
+  ),
   route(`/repos/${owner}/${repo}/issues/${number}/events`, "issue_events", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/labels`, "issue_labels", "core"),
+  route(`/repos/${owner}/${repo}/issues/${number}/reactions`, "issue_reactions", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/timeline`, "issue_timeline", "core"),
+  route(`/repos/${owner}/${repo}/assignees`, "assignee_list", "core"),
+  route(`/repos/${owner}/${repo}/assignees/${login}`, "assignee_view", "core"),
   route(`/repos/${owner}/${repo}/labels`, "label_list", "core"),
   route(`/repos/${owner}/${repo}/labels/(?<label>[^/?#]+)`, "label_view", "core"),
   route(`/repos/${owner}/${repo}/milestones`, "milestone_list", "core"),
@@ -91,6 +112,7 @@ const rules: RouteRule[] = [
   route("/search/issues", "search_issues", "search", { search: true }),
   route("/search/code", "search_code", "search", { search: true }),
   route("/search/commits", "search_commits", "search", { search: true }),
+  route("/search/repositories", "search_repositories", "search", { search: true }),
   route("/rate_limit", "rate_limit", "core"),
 ];
 
@@ -210,8 +232,25 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
         throw new HttpError(403, "route_denied", "Cross-repository compare routes are not enabled");
       }
     }
-    const searchRepo = rule.search === true ? repoFromSearchQuery(request.query) : undefined;
-    const routeOwner = (match.groups?.owner ?? searchRepo?.owner)?.toLowerCase();
+    const searchRepo = searchRepoForRule(rule, request.query);
+    if (rule.kind === "search_repositories" && !policy.allow_public_repos) {
+      throw new HttpError(
+        403,
+        "search_denied",
+        "Repository search routes require public repository pooling",
+      );
+    }
+    if (rule.kind === "org_repo_list") {
+      validateOrgRepoListQuery(request.query);
+    } else if (rule.kind === "user_repo_list") {
+      validateUserRepoListQuery(request.query);
+    }
+    const routeOwner = (
+      match.groups?.owner ??
+      match.groups?.org ??
+      (rule.kind === "user_repo_list" ? match.groups?.login : undefined) ??
+      searchRepo?.owner
+    )?.toLowerCase();
     const allowedOwner = routeOwner === undefined || policy.allowed_owners.includes(routeOwner);
     if (routeOwner !== undefined && !allowedOwner && !policy.allow_public_repos) {
       throw new HttpError(403, "owner_denied", `Owner ${routeOwner} is not allowed for this pool`);
@@ -266,9 +305,68 @@ function repoFromSearchQuery(query: Record<string, string | string[]> | undefine
   return { owner: matches[0][1], repo: matches[0][2] };
 }
 
+function searchRepoForRule(
+  rule: RouteRule,
+  query: Record<string, string | string[]> | undefined,
+): { owner: string; repo: string } | undefined {
+  if (rule.search !== true) {
+    return undefined;
+  }
+  if (rule.kind === "search_repositories") {
+    validateRepositorySearchQuery(query);
+    return undefined;
+  }
+  return repoFromSearchQuery(query);
+}
+
+function validateUserRepoListQuery(query: Record<string, string | string[]> | undefined): void {
+  const type = query?.type;
+  if (type === undefined || type === "owner") {
+    return;
+  }
+  throw new HttpError(403, "route_denied", "User repository lists only allow owner repositories");
+}
+
+function validateOrgRepoListQuery(query: Record<string, string | string[]> | undefined): void {
+  const type = query?.type;
+  if (type === undefined || type === "public") {
+    return;
+  }
+  throw new HttpError(
+    403,
+    "route_denied",
+    "Organization repository lists only allow public repositories",
+  );
+}
+
+function validateRepositorySearchQuery(query: Record<string, string | string[]> | undefined): void {
+  const q = query?.q;
+  if (typeof q !== "string") {
+    throw new HttpError(403, "search_denied", "Repository search routes require a q query");
+  }
+  const tokens = q.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) {
+    throw new HttpError(403, "search_denied", "Repository search routes require plain terms");
+  }
+  for (const token of tokens) {
+    const upper = token.toUpperCase();
+    if (
+      token.startsWith("-") ||
+      !/^[A-Za-z0-9_.-]+$/.test(token) ||
+      upper === "OR" ||
+      upper === "NOT"
+    ) {
+      throw new HttpError(403, "search_denied", "Repository search only allows plain terms");
+    }
+  }
+}
+
 export function normalizeRouteKey(method: string, path: string): string {
   const routePath = new RegExp(`^/users/${loginPath}$`).test(path) ? "/users/:login" : path;
   return `${method.toUpperCase()} ${routePath
+    .replace(new RegExp(`^/users/${loginPath}/`), "/users/:login/")
+    .replace(/^\/orgs\/[A-Za-z0-9_.-]+/, "/orgs/:org")
+    .replace(/\/gists\/[0-9A-Fa-f]+/g, "/gists/:id")
     .replace(/\/pulls\/[0-9]+/g, "/pulls/:number")
     .replace(/\/issues\/[0-9]+/g, "/issues/:number")
     .replace(/\/comments\/[0-9]+/g, "/comments/:id")

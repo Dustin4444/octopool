@@ -81,6 +81,8 @@ export function staleCacheSeconds(route: RouteInfo): number {
       return 300;
     case "pr_list":
     case "issue_list":
+    case "org_repo_list":
+    case "user_repo_list":
       return 600;
     case "pr_view":
     case "issue_view":
@@ -98,9 +100,18 @@ export function staleCacheSeconds(route: RouteInfo): number {
     case "label_view":
     case "milestone_list":
     case "milestone_view":
+    case "issue_reactions":
+    case "issue_comment_reactions":
+    case "pr_review_comment_reactions":
+    case "assignee_list":
+    case "assignee_view":
       return 3_600;
     case "repo_view":
     case "user_view":
+    case "org_view":
+    case "user_org_list":
+    case "user_gist_list":
+    case "gist_view":
     case "repo_readme":
     case "branch_list":
     case "branch_view":
@@ -198,6 +209,14 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
       return 3_600;
     case "repo_view":
       return 600;
+    case "org_repo_list":
+    case "user_repo_list":
+      return 600;
+    case "org_view":
+    case "user_org_list":
+    case "user_gist_list":
+    case "gist_view":
+      return 3_600;
     case "repo_readme":
       return 3_600;
     case "commit_list":
@@ -271,6 +290,11 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
     case "label_view":
     case "milestone_list":
     case "milestone_view":
+    case "issue_reactions":
+    case "issue_comment_reactions":
+    case "pr_review_comment_reactions":
+    case "assignee_list":
+    case "assignee_view":
       return 300;
     case "search_issues":
     case "search_code":

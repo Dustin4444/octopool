@@ -48,6 +48,12 @@ func runGHTopLevel(ctx context.Context, args []string, stdout io.Writer) (bool, 
 		return runGHRepo(ctx, args[1:], stdout)
 	case "release":
 		return runGHRelease(ctx, args[1:], stdout)
+	case "workflow":
+		return runGHWorkflow(ctx, args[1:], stdout)
+	case "label":
+		return runGHLabel(ctx, args[1:], stdout)
+	case "gist":
+		return runGHGist(ctx, args[1:], stdout)
 	case "search":
 		return runGHSearch(ctx, args[1:], stdout)
 	default:
@@ -117,7 +123,7 @@ func runGHSearch(ctx context.Context, args []string, stdout io.Writer) (bool, er
 		return false, nil
 	}
 	kind := args[0]
-	if kind != "issues" && kind != "prs" {
+	if kind != "issues" && kind != "prs" && kind != "repos" {
 		return false, nil
 	}
 	opts, fallback, err := parseGHTopOptions(args[1:])
@@ -126,6 +132,17 @@ func runGHSearch(ctx context.Context, args []string, stdout io.Writer) (bool, er
 	}
 	if topJQFallback(opts) {
 		return false, nil
+	}
+	if kind == "repos" {
+		if opts.repo != "" || opts.repoCount > 0 || opts.state != "" || opts.patch || opts.branch != "" || opts.workflow != "" || opts.status != "" || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) || limitOverOnePage(opts) {
+			return false, nil
+		}
+		query, ok := plainSearchQuery(opts.positionals)
+		if !ok || query == "" {
+			return false, nil
+		}
+		opts.positionals = nil
+		return true, relaySearchRepos(ctx, stdout, query, opts)
 	}
 	repo, ok := repoFromOptionOrCurrent(opts.repo)
 	if !ok || repo == "" || opts.repoCount > 1 || !machineReadable(opts) || limitOverOnePage(opts) {
@@ -266,18 +283,25 @@ func runGHRepo(ctx context.Context, args []string, stdout io.Writer) (bool, erro
 	if topJQFallback(opts) {
 		return false, nil
 	}
-	if args[0] != "view" || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) {
+	switch args[0] {
+	case "view":
+		if hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) {
+			return false, nil
+		}
+		if opts.repo == "" && len(opts.positionals) == 1 {
+			opts.repo = opts.positionals[0]
+			opts.positionals = nil
+		}
+		repo, ok := repoOnly(opts)
+		if !ok {
+			return false, nil
+		}
+		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo)}, opts, fieldMapRepo)
+	case "list":
+		return false, nil
+	default:
 		return false, nil
 	}
-	if opts.repo == "" && len(opts.positionals) == 1 {
-		opts.repo = opts.positionals[0]
-		opts.positionals = nil
-	}
-	repo, ok := repoOnly(opts)
-	if !ok {
-		return false, nil
-	}
-	return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo)}, opts, fieldMapRepo)
 }
 
 func runGHRelease(ctx context.Context, args []string, stdout io.Writer) (bool, error) {
@@ -310,6 +334,82 @@ func runGHRelease(ctx context.Context, args []string, stdout io.Writer) (bool, e
 			return false, nil
 		}
 		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: path}, opts, fieldMapRelease)
+	default:
+		return false, nil
+	}
+}
+
+func runGHWorkflow(ctx context.Context, args []string, stdout io.Writer) (bool, error) {
+	if len(args) == 0 {
+		return false, nil
+	}
+	opts, fallback, err := parseGHTopOptions(args[1:])
+	if err != nil || fallback {
+		return !fallback, err
+	}
+	if topJQFallback(opts) {
+		return false, nil
+	}
+	repo, ok := repoFromOptionOrCurrent(opts.repo)
+	if !ok || repo == "" {
+		return false, nil
+	}
+	switch args[0] {
+	case "list":
+		if len(opts.positionals) != 0 || opts.patch || opts.state != "" || opts.branch != "" || opts.workflow != "" || opts.status != "" || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedWorkflowFields) || limitOverOnePage(opts) {
+			return false, nil
+		}
+		return true, relayWorkflowList(ctx, stdout, repo, opts)
+	case "view":
+		if len(opts.positionals) != 1 || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedWorkflowFields) || !supportedWorkflowRef(opts.positionals[0]) {
+			return false, nil
+		}
+		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "actions", "workflows", opts.positionals[0])}, opts, fieldMapWorkflow)
+	default:
+		return false, nil
+	}
+}
+
+func runGHLabel(ctx context.Context, args []string, stdout io.Writer) (bool, error) {
+	if len(args) == 0 {
+		return false, nil
+	}
+	opts, fallback, err := parseGHTopOptions(args[1:])
+	if err != nil || fallback {
+		return !fallback, err
+	}
+	if topJQFallback(opts) {
+		return false, nil
+	}
+	if args[0] != "list" || opts.patch || opts.state != "" || opts.branch != "" || opts.workflow != "" || opts.status != "" || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedLabelFields) || limitOverOnePage(opts) {
+		return false, nil
+	}
+	repo, ok := repoOnly(opts)
+	if !ok {
+		return false, nil
+	}
+	return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "labels"), query: listQuery(opts)}, opts, fieldMapLabel)
+}
+
+func runGHGist(ctx context.Context, args []string, stdout io.Writer) (bool, error) {
+	if len(args) == 0 {
+		return false, nil
+	}
+	opts, fallback, err := parseGHTopOptions(args[1:])
+	if err != nil || fallback {
+		return !fallback, err
+	}
+	if topJQFallback(opts) {
+		return false, nil
+	}
+	switch args[0] {
+	case "list":
+		return false, nil
+	case "view":
+		if len(opts.positionals) != 1 || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedGistFields) || !isHex(opts.positionals[0]) {
+			return false, nil
+		}
+		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: "/gists/" + opts.positionals[0]}, opts, fieldMapGist)
 	default:
 		return false, nil
 	}
@@ -609,11 +709,109 @@ func relaySearchIssues(ctx context.Context, stdout io.Writer, repo string, rawQu
 	return relayGitHubSearch(ctx, stdout, repo, rawQuery, "issue", opts, fieldMapIssue)
 }
 
+func relayWorkflowList(ctx context.Context, stdout io.Writer, repo string, opts ghTopOptions) error {
+	client, err := newGHRelayClient()
+	if err != nil {
+		return err
+	}
+	limit := desiredLimitDefault(opts, 50)
+	items := make([]any, 0, limit)
+	for page := 1; page <= 10 && len(items) < limit; page++ {
+		envelope, err := client.do(ctx, ghAPIRequest{
+			method: "GET",
+			path:   repoPath(repo, "actions", "workflows"),
+			query:  map[string]any{"per_page": "100", "page": strconv.Itoa(page)},
+		})
+		if err != nil {
+			return err
+		}
+		body, err := envelopeBodyBytes(envelope)
+		if err != nil {
+			return err
+		}
+		var response map[string]any
+		if err := json.Unmarshal(body, &response); err != nil {
+			return err
+		}
+		workflows, ok := response["workflows"].([]any)
+		if !ok {
+			return errors.New("workflow list response did not include workflows")
+		}
+		for _, item := range workflows {
+			if !workflowActive(item) {
+				continue
+			}
+			items = append(items, item)
+			if len(items) >= limit {
+				break
+			}
+		}
+		if len(workflows) < 100 {
+			break
+		}
+	}
+	raw, err := json.Marshal(items)
+	if err != nil {
+		return err
+	}
+	if len(opts.json) > 0 {
+		raw, err = filterJSONFields(raw, opts.json, fieldMapWorkflow)
+		if err != nil {
+			return err
+		}
+	}
+	return writeBytes(ctx, stdout, raw, opts.jq)
+}
+
+func workflowActive(item any) bool {
+	workflow, ok := item.(map[string]any)
+	return ok && workflow["state"] == "active"
+}
+
 func relaySearchPRs(ctx context.Context, stdout io.Writer, repo string, rawQuery string, opts ghTopOptions) error {
 	if opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 {
 		return localFallbackError{Reason: "unsupported_pr_search_filter"}
 	}
 	return relayGitHubSearch(ctx, stdout, repo, rawQuery, "pr", opts, fieldMapPR)
+}
+
+func relaySearchRepos(ctx context.Context, stdout io.Writer, rawQuery string, opts ghTopOptions) error {
+	terms, ok := searchTerms(rawQuery)
+	if !ok || len(terms) == 0 {
+		return localFallbackError{Reason: "unsupported_repo_search_query"}
+	}
+	client, err := newGHRelayClient()
+	if err != nil {
+		return err
+	}
+	envelope, err := client.do(ctx, ghAPIRequest{
+		method: "GET",
+		path:   "/search/repositories",
+		query:  map[string]any{"q": strings.Join(terms, " "), "per_page": strconv.Itoa(desiredLimit(opts))},
+	})
+	if err != nil {
+		return err
+	}
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return err
+	}
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		return err
+	}
+	items, _ := response["items"].([]any)
+	raw, err := json.Marshal(items)
+	if err != nil {
+		return err
+	}
+	if len(opts.json) > 0 {
+		raw, err = filterJSONFields(raw, opts.json, fieldMapRepo)
+		if err != nil {
+			return err
+		}
+	}
+	return writeBytes(ctx, stdout, raw, opts.jq)
 }
 
 func relayGitHubSearch(
@@ -780,7 +978,7 @@ func searchTerms(raw string) ([]string, bool) {
 	fields := strings.Fields(strings.ToLower(raw))
 	terms := make([]string, 0, len(fields))
 	for _, field := range fields {
-		if strings.Contains(field, ":") || strings.HasPrefix(field, "-") || field == "or" {
+		if strings.Contains(field, ":") || strings.HasPrefix(field, "-") || field == "or" || field == "not" {
 			return nil, false
 		}
 		term := strings.Trim(field, `"'`)
@@ -793,6 +991,19 @@ func searchTerms(raw string) ([]string, bool) {
 		terms = append(terms, term)
 	}
 	return terms, true
+}
+
+func plainSearchQuery(parts []string) (string, bool) {
+	for _, part := range parts {
+		if strings.ContainsAny(part, " \t\r\n") {
+			return "", false
+		}
+	}
+	terms, ok := searchTerms(strings.Join(parts, " "))
+	if !ok {
+		return "", false
+	}
+	return strings.Join(terms, " "), true
 }
 
 func checkRunItems(envelope relayEnvelope) ([]any, int, error) {
@@ -1067,6 +1278,9 @@ func filterJSONValue(value any, fields []string, fieldMap map[string][]string) a
 		if checks, ok := typed["check_runs"].([]any); ok {
 			return filterJSONValue(checks, fields, fieldMap)
 		}
+		if workflows, ok := typed["workflows"].([]any); ok {
+			return filterJSONValue(workflows, fields, fieldMap)
+		}
 		out := map[string]any{}
 		for _, field := range fields {
 			if value, ok := mappedValue(typed, field, fieldMap); ok {
@@ -1192,6 +1406,10 @@ func currentGitHubRepo() string {
 		return ""
 	}
 	return normalizeRepo(strings.TrimSpace(string(out)))
+}
+
+func isHex(raw string) bool {
+	return regexp.MustCompile(`^[0-9A-Fa-f]+$`).MatchString(raw)
 }
 
 func normalizeRepo(raw string) string {
@@ -1359,6 +1577,21 @@ var fieldMapCheckRun = map[string][]string{
 	"completedAt": {"completed_at"},
 }
 
+var fieldMapWorkflow = map[string][]string{
+	"url":       {"html_url"},
+	"createdAt": {"created_at"},
+	"updatedAt": {"updated_at"},
+}
+
+var fieldMapLabel = map[string][]string{}
+
+var fieldMapGist = map[string][]string{
+	"url":       {"html_url"},
+	"isPublic":  {"public"},
+	"createdAt": {"created_at"},
+	"updatedAt": {"updated_at"},
+}
+
 var supportedPRFields = supportedFields(
 	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
 	"mergedAt", "headRefName", "headRefOid", "baseRefName", "baseRefOid", "isDraft", "labels",
@@ -1387,9 +1620,9 @@ var supportedRunFields = supportedFields(
 )
 
 var supportedRepoFields = supportedFields(
-	"name", "full_name", "nameWithOwner", "url", "isPrivate", "defaultBranchRef", "description",
+	"id", "name", "full_name", "nameWithOwner", "url", "isPrivate", "defaultBranchRef", "description",
 	"visibility", "stargazers_count", "forks_count", "open_issues_count", "createdAt", "updatedAt",
-	"pushedAt",
+	"pushedAt", "owner",
 )
 
 var supportedReleaseFields = supportedFields(
@@ -1398,6 +1631,18 @@ var supportedReleaseFields = supportedFields(
 
 var supportedCheckRunFields = supportedFields(
 	"bucket", "completedAt", "description", "event", "link", "name", "startedAt", "state", "workflow",
+)
+
+var supportedWorkflowFields = supportedFields(
+	"id", "name", "path", "state", "url", "createdAt", "updatedAt",
+)
+
+var supportedLabelFields = supportedFields(
+	"id", "name", "description", "color", "url",
+)
+
+var supportedGistFields = supportedFields(
+	"id", "description", "files", "isPublic", "public", "url", "createdAt", "updatedAt", "owner",
 )
 
 var allowedSearchTerm = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
