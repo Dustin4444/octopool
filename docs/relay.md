@@ -82,8 +82,13 @@ traversal (`%2e`, `%5c`). The relay only ever talks to `api.github.com`.
 - Release list/latest/tag/id reads are relayed only through unauthenticated public GitHub API
   reads; Octopool does not use pooled credentials for releases, so draft/private release
   visibility is not shared.
-- Public org/user/gist collection reads and public repository metadata collections can be served
-  from unauthenticated GitHub API responses before spending pooled identity quota.
+- Public org repository/member/event reads, user/gist collection reads, global metadata reads,
+  and public repository metadata collections can be served from unauthenticated GitHub API
+  responses before spending pooled identity quota.
+- `GET /orgs/:org` is intentionally not relayed because authenticated GitHub responses can
+  include additional org fields that are not present in unauthenticated public API responses.
+- `GET /users/:login/starred` and `/subscriptions` are intentionally not relayed because
+  authenticated responses can include private repositories visible to the caller.
 - `cache` is `hit`, `stale`, `miss`, or `bypass` (route not cacheable).
 - `stale_ok: true` means an expired public cache entry was served because all eligible
   identities were depleted, cooling down, missing, or rate-limited. `stale_reason` and
@@ -98,22 +103,34 @@ traversal (`%2e`, `%5c`). The relay only ever talks to `api.github.com`.
 Routes are classified in `src/policy.ts`. Only the following read-only shapes are
 enabled; anything else returns `403 route_denied`:
 
-- `pr_view`, `pr_files`, `pr_commits`, `pr_review_comments`, `pr_reviews`
-- `pr_review_comment_reactions`
+- `pr_view`, `pr_files`, `pr_commits`, `pr_review_comments`, `pr_review_comment_list`
+- `pr_review_comment_view`, `pr_review_comment_reactions`, `pr_reviews`, `pr_review_view`
+- `pr_review_comments_for_review`, `pr_requested_reviewers`
 - `pr_list`
-- `commit_list`, `commit_view`, `commit_comments`, `repo_comment`, `compare`, `contents`, `repo_readme`, `commit_check_runs`, `commit_status`
+- `commit_list`, `commit_view`, `commit_comments`, `commit_pulls`, `commit_branches_where_head`
+- `commit_check_runs`, `commit_check_suites`, `commit_status`, `commit_statuses`, `ref_statuses`
+- `repo_comment`, `compare`, `contents`, `repo_readme`
 - `run_list`, `run_view`, `run_jobs`, `run_artifacts`
 - `job_view`, `job_logs`, `check_run_annotations`
-- `issue_list`, `issue_view`, `issue_comments`, `issue_comment_reactions`, `issue_events`, `issue_labels`, `issue_reactions`, `issue_timeline`
+- `issue_list`, `issue_view`, `issue_comments`, `issue_comment_list`, `issue_comment_view`
+- `issue_comment_reactions`, `issue_events`, `issue_event_list`, `issue_event_view`
+- `issue_labels`, `issue_reactions`, `issue_timeline`
 - `assignee_list`, `assignee_view`
 - `label_list`, `label_view`, `milestone_list`, `milestone_view`
 - `branch_list`, `branch_view`, `tag_list`, `repo_languages`, `repo_contributors`, `repo_license`
 - `repo_topics`, `community_profile`, `fork_list`, `stargazer_list`, `subscriber_list`
+- `deployment_list`, `repo_event_list`, `network_event_list`, `repo_stats_contributors`
+- `repo_stats_commit_activity`, `repo_stats_code_frequency`, `repo_stats_participation`
+- `repo_stats_punch_card`
 - `git_blob`, `git_commit`, `git_tree`, `git_ref`, `git_matching_refs`
 - `user_view`
-- `user_repo_list`, `user_org_list`, `user_gist_list`
-- `org_view`, `org_repo_list`
+- `user_repo_list`, `user_org_list`, `user_gist_list`, `user_follower_list`
+- `user_following_list`, `user_event_list`, `user_received_event_list`, `user_key_list`
+- `user_gpg_key_list`
+- `org_repo_list`, `org_event_list`, `org_public_member_list`, `org_public_member_view`
 - `gist_view`
+- `emoji_list`, `github_meta`, `license_list`, `license_view`
+- `gitignore_template_list`, `gitignore_template_view`
 - `repo_view`
 - `release_list`, `release_latest`, `release_view`, `release_assets`, `release_asset`
 - `workflow_list`, `workflow_view`, `workflow_run_list`

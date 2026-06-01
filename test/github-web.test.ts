@@ -308,7 +308,7 @@ describe("github web provider", () => {
   it("fetches public org, user collection, gist, and repository search reads", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ login: "openclaw" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ full_name: "openclaw/octopool" }])))
       .mockResolvedValueOnce(new Response(JSON.stringify([{ full_name: "openclaw/octopool" }])))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: "abc123", public: true })))
       .mockResolvedValueOnce(
@@ -319,7 +319,8 @@ describe("github web provider", () => {
     const org = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
-      path: "/orgs/openclaw",
+      path: "/orgs/openclaw/repos",
+      query: { type: "public", per_page: "1" },
     });
     const userRepos = validateRelayRequest({
       pool: "maintainers",
@@ -340,7 +341,7 @@ describe("github web provider", () => {
     });
 
     await expect(callGitHubWeb(env(), org, classifyRoute(org, policy))).resolves.toMatchObject({
-      body: { login: "openclaw" },
+      body: [{ full_name: "openclaw/octopool" }],
     });
     await expect(
       callGitHubWeb(env(), userRepos, classifyRoute(userRepos, policy)),
@@ -372,7 +373,15 @@ describe("github web provider", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 1, body: "comment" }])))
       .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 2, event: "closed" }])))
       .mockResolvedValueOnce(new Response(JSON.stringify({ total_count: 0, check_suites: [] })))
-      .mockResolvedValueOnce(new Response(JSON.stringify([[1682899200, 12]])));
+      .mockResolvedValueOnce(new Response(JSON.stringify([[1682899200, 12]])))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ verifiable_password_authentication: true })),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ key: "mit", name: "MIT License" }])))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ login: "steipete" }])))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ total_count: 0, users: [], teams: [] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ state: "success" }])))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 123, body: "review" })));
     vi.stubGlobal("fetch", fetchMock);
     const requests = [
       validateRelayRequest({
@@ -408,6 +417,37 @@ describe("github web provider", () => {
         pool: "maintainers",
         method: "GET",
         path: "/repos/openclaw/octopool/stats/code_frequency",
+      }),
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/meta",
+      }),
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/licenses",
+      }),
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/orgs/openclaw/public_members",
+        query: { per_page: "1" },
+      }),
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/pulls/12/requested_reviewers",
+      }),
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/statuses/ac49d8e2295a093f168baa45312e1e29238c0351",
+      }),
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/pulls/comments/123",
       }),
     ];
 

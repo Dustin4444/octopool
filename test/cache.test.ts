@@ -186,6 +186,16 @@ describe("github cache policy", () => {
       cacheTTLSeconds(checkSuites, response({ check_suites: [{ status: "completed" }] })),
     ).toBe(300);
     expect(cacheTTLSeconds(checkSuites, response({ check_suites: [] }))).toBe(15);
+    const statuses = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/statuses/abc1234",
+      }),
+      policy,
+    );
+    expect(cacheTTLSeconds(statuses, response([{ state: "success" }]))).toBe(300);
+    expect(cacheTTLSeconds(statuses, response([{ state: "pending" }]))).toBe(15);
 
     const files = classifyRoute(
       validateRelayRequest({

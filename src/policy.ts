@@ -11,6 +11,7 @@ const sha = "[0-9A-Fa-f]{7,64}";
 const id = "[0-9]+";
 const tag = "(?<tag>[^/?#]+)";
 const gistId = "(?<gistId>[0-9A-Fa-f]+)";
+const slug = "(?<slug>[A-Za-z0-9_.-]+)";
 
 type RouteRule = {
   pattern: RegExp;
@@ -33,9 +34,17 @@ const rules: RouteRule[] = [
   route(`/users/${login}/received_events`, "user_received_event_list", "core"),
   route(`/users/${login}/keys`, "user_key_list", "core"),
   route(`/users/${login}/gpg_keys`, "user_gpg_key_list", "core"),
-  route(`/orgs/${org}`, "org_view", "core"),
   route(`/orgs/${org}/repos`, "org_repo_list", "core"),
+  route(`/orgs/${org}/events`, "org_event_list", "core"),
+  route(`/orgs/${org}/public_members`, "org_public_member_list", "core"),
+  route(`/orgs/${org}/public_members/${login}`, "org_public_member_view", "core"),
   route(`/gists/${gistId}`, "gist_view", "core"),
+  route("/emojis", "emoji_list", "core"),
+  route("/meta", "github_meta", "core"),
+  route("/licenses", "license_list", "core"),
+  route(`/licenses/${slug}`, "license_view", "core"),
+  route("/gitignore/templates", "gitignore_template_list", "core"),
+  route("/gitignore/templates/(?<template>[^/?#]+)", "gitignore_template_view", "core"),
   route(`/repos/${owner}/${repo}`, "repo_view", "core"),
   route(`/repos/${owner}/${repo}/commits`, "commit_list", "core"),
   route(`/repos/${owner}/${repo}/commits/${sha}`, "commit_view", "core"),
@@ -46,6 +55,7 @@ const rules: RouteRule[] = [
     "commit_branches_where_head",
     "core",
   ),
+  route(`/repos/${owner}/${repo}/commits/${sha}/statuses`, "commit_statuses", "core"),
   route(`/repos/${owner}/${repo}/comments/${id}`, "repo_comment", "core"),
   route(`/repos/${owner}/${repo}/compare/(?<compare>[^/?#]+)`, "compare", "core"),
   route(`/repos/${owner}/${repo}/contents/(?<contentPath>.+)`, "contents", "core"),
@@ -57,15 +67,28 @@ const rules: RouteRule[] = [
   route(`/repos/${owner}/${repo}/pulls/${number}/commits`, "pr_commits", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}/comments`, "pr_review_comments", "core"),
   route(`/repos/${owner}/${repo}/pulls/comments`, "pr_review_comment_list", "core"),
+  route(`/repos/${owner}/${repo}/pulls/comments/${id}`, "pr_review_comment_view", "core"),
   route(
     `/repos/${owner}/${repo}/pulls/comments/${id}/reactions`,
     "pr_review_comment_reactions",
     "core",
   ),
   route(`/repos/${owner}/${repo}/pulls/${number}/reviews`, "pr_reviews", "core"),
+  route(`/repos/${owner}/${repo}/pulls/${number}/reviews/${id}`, "pr_review_view", "core"),
+  route(
+    `/repos/${owner}/${repo}/pulls/${number}/reviews/${id}/comments`,
+    "pr_review_comments_for_review",
+    "core",
+  ),
+  route(
+    `/repos/${owner}/${repo}/pulls/${number}/requested_reviewers`,
+    "pr_requested_reviewers",
+    "core",
+  ),
   route(`/repos/${owner}/${repo}/commits/${sha}/check-runs`, "commit_check_runs", "core"),
   route(`/repos/${owner}/${repo}/commits/${sha}/check-suites`, "commit_check_suites", "core"),
   route(`/repos/${owner}/${repo}/commits/${sha}/status`, "commit_status", "core"),
+  route(`/repos/${owner}/${repo}/statuses/${sha}`, "ref_statuses", "core"),
   route(`/repos/${owner}/${repo}/actions/runs`, "run_list", "core"),
   route(`/repos/${owner}/${repo}/actions/runs/${id}`, "run_view", "core"),
   route(`/repos/${owner}/${repo}/actions/runs/${id}/jobs`, "run_jobs", "core"),
@@ -80,6 +103,7 @@ const rules: RouteRule[] = [
   route(`/repos/${owner}/${repo}/issues`, "issue_list", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/comments`, "issue_comments", "core"),
   route(`/repos/${owner}/${repo}/issues/comments`, "issue_comment_list", "core"),
+  route(`/repos/${owner}/${repo}/issues/comments/${id}`, "issue_comment_view", "core"),
   route(
     `/repos/${owner}/${repo}/issues/comments/${id}/reactions`,
     "issue_comment_reactions",
@@ -87,6 +111,7 @@ const rules: RouteRule[] = [
   ),
   route(`/repos/${owner}/${repo}/issues/${number}/events`, "issue_events", "core"),
   route(`/repos/${owner}/${repo}/issues/events`, "issue_event_list", "core"),
+  route(`/repos/${owner}/${repo}/issues/events/${id}`, "issue_event_view", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/labels`, "issue_labels", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/reactions`, "issue_reactions", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/timeline`, "issue_timeline", "core"),
@@ -107,6 +132,7 @@ const rules: RouteRule[] = [
   route(`/repos/${owner}/${repo}/forks`, "fork_list", "core"),
   route(`/repos/${owner}/${repo}/stargazers`, "stargazer_list", "core"),
   route(`/repos/${owner}/${repo}/subscribers`, "subscriber_list", "core"),
+  route(`/repos/${owner}/${repo}/deployments`, "deployment_list", "core"),
   route(`/repos/${owner}/${repo}/events`, "repo_event_list", "core"),
   route(`/networks/${owner}/${repo}/events`, "network_event_list", "core"),
   route(`/repos/${owner}/${repo}/stats/contributors`, "repo_stats_contributors", "core"),

@@ -770,8 +770,10 @@ function webOnlyRoute(route: RouteInfo): boolean {
     route.kind === "release_view" ||
     route.kind === "release_assets" ||
     route.kind === "release_asset" ||
-    route.kind === "org_view" ||
     route.kind === "org_repo_list" ||
+    route.kind === "org_event_list" ||
+    route.kind === "org_public_member_list" ||
+    route.kind === "org_public_member_view" ||
     route.kind === "user_repo_list" ||
     route.kind === "user_org_list" ||
     route.kind === "user_gist_list" ||
@@ -782,6 +784,12 @@ function webOnlyRoute(route: RouteInfo): boolean {
     route.kind === "user_key_list" ||
     route.kind === "user_gpg_key_list" ||
     route.kind === "gist_view" ||
+    route.kind === "emoji_list" ||
+    route.kind === "github_meta" ||
+    route.kind === "license_list" ||
+    route.kind === "license_view" ||
+    route.kind === "gitignore_template_list" ||
+    route.kind === "gitignore_template_view" ||
     route.kind === "search_repositories"
   );
 }

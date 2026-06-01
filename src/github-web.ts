@@ -323,14 +323,23 @@ function publicApiRoute(route: RouteInfo): boolean {
     case "user_received_event_list":
     case "user_key_list":
     case "user_gpg_key_list":
-    case "org_view":
     case "org_repo_list":
+    case "org_event_list":
+    case "org_public_member_list":
+    case "org_public_member_view":
     case "gist_view":
+    case "emoji_list":
+    case "github_meta":
+    case "license_list":
+    case "license_view":
+    case "gitignore_template_list":
+    case "gitignore_template_view":
     case "commit_list":
     case "commit_view":
     case "commit_comments":
     case "commit_pulls":
     case "commit_branches_where_head":
+    case "commit_statuses":
     case "repo_comment":
     case "compare":
     case "contents":
@@ -341,11 +350,16 @@ function publicApiRoute(route: RouteInfo): boolean {
     case "pr_commits":
     case "pr_review_comments":
     case "pr_review_comment_list":
+    case "pr_review_comment_view":
     case "pr_review_comment_reactions":
     case "pr_reviews":
+    case "pr_review_view":
+    case "pr_review_comments_for_review":
+    case "pr_requested_reviewers":
     case "commit_check_runs":
     case "commit_check_suites":
     case "commit_status":
+    case "ref_statuses":
     case "run_list":
     case "run_view":
     case "run_jobs":
@@ -356,9 +370,11 @@ function publicApiRoute(route: RouteInfo): boolean {
     case "issue_list":
     case "issue_comments":
     case "issue_comment_list":
+    case "issue_comment_view":
     case "issue_comment_reactions":
     case "issue_events":
     case "issue_event_list":
+    case "issue_event_view":
     case "issue_labels":
     case "issue_reactions":
     case "issue_timeline":
@@ -379,6 +395,7 @@ function publicApiRoute(route: RouteInfo): boolean {
     case "fork_list":
     case "stargazer_list":
     case "subscriber_list":
+    case "deployment_list":
     case "repo_event_list":
     case "network_event_list":
     case "repo_stats_contributors":

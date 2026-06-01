@@ -26,8 +26,10 @@ describe("route policy", () => {
 
   it("allows public org, user collection, and gist reads", () => {
     for (const [path, kind] of [
-      ["/orgs/openclaw", "org_view"],
       ["/orgs/openclaw/repos", "org_repo_list"],
+      ["/orgs/openclaw/events", "org_event_list"],
+      ["/orgs/openclaw/public_members", "org_public_member_list"],
+      ["/orgs/openclaw/public_members/steipete", "org_public_member_view"],
       ["/users/openperf/repos", "user_repo_list"],
       ["/users/openperf/orgs", "user_org_list"],
       ["/users/openperf/gists", "user_gist_list"],
@@ -38,6 +40,14 @@ describe("route policy", () => {
       ["/users/openperf/keys", "user_key_list"],
       ["/users/openperf/gpg_keys", "user_gpg_key_list"],
       ["/gists/abc123", "gist_view"],
+      ["/emojis", "emoji_list"],
+      ["/meta", "github_meta"],
+      ["/licenses", "license_list"],
+      ["/licenses/mit", "license_view"],
+      ["/gitignore/templates", "gitignore_template_list"],
+      ["/gitignore/templates/Go", "gitignore_template_view"],
+      ["/gitignore/templates/C++", "gitignore_template_view"],
+      ["/gitignore/templates/C%2B%2B", "gitignore_template_view"],
     ]) {
       const request = validateRelayRequest({
         pool: "maintainers",
@@ -46,6 +56,15 @@ describe("route policy", () => {
       });
       expect(classifyRoute(request, policy).kind).toBe(kind);
     }
+  });
+
+  it("does not relay organization profiles with auth-only fields", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/orgs/openclaw",
+    });
+    expect(() => classifyRoute(request, policy)).toThrow(/Route is not enabled/);
   });
 
   it("does not normalize repo names that match top-level routes", () => {
@@ -81,20 +100,28 @@ describe("route policy", () => {
       "/repos/openclaw/openclaw/issues?state=open",
       "/repos/openclaw/openclaw/pulls/85341",
       "/repos/openclaw/openclaw/pulls/85341/commits",
+      "/repos/openclaw/openclaw/pulls/85341/requested_reviewers",
+      "/repos/openclaw/openclaw/pulls/85341/reviews/1",
+      "/repos/openclaw/openclaw/pulls/85341/reviews/1/comments",
       "/repos/openclaw/openclaw/pulls/comments",
+      "/repos/openclaw/openclaw/pulls/comments/123",
       "/repos/openclaw/openclaw/pulls/comments/123/reactions",
       "/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351/comments",
+      "/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351/statuses",
       "/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351/check-runs",
       "/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351/check-suites",
       "/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351/pulls",
       "/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351/branches-where-head",
+      "/repos/openclaw/openclaw/statuses/ac49d8e2295a093f168baa45312e1e29238c0351",
       "/repos/openclaw/openclaw/actions/runs/26360397003/jobs",
       "/repos/openclaw/openclaw/actions/jobs/77594668516/logs",
       "/repos/openclaw/openclaw/issues/80490/comments",
       "/repos/openclaw/openclaw/issues/comments",
+      "/repos/openclaw/openclaw/issues/comments/123",
       "/repos/openclaw/openclaw/issues/comments/123/reactions",
       "/repos/openclaw/openclaw/issues/80490/events",
       "/repos/openclaw/openclaw/issues/events",
+      "/repos/openclaw/openclaw/issues/events/123",
       "/repos/openclaw/openclaw/issues/80490/labels",
       "/repos/openclaw/openclaw/issues/80490/reactions",
       "/repos/openclaw/openclaw/assignees",
@@ -115,6 +142,7 @@ describe("route policy", () => {
       "/repos/openclaw/openclaw/forks",
       "/repos/openclaw/openclaw/stargazers",
       "/repos/openclaw/openclaw/subscribers",
+      "/repos/openclaw/openclaw/deployments",
       "/repos/openclaw/openclaw/events",
       "/networks/openclaw/openclaw/events",
       "/repos/openclaw/openclaw/stats/contributors",
@@ -174,6 +202,17 @@ describe("route policy", () => {
     expect(() => classifyRoute(request, { ...policy, allow_public_repos: false })).toThrow(
       /not allowed/,
     );
+  });
+
+  it("does not relay auth-dependent user repository collections", () => {
+    for (const path of ["/users/openperf/starred", "/users/openperf/subscriptions"]) {
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path,
+      });
+      expect(() => classifyRoute(request, policy)).toThrow(/Route is not enabled/);
+    }
   });
 
   it("only allows owner repositories for user repository lists", () => {

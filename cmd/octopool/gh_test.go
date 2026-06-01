@@ -123,6 +123,14 @@ func TestSafeRelayRequest(t *testing.T) {
 		t.Fatal("queryless unknown read can ask octopool for a fallback decision")
 	}
 
+	request, fallback, err = parseGHAPIArgs([]string{"/gitignore/templates/C%2B%2B"})
+	if err != nil || fallback {
+		t.Fatalf("parse fallback=%v err=%v", fallback, err)
+	}
+	if !safeRelayRequest(request) {
+		t.Fatal("encoded gitignore template names can ask octopool for a policy decision")
+	}
+
 	request, fallback, err = parseGHAPIArgs([]string{"/search/repositories?q=octopool+relay"})
 	if err != nil || fallback {
 		t.Fatalf("parse fallback=%v err=%v", fallback, err)

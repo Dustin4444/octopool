@@ -76,6 +76,8 @@ export function staleCacheSeconds(route: RouteInfo): number {
     case "commit_check_runs":
     case "commit_check_suites":
     case "commit_status":
+    case "commit_statuses":
+    case "ref_statuses":
     case "job_view":
     case "git_ref":
     case "git_matching_refs":
@@ -91,15 +93,21 @@ export function staleCacheSeconds(route: RouteInfo): number {
     case "pr_commits":
     case "pr_review_comments":
     case "pr_review_comment_list":
+    case "pr_review_comment_view":
     case "pr_reviews":
+    case "pr_review_view":
+    case "pr_review_comments_for_review":
+    case "pr_requested_reviewers":
     case "commit_comments":
     case "commit_pulls":
     case "commit_branches_where_head":
     case "repo_comment":
     case "issue_comments":
     case "issue_comment_list":
+    case "issue_comment_view":
     case "issue_events":
     case "issue_event_list":
+    case "issue_event_view":
     case "issue_labels":
     case "issue_timeline":
     case "label_list":
@@ -113,10 +121,11 @@ export function staleCacheSeconds(route: RouteInfo): number {
     case "assignee_view":
     case "repo_event_list":
     case "network_event_list":
+    case "org_event_list":
+    case "deployment_list":
       return 3_600;
     case "repo_view":
     case "user_view":
-    case "org_view":
     case "user_org_list":
     case "user_gist_list":
     case "user_follower_list":
@@ -125,7 +134,15 @@ export function staleCacheSeconds(route: RouteInfo): number {
     case "user_received_event_list":
     case "user_key_list":
     case "user_gpg_key_list":
+    case "org_public_member_list":
+    case "org_public_member_view":
     case "gist_view":
+    case "emoji_list":
+    case "github_meta":
+    case "license_list":
+    case "license_view":
+    case "gitignore_template_list":
+    case "gitignore_template_view":
     case "repo_readme":
     case "branch_list":
     case "branch_view":
@@ -231,7 +248,6 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
     case "org_repo_list":
     case "user_repo_list":
       return 600;
-    case "org_view":
     case "user_org_list":
     case "user_gist_list":
     case "user_follower_list":
@@ -240,7 +256,16 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
     case "user_received_event_list":
     case "user_key_list":
     case "user_gpg_key_list":
+    case "org_event_list":
+    case "org_public_member_list":
+    case "org_public_member_view":
     case "gist_view":
+    case "emoji_list":
+    case "github_meta":
+    case "license_list":
+    case "license_view":
+    case "gitignore_template_list":
+    case "gitignore_template_view":
       return 3_600;
     case "repo_readme":
       return 3_600;
@@ -288,6 +313,7 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
     case "subscriber_list":
     case "repo_event_list":
     case "network_event_list":
+    case "deployment_list":
       return 3_600;
     case "git_ref":
     case "git_matching_refs":
@@ -305,6 +331,9 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
       return completedCheckSuites(response) ? 300 : 15;
     case "commit_status":
       return completedStatus(response) ? 300 : 15;
+    case "commit_statuses":
+    case "ref_statuses":
+      return completedStatusList(response) ? 300 : 15;
     case "job_view":
       return 15;
     case "pr_files":
@@ -312,13 +341,19 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
     case "pr_commits":
     case "pr_review_comments":
     case "pr_review_comment_list":
+    case "pr_review_comment_view":
     case "pr_reviews":
+    case "pr_review_view":
+    case "pr_review_comments_for_review":
+    case "pr_requested_reviewers":
     case "commit_comments":
     case "repo_comment":
     case "issue_comments":
     case "issue_comment_list":
+    case "issue_comment_view":
     case "issue_events":
     case "issue_event_list":
+    case "issue_event_view":
     case "issue_labels":
     case "issue_timeline":
     case "label_list":
@@ -467,6 +502,16 @@ function completedStatus(response?: GitHubRelayResponse): boolean {
   return (
     response.body.statuses.length > 0 &&
     response.body.statuses.every((item) => isRecord(item) && item.state !== "pending")
+  );
+}
+
+function completedStatusList(response?: GitHubRelayResponse): boolean {
+  if (!Array.isArray(response?.body)) {
+    return false;
+  }
+  return (
+    response.body.length > 0 &&
+    response.body.every((item) => isRecord(item) && item.state !== "pending")
   );
 }
 
