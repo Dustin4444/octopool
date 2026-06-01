@@ -7,6 +7,7 @@
 - Add `GET /users/:login` to the safe GitHub relay allowlist, including bot logins, and cache sanitized profiles fetched through unauthenticated public GitHub API reads.
 - Expand token-free public GitHub API fallbacks across exact JSON read routes, including repo metadata, contents/README, PR and issue subresources, commits/comments, labels, milestones, checks/statuses, Actions run/workflow metadata, branches, tags, topics, community profiles, forks, stargazers, subscribers, Git object reads, languages, contributors, licenses, release assets, and repo-scoped issue/commit search.
 - Add public org/user/gist reads, reactions, assignees, repository search, and top-level cached `gh workflow list/view`, `gh label list`, `gh gist view`, and `gh search repos` coverage.
+- Add more token-free public API fallback routes for user followers/following/events/keys, repo-wide issue and PR comments/events, commit pull/check-suite/branch metadata, network events, and repository stats.
 
 ## 0.3.0 - 2026-05-31
 

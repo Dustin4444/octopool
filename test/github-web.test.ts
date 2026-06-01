@@ -364,6 +364,69 @@ describe("github web provider", () => {
     );
   });
 
+  it("fetches additional public user and repository collection reads", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ login: "steipete" }])))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: "event-1" }])))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 1, body: "comment" }])))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 2, event: "closed" }])))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ total_count: 0, check_suites: [] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify([[1682899200, 12]])));
+    vi.stubGlobal("fetch", fetchMock);
+    const requests = [
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/users/openperf/followers",
+        query: { per_page: "1" },
+      }),
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/users/openperf/events",
+        query: { per_page: "1" },
+      }),
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/issues/comments",
+        query: { per_page: "1" },
+      }),
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/networks/openclaw/octopool/events",
+        query: { per_page: "1" },
+      }),
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/commits/ac49d8e2295a093f168baa45312e1e29238c0351/check-suites",
+      }),
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/stats/code_frequency",
+      }),
+    ];
+
+    for (const request of requests) {
+      await expect(
+        callGitHubWeb(env(), request, classifyRoute(request, policy)),
+      ).resolves.toMatchObject({
+        backend: "web",
+      });
+    }
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "https://api.github.com/networks/openclaw/octopool/events?per_page=1",
+      expect.objectContaining({
+        headers: expect.not.objectContaining({ authorization: expect.any(String) }),
+      }),
+    );
+  });
+
   it("does not serve secret gist bodies through the public web fallback", async () => {
     vi.stubGlobal(
       "fetch",

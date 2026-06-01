@@ -82,6 +82,8 @@ traversal (`%2e`, `%5c`). The relay only ever talks to `api.github.com`.
 - Release list/latest/tag/id reads are relayed only through unauthenticated public GitHub API
   reads; Octopool does not use pooled credentials for releases, so draft/private release
   visibility is not shared.
+- Public org/user/gist collection reads and public repository metadata collections can be served
+  from unauthenticated GitHub API responses before spending pooled identity quota.
 - `cache` is `hit`, `stale`, `miss`, or `bypass` (route not cacheable).
 - `stale_ok: true` means an expired public cache entry was served because all eligible
   identities were depleted, cooling down, missing, or rate-limited. `stale_reason` and

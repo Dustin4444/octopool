@@ -775,6 +775,12 @@ function webOnlyRoute(route: RouteInfo): boolean {
     route.kind === "user_repo_list" ||
     route.kind === "user_org_list" ||
     route.kind === "user_gist_list" ||
+    route.kind === "user_follower_list" ||
+    route.kind === "user_following_list" ||
+    route.kind === "user_event_list" ||
+    route.kind === "user_received_event_list" ||
+    route.kind === "user_key_list" ||
+    route.kind === "user_gpg_key_list" ||
     route.kind === "gist_view" ||
     route.kind === "search_repositories"
   );

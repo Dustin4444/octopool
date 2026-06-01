@@ -74,6 +74,7 @@ export function staleCacheSeconds(route: RouteInfo): number {
     case "workflow_run_list":
     case "run_jobs":
     case "commit_check_runs":
+    case "commit_check_suites":
     case "commit_status":
     case "job_view":
     case "git_ref":
@@ -89,11 +90,16 @@ export function staleCacheSeconds(route: RouteInfo): number {
     case "pr_files":
     case "pr_commits":
     case "pr_review_comments":
+    case "pr_review_comment_list":
     case "pr_reviews":
     case "commit_comments":
+    case "commit_pulls":
+    case "commit_branches_where_head":
     case "repo_comment":
     case "issue_comments":
+    case "issue_comment_list":
     case "issue_events":
+    case "issue_event_list":
     case "issue_labels":
     case "issue_timeline":
     case "label_list":
@@ -105,12 +111,20 @@ export function staleCacheSeconds(route: RouteInfo): number {
     case "pr_review_comment_reactions":
     case "assignee_list":
     case "assignee_view":
+    case "repo_event_list":
+    case "network_event_list":
       return 3_600;
     case "repo_view":
     case "user_view":
     case "org_view":
     case "user_org_list":
     case "user_gist_list":
+    case "user_follower_list":
+    case "user_following_list":
+    case "user_event_list":
+    case "user_received_event_list":
+    case "user_key_list":
+    case "user_gpg_key_list":
     case "gist_view":
     case "repo_readme":
     case "branch_list":
@@ -132,6 +146,11 @@ export function staleCacheSeconds(route: RouteInfo): number {
     case "release_latest":
     case "release_assets":
     case "release_asset":
+    case "repo_stats_contributors":
+    case "repo_stats_commit_activity":
+    case "repo_stats_code_frequency":
+    case "repo_stats_participation":
+    case "repo_stats_punch_card":
       return 7_200;
     case "commit_view":
     case "git_blob":
@@ -215,11 +234,20 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
     case "org_view":
     case "user_org_list":
     case "user_gist_list":
+    case "user_follower_list":
+    case "user_following_list":
+    case "user_event_list":
+    case "user_received_event_list":
+    case "user_key_list":
+    case "user_gpg_key_list":
     case "gist_view":
       return 3_600;
     case "repo_readme":
       return 3_600;
     case "commit_list":
+      return 300;
+    case "commit_pulls":
+    case "commit_branches_where_head":
       return 300;
     case "commit_view":
     case "git_blob":
@@ -258,6 +286,8 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
     case "fork_list":
     case "stargazer_list":
     case "subscriber_list":
+    case "repo_event_list":
+    case "network_event_list":
       return 3_600;
     case "git_ref":
     case "git_matching_refs":
@@ -271,6 +301,8 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
       return completedJobs(response) ? 300 : 15;
     case "commit_check_runs":
       return completedChecks(response) ? 300 : 15;
+    case "commit_check_suites":
+      return completedCheckSuites(response) ? 300 : 15;
     case "commit_status":
       return completedStatus(response) ? 300 : 15;
     case "job_view":
@@ -279,11 +311,14 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
       return stateAwarePRSubresource(route, response) ? 300 : 60;
     case "pr_commits":
     case "pr_review_comments":
+    case "pr_review_comment_list":
     case "pr_reviews":
     case "commit_comments":
     case "repo_comment":
     case "issue_comments":
+    case "issue_comment_list":
     case "issue_events":
+    case "issue_event_list":
     case "issue_labels":
     case "issue_timeline":
     case "label_list":
@@ -303,6 +338,11 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
       return 120;
     case "release_assets":
     case "release_asset":
+    case "repo_stats_contributors":
+    case "repo_stats_commit_activity":
+    case "repo_stats_code_frequency":
+    case "repo_stats_participation":
+    case "repo_stats_punch_card":
       return 3_600;
     default:
       return 60;
@@ -407,6 +447,16 @@ function completedChecks(response?: GitHubRelayResponse): boolean {
   return (
     response.body.check_runs.length > 0 &&
     response.body.check_runs.every((item) => isRecord(item) && item.status === "completed")
+  );
+}
+
+function completedCheckSuites(response?: GitHubRelayResponse): boolean {
+  if (!isRecord(response?.body) || !Array.isArray(response.body.check_suites)) {
+    return false;
+  }
+  return (
+    response.body.check_suites.length > 0 &&
+    response.body.check_suites.every((item) => isRecord(item) && item.status === "completed")
   );
 }
 

@@ -174,6 +174,18 @@ describe("github cache policy", () => {
     );
     expect(cacheTTLSeconds(checks, response({ check_runs: [{ status: "completed" }] }))).toBe(300);
     expect(cacheTTLSeconds(checks, response({ check_runs: [] }))).toBe(15);
+    const checkSuites = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/commits/abc1234/check-suites",
+      }),
+      policy,
+    );
+    expect(
+      cacheTTLSeconds(checkSuites, response({ check_suites: [{ status: "completed" }] })),
+    ).toBe(300);
+    expect(cacheTTLSeconds(checkSuites, response({ check_suites: [] }))).toBe(15);
 
     const files = classifyRoute(
       validateRelayRequest({
@@ -193,6 +205,24 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(commits, response([]))).toBe(300);
+    const commitPulls = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/commits/abc1234/pulls",
+      }),
+      policy,
+    );
+    expect(cacheTTLSeconds(commitPulls, response([]))).toBe(300);
+    const commitBranches = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/commits/abc1234/branches-where-head",
+      }),
+      policy,
+    );
+    expect(cacheTTLSeconds(commitBranches, response([]))).toBe(300);
     const stateAwareFiles = {
       ...classifyRoute(
         validateRelayRequest({

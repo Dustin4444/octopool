@@ -317,12 +317,20 @@ function publicApiRoute(route: RouteInfo): boolean {
     case "user_repo_list":
     case "user_org_list":
     case "user_gist_list":
+    case "user_follower_list":
+    case "user_following_list":
+    case "user_event_list":
+    case "user_received_event_list":
+    case "user_key_list":
+    case "user_gpg_key_list":
     case "org_view":
     case "org_repo_list":
     case "gist_view":
     case "commit_list":
     case "commit_view":
     case "commit_comments":
+    case "commit_pulls":
+    case "commit_branches_where_head":
     case "repo_comment":
     case "compare":
     case "contents":
@@ -332,9 +340,11 @@ function publicApiRoute(route: RouteInfo): boolean {
     case "pr_files":
     case "pr_commits":
     case "pr_review_comments":
+    case "pr_review_comment_list":
     case "pr_review_comment_reactions":
     case "pr_reviews":
     case "commit_check_runs":
+    case "commit_check_suites":
     case "commit_status":
     case "run_list":
     case "run_view":
@@ -345,8 +355,10 @@ function publicApiRoute(route: RouteInfo): boolean {
     case "issue_view":
     case "issue_list":
     case "issue_comments":
+    case "issue_comment_list":
     case "issue_comment_reactions":
     case "issue_events":
+    case "issue_event_list":
     case "issue_labels":
     case "issue_reactions":
     case "issue_timeline":
@@ -367,6 +379,13 @@ function publicApiRoute(route: RouteInfo): boolean {
     case "fork_list":
     case "stargazer_list":
     case "subscriber_list":
+    case "repo_event_list":
+    case "network_event_list":
+    case "repo_stats_contributors":
+    case "repo_stats_commit_activity":
+    case "repo_stats_code_frequency":
+    case "repo_stats_participation":
+    case "repo_stats_punch_card":
     case "git_blob":
     case "git_commit":
     case "git_tree":
