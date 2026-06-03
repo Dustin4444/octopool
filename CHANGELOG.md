@@ -4,6 +4,8 @@
 
 ### Fixes
 
+- Let verified OpenClaw org members self-enroll into the default Octopool login pool instead of requiring an admin-created caller grant first.
+
 ## 0.3.1 - 2026-06-01
 
 ### Fixes
@@ -14,10 +16,6 @@
 - Add more token-free public API fallback routes for user followers/following/events/keys, repo-wide issue and PR comments/events, commit pull/check-suite/branch metadata, network events, and repository stats.
 - Add token-free public fallback routes for GitHub metadata/license/gitignore APIs, org public events and members, PR review/requested-reviewer detail reads, issue/PR comment and event detail reads, deployments, and commit status aliases.
 - Keep `GET /orgs/:org` on local `gh` because live comparison shows authenticated GitHub responses include extra org fields missing from unauthenticated public API responses.
-
-### Fixes
-
-- Let verified OpenClaw org members self-enroll into the default Octopool login pool instead of requiring an admin-created caller grant first.
 
 ## 0.3.0 - 2026-05-31
 
