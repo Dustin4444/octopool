@@ -1,7 +1,7 @@
 import { HttpError } from "./http";
 
 const TITLES: Record<string, string> = {
-  caller_not_provisioned: "Access not provisioned",
+  caller_not_provisioned: "Pool access unavailable",
   dashboard_denied: "Dashboard access denied",
   github_login_denied: "GitHub login cancelled",
   github_state_expired: "Login expired",
@@ -74,7 +74,7 @@ function webErrorMessage(error: unknown): string {
     return "Octopool hit an internal error. Please try again, and include the request id if it keeps happening.";
   }
   if (error.code === "caller_not_provisioned") {
-    return "You are signed in with GitHub, but this account is not provisioned for the Octopool pool yet. Ask an OpenClaw maintainer to add your caller grant.";
+    return "Your GitHub account is verified, but Octopool could not grant this pool automatically.";
   }
   if (error.code === "dashboard_denied") {
     return "Your GitHub account can use Octopool, but it does not have dashboard admin access.";

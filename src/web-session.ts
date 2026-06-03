@@ -6,6 +6,7 @@ import {
   newToken,
   verifyGitHubOrgMember,
 } from "./auth";
+import { ensureWebCaller } from "./callers";
 import { queries } from "./generated/sql";
 import { effectiveOrigin } from "./hosts";
 import { HttpError, jsonResponse } from "./http";
@@ -71,25 +72,13 @@ export async function finishGitHubWebLogin(
   const user = await githubUserFromToken(githubToken);
   const verifiedAt = await verifyGitHubOrgMember(env, user.login);
   const pool = loginPool(env);
-  const caller = await env.DB.prepare(queries.webLoginCaller)
-    .bind(user.id, env.ALLOWED_GITHUB_ORG, pool)
-    .first<{ id: string; dashboard_role: "none" | "admin" }>();
-  if (caller === null) {
-    throw new HttpError(403, "caller_not_provisioned", "Caller is not provisioned for this pool");
-  }
+  const caller = await ensureWebCaller(env, pool, user, verifiedAt);
 
   const session = newToken("sess");
   const expires = sqliteTimestamp(Date.now() + SESSION_TTL_SECONDS * 1000);
-  await env.DB.batch([
-    env.DB.prepare(queries.updateCallerWebLogin).bind(
-      user.name ?? user.login,
-      user.login,
-      user.id,
-      verifiedAt,
-      caller.id,
-    ),
-    env.DB.prepare(queries.insertWebSession).bind(await hashToken(session), caller.id, expires),
-  ]);
+  await env.DB.prepare(queries.insertWebSession)
+    .bind(await hashToken(session), caller.id, expires)
+    .run();
 
   return redirectWithCookies(nextPath, [
     expiredCookie(STATE_COOKIE, "/login/github"),

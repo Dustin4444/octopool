@@ -208,6 +208,14 @@ WHERE callers.github_user_id = ?1
   AND caller_pools.pool_id = ?3
 LIMIT 1;
 
+-- name: FindActiveCallerByGitHubUser :one
+SELECT id
+FROM callers
+WHERE github_user_id = ?1
+  AND org_login = ?2
+  AND status = 'active'
+LIMIT 1;
+
 -- name: UpdateCallerLogin :exec
 UPDATE callers
 SET name = ?1,
@@ -223,7 +231,7 @@ INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_log
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active');
 
 -- name: InsertCallerPool :exec
-INSERT INTO caller_pools (caller_id, pool_id)
+INSERT OR IGNORE INTO caller_pools (caller_id, pool_id)
 VALUES (?1, ?2);
 
 -- name: GetIdentityPoolKind :one

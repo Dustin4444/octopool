@@ -153,14 +153,11 @@ wrangler deploy
 
 DNS-managed-by-Cloudflare domains register the custom domain in `routes[]` automatically; otherwise CNAME your domain at the Worker once.
 
-### 5. Provision a caller and at least one identity
+### 5. Register at least one identity
 
 ```sh
 export OCTOPOOL_ADMIN_TOKEN=...                              # the value you put above
 export OCTOPOOL_URL=https://octopool.your-org.dev
-
-# Register a teammate (verified against ALLOWED_GITHUB_ORG by GitHub user id):
-octopool admin caller --pool maintainers --github-login alice --name "Alice"
 
 # Pooled PAT identity:
 octopool admin identity \
@@ -185,7 +182,7 @@ octopool admin identity \
   --scope your-org/core
 ```
 
-The first reference to a pool by name (here, `maintainers`) creates it with the default policy (owners = `DEFAULT_ALLOWED_OWNERS`, `allow_public_repos: true`, `allow_search: false`, `allow_logs: true`). Teammates can now `octopool login https://octopool.your-org.dev` and start using the relay; the identities you registered take turns serving cache misses.
+The first reference to a pool by name (here, `maintainers`) creates it with the default policy (owners = `DEFAULT_ALLOWED_OWNERS`, `allow_public_repos: true`, `allow_search: false`, `allow_logs: true`). Verified org members can now `octopool login https://octopool.your-org.dev` and start using the relay; the identities you registered take turns serving cache misses.
 
 ### 6. Verify
 

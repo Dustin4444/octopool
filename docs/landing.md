@@ -54,7 +54,7 @@ website sessions, and dashboard JSON endpoints are not served there.
 ## `GET /login/github/callback`
 
 The callback exchanges the GitHub OAuth code, verifies the GitHub user, checks OpenClaw
-membership through the configured org verifier token, finds the already-provisioned
-caller by immutable GitHub user id, and creates a web session. The dashboard additionally
+membership through the configured org verifier token, creates or refreshes the caller
+grant by immutable GitHub user id, and creates a web session. The dashboard additionally
 requires `dashboard_role = 'admin'`. Browser-facing login and dashboard failures render a
 small HTML error page instead of exposing the API JSON envelope.

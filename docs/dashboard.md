@@ -11,7 +11,7 @@ The dashboard uses the website GitHub login, not a pasted admin token.
 
 - `/dashboard` redirects anonymous browsers to `/login/github?next=/dashboard`.
 - `/login/github/callback` verifies GitHub identity and OpenClaw membership.
-- The caller must already be provisioned for the default login pool.
+- The default login-pool caller grant is created or refreshed automatically.
 - The caller must have `dashboard_role = 'admin'`.
 - A successful login stores an opaque `octopool_session` cookie (`HttpOnly`, `Secure`,
   `SameSite=Lax`) and a hashed session row in D1.

@@ -3,7 +3,6 @@ import {
   authenticateCaller,
   githubUserByLogin,
   githubUserFromToken,
-  hashToken,
   newToken,
   verifyGitHubOrgMember,
   verifyGitHubOrgMemberWithToken,
@@ -34,6 +33,7 @@ import { isPublicRequest } from "./hosts";
 import { rootResponse } from "./landing";
 import { githubResponseLocalFallbackReason, localFallbackError } from "./local-fallback";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
+import { ensureCliCaller } from "./callers";
 import { PoolCoordinator } from "./pool-coordinator";
 import { verifyPRStateHint, verifyPRStateHintLive } from "./pr-state";
 import { ensurePublicGitHubRepo } from "./public-repos";
@@ -868,33 +868,11 @@ async function loginGitHubCLI(request: Request, env: Env): Promise<Response> {
   const pool = loginPool(env, body.pool);
   const user = await githubUserFromToken(githubToken);
   const verifiedAt = await verifyGitHubOrgMemberWithToken(env, githubToken, user.login);
-  await ensurePool(env, pool);
   const token = newToken("op");
-  const existing = await env.DB.prepare(queries.loginExistingCaller)
-    .bind(user.id, env.ALLOWED_GITHUB_ORG, pool)
-    .first<{ id: string }>();
-  if (existing === null) {
-    throw new HttpError(403, "caller_not_provisioned", "Caller is not provisioned for this pool");
-  }
-  await env.DB.batch([
-    env.DB.prepare(queries.updateCallerLogin).bind(
-      user.name ?? user.login,
-      await hashToken(token),
-      user.login,
-      user.id,
-      verifiedAt,
-      existing.id,
-    ),
-  ]);
+  const caller = await ensureCliCaller(env, pool, user, verifiedAt, token);
   return jsonResponse(
     {
-      caller: {
-        id: existing.id,
-        name: user.name ?? user.login,
-        github_login: user.login,
-        org_login: env.ALLOWED_GITHUB_ORG,
-        pool,
-      },
+      caller,
       token,
     },
     201,
@@ -924,28 +902,10 @@ async function createCaller(request: Request, env: Env): Promise<Response> {
   const verifiedAt = await verifyGitHubOrgMember(env, githubLogin);
   const githubUser = await githubUserByLogin(githubLogin);
   const token = newToken("op");
-  const callerId = `caller_${crypto.randomUUID()}`;
-  await env.DB.prepare(queries.insertCaller)
-    .bind(
-      callerId,
-      name,
-      await hashToken(token),
-      githubUser.login,
-      githubUser.id,
-      env.ALLOWED_GITHUB_ORG,
-      verifiedAt,
-    )
-    .run();
-  await env.DB.prepare(queries.insertCallerPool).bind(callerId, pool).run();
+  const caller = await ensureCliCaller(env, pool, { ...githubUser, name }, verifiedAt, token);
   return jsonResponse(
     {
-      caller: {
-        id: callerId,
-        name,
-        github_login: githubLogin,
-        org_login: env.ALLOWED_GITHUB_ORG,
-        pool,
-      },
+      caller,
       token,
     },
     201,

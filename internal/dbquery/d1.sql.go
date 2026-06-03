@@ -515,6 +515,27 @@ func (q *Queries) EnsurePool(ctx context.Context, arg EnsurePoolParams) error {
 	return err
 }
 
+const findActiveCallerByGitHubUser = `-- name: FindActiveCallerByGitHubUser :one
+SELECT id
+FROM callers
+WHERE github_user_id = ?1
+  AND org_login = ?2
+  AND status = 'active'
+LIMIT 1
+`
+
+type FindActiveCallerByGitHubUserParams struct {
+	GithubUserID sql.NullInt64 `json:"github_user_id"`
+	OrgLogin     string        `json:"org_login"`
+}
+
+func (q *Queries) FindActiveCallerByGitHubUser(ctx context.Context, arg FindActiveCallerByGitHubUserParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, findActiveCallerByGitHubUser, arg.GithubUserID, arg.OrgLogin)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const freshCoveringPublicRepoProof = `-- name: FreshCoveringPublicRepoProof :one
 SELECT 1
 FROM github_public_repos
@@ -753,7 +774,7 @@ func (q *Queries) InsertCaller(ctx context.Context, arg InsertCallerParams) erro
 }
 
 const insertCallerPool = `-- name: InsertCallerPool :exec
-INSERT INTO caller_pools (caller_id, pool_id)
+INSERT OR IGNORE INTO caller_pools (caller_id, pool_id)
 VALUES (?1, ?2)
 `
 

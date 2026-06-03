@@ -86,13 +86,11 @@ wrangler deploy
 For Cloudflare-managed domains, the `routes[]` entry registers the custom domain
 automatically. For external DNS, CNAME the host at the Worker once.
 
-### 5. Provision a caller and at least one identity
+### 5. Register at least one identity
 
 ```sh
 export OCTOPOOL_ADMIN_TOKEN=...                              # the value you set above
 export OCTOPOOL_URL=https://octopool.your-org.dev
-
-octopool admin caller --pool maintainers --github-login alice --name "Alice"
 
 octopool admin identity \
   --pool maintainers \
@@ -109,8 +107,8 @@ octopool admin identity \
 ```
 
 The first reference to a pool by name (here, `maintainers`) creates it with the default
-policy. Teammates can now `octopool login https://octopool.your-org.dev` and use the
-relay; the identities you registered take turns serving cache misses. See
+policy. Verified org members can now `octopool login https://octopool.your-org.dev` and
+use the relay; the identities you registered take turns serving cache misses. See
 [Admin & provisioning](admin.md) for `--scope`, `--kind github_app`, and `--installation-id`
 shapes.
 

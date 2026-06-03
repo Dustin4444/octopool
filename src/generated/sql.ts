@@ -67,11 +67,13 @@ export const queries = {
     "SELECT\n  COUNT(*) AS identities_total,\n  SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS identities_healthy\nFROM identities\nWHERE pool_id = ?1",
   loginExistingCaller:
     "SELECT callers.id\nFROM callers\nJOIN caller_pools ON caller_pools.caller_id = callers.id\nWHERE callers.github_user_id = ?1\n  AND callers.org_login = ?2\n  AND callers.status = 'active'\n  AND caller_pools.pool_id = ?3\nLIMIT 1",
+  findActiveCallerByGitHubUser:
+    "SELECT id\nFROM callers\nWHERE github_user_id = ?1\n  AND org_login = ?2\n  AND status = 'active'\nLIMIT 1",
   updateCallerLogin:
     "UPDATE callers\nSET name = ?1,\n    token_hash = ?2,\n    github_login = ?3,\n    github_user_id = ?4,\n    org_verified_at = ?5,\n    updated_at = CURRENT_TIMESTAMP\nWHERE id = ?6",
   insertCaller:
     "INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_login, org_verified_at, status)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active')",
-  insertCallerPool: "INSERT INTO caller_pools (caller_id, pool_id)\nVALUES (?1, ?2)",
+  insertCallerPool: "INSERT OR IGNORE INTO caller_pools (caller_id, pool_id)\nVALUES (?1, ?2)",
   getIdentityPoolKind: "SELECT pool_id, kind\nFROM identities\nWHERE id = ?1",
   upsertIdentity:
     "INSERT INTO identities (id, pool_id, kind, login, secret_ref, installation_id, status, weight)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7)\nON CONFLICT(id) DO UPDATE SET\n  login = excluded.login,\n  secret_ref = excluded.secret_ref,\n  installation_id = excluded.installation_id,\n  status = 'active',\n  weight = excluded.weight,\n  updated_at = CURRENT_TIMESTAMP",

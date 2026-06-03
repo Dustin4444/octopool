@@ -98,8 +98,8 @@ describe("web routing helpers", () => {
     expect(response.status).toBe(403);
     expect(response.headers.get("content-type")).toContain("text/html");
     const html = await response.text();
-    expect(html).toContain("Access not provisioned");
-    expect(html).toContain("Ask an OpenClaw maintainer");
+    expect(html).toContain("Pool access unavailable");
+    expect(html).toContain("could not grant this pool automatically");
     expect(html).not.toContain('{"error"');
   });
 

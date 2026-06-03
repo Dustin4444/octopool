@@ -38,8 +38,8 @@ The browser dashboard uses GitHub OAuth and an opaque cookie session:
    short-lived signed state mirrored in an `HttpOnly` state cookie. The state payload
    only carries issue time, nonce, and the sanitized dashboard return path.
 2. `/login/github/callback` exchanges the code with GitHub, resolves the user, verifies
-   OpenClaw membership with the configured org verifier token, and finds the
-   pre-provisioned caller by immutable GitHub user id.
+   OpenClaw membership with the configured org verifier token, and creates or refreshes
+   the caller grant for the default login pool by immutable GitHub user id.
 3. A random `octopool_session` cookie is set (`HttpOnly`, `Secure`, `SameSite=Lax`).
    Only its SHA-256 hash is stored in `web_sessions`; the raw session token is never
    stored.
@@ -61,9 +61,8 @@ Flow:
 2. Body carries `github_token` (the user's `gh auth token`) and an optional `pool`.
 3. The Worker resolves the GitHub user (`GET /user`) and verifies that user is a member
    of `ALLOWED_GITHUB_ORG` using the supplied token.
-4. The caller must already be **provisioned** — matched by immutable GitHub **user id**,
-   org, active status, and a grant for the requested pool. There is no self-service
-   pool grant: an unprovisioned user gets `403 caller_not_provisioned`.
+4. The caller row and requested default-pool grant are created or refreshed by immutable
+   GitHub **user id**, org, active status, and pool.
 5. A new caller token (`op_…`) is generated, hashed, and stored; the row is refreshed
    with the current login, user id, and verification time.
 6. The plaintext token is returned once, for the CLI to store locally.
@@ -72,8 +71,8 @@ Flow:
 
 `octopool login` cannot self-grant an arbitrary pool. The requested pool must equal
 `DEFAULT_LOGIN_POOL` (default `maintainers`); anything else is `403 pool_denied`. Binding
-by user id (not the mutable login) is why production caller backfill is explicit in the
-D1 migration rather than self-service.
+by user id, not the mutable login, keeps later username changes attached to the same
+caller row.
 
 ## Org verification tokens
 

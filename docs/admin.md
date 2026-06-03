@@ -1,8 +1,9 @@
 # Admin & Provisioning
 
-Pools, callers, and identities are admin-managed. There is no self-service: a user can
-only `octopool login` into a pool they were already provisioned for. Admin actions use the
-admin token (see [Auth](auth.md#admin-auth)).
+Pools and identities are admin-managed. Verified org members can `octopool login` into
+the default login pool automatically; admin caller registration remains available for
+manual backfills and token issuance. Admin actions use the admin token (see
+[Auth](auth.md#admin-auth)).
 
 Source: `src/index.ts` (`createCaller`, `upsertIdentity`), `cmd/octopool/main.go`.
 
@@ -25,8 +26,9 @@ OCTOPOOL_ADMIN_TOKEN=… octopool admin caller \
   --pool maintainers --github-login steipete --name Peter
 ```
 
-In practice callers usually run `octopool login` afterward, which re-issues their token
-bound by user id. The admin step is what makes that login succeed.
+In practice callers usually run `octopool login`, which creates or refreshes this grant
+for the default login pool automatically. Use this admin command for manual backfills,
+nonstandard pools, or one-time token issuance.
 
 ## Register an identity
 
