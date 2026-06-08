@@ -18,11 +18,11 @@
     "types": "wrangler types"
   },
   "devDependencies": {
-    "@types/node": "^25.9.1",
+    "@types/node": "^25.9.2",
     "oxfmt": "^0.52.0",
-    "oxlint": "^1.67.0",
+    "oxlint": "^1.69.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.14",
-    "wrangler": "^4.94.0"
+    "vitest": "^4.1.8",
+    "wrangler": "^4.98.0"
   }
 }
