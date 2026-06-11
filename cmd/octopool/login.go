@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"debug/buildinfo"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -354,7 +355,11 @@ func ghExecutableNames(goos string, pathExt string) []string {
 
 func resolveGHPathFrom(configured string, self string, candidates []string) (string, error) {
 	if configured != "" && configured != "gh" {
-		return configured, nil
+		resolved, err := resolveConfiguredGHPath(configured)
+		if err == nil && usableGHPath(resolved, self) {
+			return resolved, nil
+		}
+		return "", fmt.Errorf("OCTOPOOL_GH_PATH does not point to the real GitHub CLI: %s", configured)
 	}
 	for _, candidate := range candidates {
 		if usableGHPath(candidate, self) {
@@ -362,6 +367,18 @@ func resolveGHPathFrom(configured string, self string, candidates []string) (str
 		}
 	}
 	return "", errors.New("real gh not found; set OCTOPOOL_GH_PATH or install GitHub CLI")
+}
+
+func resolveConfiguredGHPath(configured string) (string, error) {
+	if filepath.IsAbs(configured) {
+		return configured, nil
+	}
+	for i := 0; i < len(configured); i++ {
+		if os.IsPathSeparator(configured[i]) {
+			return filepath.Abs(configured)
+		}
+	}
+	return exec.LookPath(configured)
 }
 
 func usableGHPath(path string, self string) bool {
@@ -378,13 +395,20 @@ func usableGHPath(path string, self string) bool {
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
 		return false
 	}
-	return !octopoolGHWrapper(path)
+	return !ghShimPath(path)
 }
 
-func octopoolGHWrapper(path string) bool {
+func ghShimPath(path string) bool {
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		base := filepath.Base(resolved)
-		if base == "octopool" || base == "octopool-gh" {
+		base := strings.TrimSuffix(strings.ToLower(filepath.Base(resolved)), strings.ToLower(filepath.Ext(resolved)))
+		switch base {
+		case "octopool", "octopool-gh", "gitcrawl", "gitcrawl-gh":
+			return true
+		}
+	}
+	if info, err := buildinfo.ReadFile(path); err == nil {
+		switch info.Path {
+		case "github.com/openclaw/octopool/cmd/octopool", "github.com/openclaw/gitcrawl/cmd/gitcrawl":
 			return true
 		}
 	}
@@ -392,7 +416,8 @@ func octopoolGHWrapper(path string) bool {
 	if err != nil || len(data) == 0 || len(data) > 8192 {
 		return false
 	}
-	return strings.Contains(string(data), "octopool gh")
+	body := string(data)
+	return strings.Contains(body, "octopool gh") || strings.Contains(body, "gitcrawl gh moved")
 }
 
 func samePath(left string, right string) bool {
