@@ -85,6 +85,9 @@ and patch hosts.
   quota falls below 50%. Raw API requests retain exact REST response semantics.
   Octopool does not use pooled credentials for releases, so draft/private release visibility
   is not shared.
+- Supported top-level `gh run view --json jobs` reads can compose job and step metadata from
+  public GitHub pages below 50% anonymous API quota. Raw `/actions/runs/{id}/jobs` requests
+  retain exact REST response semantics, and log bodies still require authenticated API access.
 - Public org repository/member/event reads, user/gist collection reads, global metadata reads,
   and public repository metadata collections can be served from unauthenticated GitHub API
   responses before spending pooled identity quota.

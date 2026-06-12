@@ -45,9 +45,10 @@ serves these public shapes through GitHub web/raw endpoints:
   patch `Accept` header) via `github.com/{owner}/{repo}/pull/{number}.diff|patch`
 - commit diff/patch media requests via `github.com/{owner}/{repo}/commit/{sha}.diff|patch`
 - compare diff/patch media requests via `github.com/{owner}/{repo}/compare/{base...head}.diff|patch`
-- supported top-level `gh run list/view` summaries (up to 25 results, with branch/status
-  filters) prefer public `github.com/{owner}/{repo}/actions` pages once anonymous API quota
-  falls below 50%; raw API requests retain exact REST semantics
+- supported top-level `gh run list/view` summaries (up to 25 results, with branch/status or
+  workflow filters) and bounded `gh run view --json jobs` job/step metadata prefer public
+  GitHub pages once anonymous API quota falls below 50%; raw API requests retain exact REST
+  semantics, and log bodies remain authenticated
 - exact public GitHub API reads without caller credentials for repo metadata, commits,
   compare JSON, contents, README, PRs, issues, checks/statuses, Actions run/workflow
   metadata, branches, tags, labels, milestones, topics, community profiles, forks,

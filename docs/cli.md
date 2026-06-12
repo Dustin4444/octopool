@@ -111,6 +111,7 @@ octopool gh issue view 80490 -R openclaw/openclaw --json number,title,state,url
 octopool gh issue list -R openclaw/openclaw --state open --label bug --limit 20 --json number,title,url
 octopool gh run list -R openclaw/openclaw --branch main --limit 10 --json databaseId,workflowName,status,conclusion,url
 octopool gh run view 26360397003 -R openclaw/openclaw --json databaseId,workflowName,status,conclusion,url
+octopool gh run view 26360397003 -R openclaw/openclaw --json status,conclusion,jobs
 octopool gh repo view openclaw/openclaw --json nameWithOwner,defaultBranchRef,url
 octopool gh workflow list -R openclaw/octopool --json id,name,path,state
 octopool gh workflow view ci.yml -R openclaw/octopool --json id,name,path,state
@@ -127,6 +128,8 @@ formatted commands stay on the real `gh`. Supported `--json` fields are intentio
 conservative. Common `gh` field names are mapped where the REST API uses different
 names, such as `url`, `author`, `headRefName`, `headRefOid`, `baseRefName`,
 `baseRefOid`, `isDraft`, `databaseId`, `workflowName`, and `nameWithOwner`.
+Run views also support the nested `jobs` field; Octopool composes its job/step metadata from
+the cache, exact API responses, or bounded public GitHub pages.
 `gh search issues|prs` is translated to a repo-scoped, cacheable GitHub Search request
 for the common plain-term `-R owner/repo --state ... --json ...` shape. Cache hits cost
 zero GitHub Search quota; misses use the pool's search bucket. Qualified search syntax

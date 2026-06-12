@@ -254,7 +254,7 @@ func runGHRun(ctx context.Context, args []string, stdout io.Writer) (bool, error
 			}
 			path = repoPath(repo, "actions", "workflows", opts.workflow, "runs")
 		}
-		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRunFields) || limitOverOnePage(opts) {
+		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRunListFields) || limitOverOnePage(opts) {
 			return false, nil
 		}
 		return true, relayTop(ctx, stdout, ghAPIRequest{
@@ -264,18 +264,14 @@ func runGHRun(ctx context.Context, args []string, stdout io.Writer) (bool, error
 			headers: map[string]string{"x-octopool-public-shape": "actions-summary-v1"},
 		}, opts, fieldMapRun)
 	case "view":
-		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedRunFields) {
+		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedRunViewFields) {
 			return false, nil
 		}
 		repo, ok := repoFromOptionOrCurrent(opts.repo)
 		if !ok {
 			return false, nil
 		}
-		return true, relayTop(ctx, stdout, ghAPIRequest{
-			method:  "GET",
-			path:    repoPath(repo, "actions", "runs", opts.positionals[0]),
-			headers: map[string]string{"x-octopool-public-shape": "actions-summary-v1"},
-		}, opts, fieldMapRun)
+		return true, relayRunView(ctx, stdout, repo, opts.positionals[0], opts)
 	default:
 		return false, nil
 	}
@@ -522,6 +518,132 @@ func relayTop(ctx context.Context, stdout io.Writer, request ghAPIRequest, opts 
 		return writeBytes(ctx, stdout, filtered, opts.jq)
 	}
 	return writeBytes(ctx, stdout, filtered, "")
+}
+
+func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string, opts ghTopOptions) error {
+	client, err := newGHRelayClient()
+	if err != nil {
+		return err
+	}
+	run := map[string]any{}
+	if len(opts.json) > 1 || !hasJSONField(opts.json, "jobs") {
+		envelope, err := client.do(ctx, ghAPIRequest{
+			method:  "GET",
+			path:    repoPath(repo, "actions", "runs", id),
+			headers: map[string]string{"x-octopool-public-shape": "actions-summary-v1"},
+		})
+		if err != nil {
+			return err
+		}
+		body, err := envelopeBodyBytes(envelope)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(body, &run); err != nil {
+			return err
+		}
+	}
+	if hasJSONField(opts.json, "jobs") {
+		envelope, err := client.do(ctx, ghAPIRequest{
+			method: "GET",
+			path:   repoPath(repo, "actions", "runs", id, "jobs"),
+			query:  map[string]any{"per_page": "100"},
+			headers: map[string]string{
+				"x-octopool-public-shape": "actions-jobs-v1",
+			},
+		})
+		if err != nil {
+			return err
+		}
+		jobs, err := runJobs(envelope)
+		if err != nil {
+			return err
+		}
+		run["jobs"] = jobs
+	}
+	raw, err := json.Marshal(run)
+	if err != nil {
+		return err
+	}
+	filtered, err := filterJSONFields(raw, opts.json, fieldMapRun)
+	if err != nil {
+		return err
+	}
+	return writeBytes(ctx, stdout, filtered, opts.jq)
+}
+
+func runJobs(envelope relayEnvelope) ([]any, error) {
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return nil, err
+	}
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+	rawJobs, ok := response["jobs"].([]any)
+	if !ok {
+		return nil, errors.New("workflow jobs response did not include jobs")
+	}
+	if total, ok := response["total_count"].(float64); ok && total > float64(len(rawJobs)) {
+		return nil, localFallbackError{Reason: "workflow jobs response requires pagination"}
+	}
+	jobs := make([]any, 0, len(rawJobs))
+	for _, rawJob := range rawJobs {
+		job, ok := rawJob.(map[string]any)
+		if !ok {
+			return nil, errors.New("workflow jobs response included an invalid job")
+		}
+		mapped := map[string]any{}
+		for field, path := range map[string][]string{
+			"databaseId":  {"id"},
+			"name":        {"name"},
+			"status":      {"status"},
+			"conclusion":  {"conclusion"},
+			"startedAt":   {"started_at"},
+			"completedAt": {"completed_at"},
+			"url":         {"html_url"},
+		} {
+			if value, ok := valueAtPath(job, path...); ok {
+				mapped[field] = value
+			}
+		}
+		if rawSteps, ok := job["steps"].([]any); ok {
+			steps := make([]any, 0, len(rawSteps))
+			for _, rawStep := range rawSteps {
+				step, ok := rawStep.(map[string]any)
+				if !ok {
+					return nil, errors.New("workflow jobs response included an invalid step")
+				}
+				mappedStep := map[string]any{}
+				for field, path := range map[string][]string{
+					"name":        {"name"},
+					"number":      {"number"},
+					"status":      {"status"},
+					"conclusion":  {"conclusion"},
+					"startedAt":   {"started_at"},
+					"completedAt": {"completed_at"},
+				} {
+					if value, ok := valueAtPath(step, path...); ok {
+						mappedStep[field] = value
+					}
+				}
+				steps = append(steps, mappedStep)
+			}
+			mapped["steps"] = steps
+		}
+		jobs = append(jobs, mapped)
+	}
+	return jobs, nil
+}
+
+func hasJSONField(fields []string, expected string) bool {
+	for _, field := range fields {
+		if field == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func relayPRChecks(ctx context.Context, stdout io.Writer, repo string, number string, opts ghTopOptions) error {
@@ -1556,7 +1678,9 @@ var fieldMapIssue = map[string][]string{
 
 var fieldMapRun = map[string][]string{
 	"databaseId":   {"id"},
+	"displayTitle": {"display_title"},
 	"workflowName": {"name"},
+	"number":       {"run_number"},
 	"url":          {"html_url"},
 	"headBranch":   {"head_branch"},
 	"headSha":      {"head_sha"},
@@ -1627,9 +1751,14 @@ var supportedIssueFields = supportedFields(
 	"labels", "assignees", "milestone",
 )
 
-var supportedRunFields = supportedFields(
-	"databaseId", "id", "name", "workflowName", "status", "conclusion", "url", "headBranch",
-	"headSha", "event", "createdAt", "updatedAt", "display_title",
+var supportedRunListFields = supportedFields(
+	"databaseId", "name", "workflowName", "status", "conclusion", "url", "headBranch",
+	"headSha", "event", "createdAt", "updatedAt", "displayTitle", "number",
+)
+
+var supportedRunViewFields = supportedFields(
+	"databaseId", "name", "workflowName", "status", "conclusion", "url", "headBranch",
+	"headSha", "event", "createdAt", "updatedAt", "displayTitle", "number", "jobs",
 )
 
 var supportedRepoFields = supportedFields(

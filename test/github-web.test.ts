@@ -236,7 +236,7 @@ describe("github web provider", () => {
           head_sha: "1e6a563d13924ba423febe3a4cb47eeb9d594322",
           event: "push",
           created_at: "2026-06-11T06:38:49Z",
-          updated_at: "2026-06-11T06:41:38.000Z",
+          updated_at: "2026-06-11T06:41:38Z",
         },
       ],
     });
@@ -319,6 +319,75 @@ describe("github web provider", () => {
     expect(response?.body).toMatchObject({ total_count: 30 });
     const body = response?.body as { workflow_runs: unknown[] } | undefined;
     expect(body?.workflow_runs).toHaveLength(25);
+  });
+
+  it("falls back to a public workflow page for workflow-filtered run lists", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+      .mockResolvedValueOnce(
+        new Response(`
+          <strong>1 workflow run result</strong>
+          <div class="Box-row js-socket-channel js-updatable-content">
+            <a href="/openclaw/octopool/actions/runs/26906919053" aria-label="completed successfully: Run 65 of CI. workflow-filtered">
+              <span class="h4 markdown-title">workflow-filtered</span>
+            </a>
+            <span class="text-bold">CI</span> #65:
+            pull request
+            <relative-time datetime="2026-06-03T18:14:57Z"></relative-time>
+          </div>
+        `),
+      )
+      .mockResolvedValueOnce(
+        new Response(`
+          <meta name="twitter:title" content="workflow-filtered &#183; openclaw/octopool@ef53e13">
+          <span class="PageHeader-parentLink-label"> CI</span>
+          <span class="actions-workflow-runs-status"><svg aria-label="completed successfully: "></svg></span>
+          <h1 class="PageHeader-title"><span class="markdown-title">workflow-filtered</span><span>#65</span></h1>
+          <span>Triggered via pull request <relative-time datetime="2026-06-03T18:14:57Z"></relative-time></span>
+          <a class="branch-name" title="RomneyDa:fix/login-provisioning-guidance" href="/RomneyDa/octopool/tree/refs/heads/fix/login-provisioning-guidance">fix/login-provisioning-guidance</a>
+          <span>Total duration</span><a class="h4 color-fg-default">19s</a>
+        `),
+      )
+      .mockResolvedValueOnce(
+        new Response("From ef53e13233adb1af0730f8239d87149d60cb42ac Mon Sep 17 00:00:00 2001\n"),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/workflows/ci.yml/runs",
+      query: { per_page: "20", branch: "main" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://github.com/openclaw/octopool/actions/workflows/ci.yml?query=branch%3Amain",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://github.com/openclaw/octopool/actions/runs/26906919053",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "https://github.com/openclaw/octopool/commit/ef53e13.patch",
+      expect.objectContaining({ headers: expect.objectContaining({ accept: "text/plain" }) }),
+    );
+    expect(response?.body).toMatchObject({
+      workflow_runs: [
+        {
+          display_title: "workflow-filtered",
+          head_branch: "fix/login-provisioning-guidance",
+          head_sha: "ef53e13233adb1af0730f8239d87149d60cb42ac",
+          updated_at: "2026-06-03T18:15:16Z",
+        },
+      ],
+    });
   });
 
   it("does not drop repeated Actions list filters in the HTML fallback", async () => {
@@ -523,6 +592,115 @@ describe("github web provider", () => {
       },
       backend: "web",
     });
+  });
+
+  it("falls back to public job metadata for shaped Actions job lists", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+      .mockResolvedValueOnce(
+        Response.json({
+          jobGroups: [
+            {
+              name: "Check",
+              nonNested: {
+                jobs: [
+                  {
+                    id: 80970314592,
+                    displayName: "Check",
+                    status: "completed",
+                    conclusion: "success",
+                    href: "/openclaw/octopool/actions/runs/27398328238/job/80970314592",
+                  },
+                ],
+              },
+            },
+          ],
+          totalCount: 1,
+          hasMore: false,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(`
+          <span data-url="/openclaw/octopool/runs/80970314592/header">
+            succeeded
+            <relative-time datetime="2026-06-12T06:17:55Z"></relative-time>
+          </span>
+          <check-steps data-job-status="completed">
+            <check-step
+              data-name="Check out"
+              data-number="2"
+              data-conclusion="success"
+              data-started-at="2026-06-12T06:15:23Z"
+              data-completed-at="2026-06-12T06:15:26Z">
+            </check-step>
+          </check-steps>
+        `),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs/27398328238/jobs",
+      query: { per_page: "100" },
+      headers: { "x-octopool-public-shape": "actions-jobs-v1" },
+    });
+
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://github.com/openclaw/octopool/actions/runs/27398328238/job_groups_batch?attempt=1",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "x-requested-with": "XMLHttpRequest" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://github.com/openclaw/octopool/actions/runs/27398328238/job/80970314592",
+      expect.any(Object),
+    );
+    expect(response?.body).toEqual({
+      total_count: 1,
+      jobs: [
+        {
+          id: 80970314592,
+          name: "Check",
+          status: "completed",
+          conclusion: "success",
+          started_at: "2026-06-12T06:15:23Z",
+          completed_at: "2026-06-12T06:17:55Z",
+          html_url: "https://github.com/openclaw/octopool/actions/runs/27398328238/job/80970314592",
+          steps: [
+            {
+              name: "Check out",
+              number: 2,
+              status: "completed",
+              conclusion: "success",
+              started_at: "2026-06-12T06:15:23Z",
+              completed_at: "2026-06-12T06:15:26Z",
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("keeps raw Actions job list requests on exact API responses", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response("rate limited", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs/27398328238/jobs",
+      query: { per_page: "100" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("falls back to release HTML when anonymous API quota is exhausted", async () => {

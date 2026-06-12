@@ -3,6 +3,14 @@ type RunState = {
   conclusion: string | null;
 };
 
+export type ActionsJobSummary = {
+  id: number;
+  name: string;
+  status: string;
+  conclusion: string | null;
+  href: string;
+};
+
 export function parseActionsRunListHTML(
   html: string,
   owner: string,
@@ -104,12 +112,14 @@ export function parseActionsRunHTML(
     `<span class="markdown-title"[\\s\\S]*?</span>\\s*<span[^>]*>\\s*#([0-9]+)`,
   ).exec(html)?.[1];
   const trigger = /Triggered via\s+([^<]+?)\s*<relative-time[^>]*datetime="([^"]+)"/.exec(html);
-  const sha = new RegExp(
-    `href="/${escapeRegex(owner)}/${escapeRegex(repo)}/commit/([0-9A-Fa-f]{7,64})"`,
-  ).exec(html)?.[1];
-  const branch = new RegExp(
-    `href="/${escapeRegex(owner)}/${escapeRegex(repo)}/tree/refs/heads/([^"]+)"`,
-  ).exec(html)?.[1];
+  const sha =
+    new RegExp(
+      `href="/${escapeRegex(owner)}/${escapeRegex(repo)}/commit/([0-9A-Fa-f]{7,64})"`,
+    ).exec(html)?.[1] ??
+    new RegExp(
+      `(?:\\u00b7|&#183;)\\s*${escapeRegex(owner)}/${escapeRegex(repo)}@([0-9A-Fa-f]{7,64})`,
+    ).exec(html)?.[1];
+  const branch = actionsRunBranch(html, owner, repo);
   if (
     title === undefined ||
     workflow === undefined ||
@@ -132,7 +142,7 @@ export function parseActionsRunHTML(
     status: state.status,
     conclusion: state.conclusion,
     html_url: `https://github.com/${owner}/${repo}/actions/runs/${id}`,
-    head_branch: branch === undefined ? null : decodeURIComponentSafe(branch),
+    head_branch: branch ?? null,
     head_sha: sha,
     event: trigger[1]!
       .trim()
@@ -140,6 +150,81 @@ export function parseActionsRunHTML(
       .replace(/[\s-]+/g, "_"),
     created_at: createdAt,
     updated_at: addDuration(createdAt, duration) ?? createdAt,
+  };
+}
+
+export function parseCommitPatchSHA(patch: string): string | undefined {
+  return /^From ([0-9A-Fa-f]{40,64})\s/m.exec(patch)?.[1];
+}
+
+export function parseActionsJobGroupsJSON(
+  value: unknown,
+  owner: string,
+  repo: string,
+  runID: number,
+): ActionsJobSummary[] | undefined {
+  if (!isRecord(value) || value.hasMore !== false || !Number.isInteger(value.totalCount)) {
+    return undefined;
+  }
+  const expectedPath = `/${owner}/${repo}/actions/runs/${runID}/job/`;
+  const jobs = new Map<number, ActionsJobSummary>();
+  collectJobSummaries(value.jobGroups, expectedPath, jobs);
+  if (jobs.size !== value.totalCount || jobs.size === 0) {
+    return undefined;
+  }
+  return [...jobs.values()];
+}
+
+export function parseActionsJobHTML(
+  html: string,
+  summary: ActionsJobSummary,
+  owner: string,
+  repo: string,
+): Record<string, unknown> | undefined {
+  const steps: Record<string, unknown>[] = [];
+  for (const match of html.matchAll(/<check-step\b([\s\S]*?)>/g)) {
+    const attributes = match[1]!;
+    const name = htmlAttribute(attributes, "data-name");
+    const number = Number(htmlAttribute(attributes, "data-number"));
+    const startedAt = htmlAttribute(attributes, "data-started-at");
+    const completedAt = htmlAttribute(attributes, "data-completed-at");
+    const conclusion = htmlAttribute(attributes, "data-conclusion");
+    if (name === undefined || !Number.isInteger(number)) {
+      return undefined;
+    }
+    steps.push({
+      name,
+      number,
+      status:
+        completedAt !== undefined
+          ? "completed"
+          : startedAt !== undefined
+            ? "in_progress"
+            : "queued",
+      conclusion: conclusion ?? null,
+      started_at: startedAt ?? null,
+      completed_at: completedAt ?? null,
+    });
+  }
+  const startedAt = firstTimestamp(steps, "started_at");
+  const completedAt = new RegExp(
+    `data-url="/${escapeRegex(owner)}/${escapeRegex(repo)}/runs/${summary.id}/header"[\\s\\S]{0,1000}?<relative-time[^>]*datetime="([^"]+)"`,
+  ).exec(html)?.[1];
+  if (
+    (summary.status === "completed" && completedAt === undefined) ||
+    (summary.status !== "queued" && steps.length === 0)
+  ) {
+    return undefined;
+  }
+  return {
+    id: summary.id,
+    name: summary.name,
+    status: summary.status,
+    conclusion: summary.conclusion,
+    started_at: startedAt,
+    completed_at: completedAt ?? null,
+    html_url: `https://github.com${summary.href}`,
+    steps,
   };
 }
 
@@ -174,6 +259,80 @@ export function parseReleaseHTML(
     published_at: publishedAt,
     body: htmlToText(bodyHTML),
   };
+}
+
+function collectJobSummaries(
+  value: unknown,
+  expectedPath: string,
+  out: Map<number, ActionsJobSummary>,
+): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectJobSummaries(item, expectedPath, out);
+    }
+    return;
+  }
+  if (!isRecord(value)) {
+    return;
+  }
+  if (
+    Number.isInteger(value.id) &&
+    typeof value.displayName === "string" &&
+    typeof value.status === "string" &&
+    (typeof value.conclusion === "string" || value.conclusion === null) &&
+    typeof value.href === "string" &&
+    value.href === `${expectedPath}${value.id}`
+  ) {
+    out.set(value.id as number, {
+      id: value.id as number,
+      name: value.displayName,
+      status: value.status,
+      conclusion: value.conclusion,
+      href: value.href,
+    });
+  }
+  for (const child of Object.values(value)) {
+    collectJobSummaries(child, expectedPath, out);
+  }
+}
+
+function actionsRunBranch(html: string, owner: string, repo: string): string | undefined {
+  const branch = new RegExp(
+    `href="/${escapeRegex(owner)}/${escapeRegex(repo)}/tree/refs/heads/([^"]+)"`,
+  ).exec(html)?.[1];
+  if (branch !== undefined) {
+    return decodeURIComponentSafe(branch);
+  }
+  for (const match of html.matchAll(/<a\b([^>]*)>/g)) {
+    const classes = htmlAttribute(match[1]!, "class")?.split(/\s+/);
+    if (!classes?.includes("branch-name")) {
+      continue;
+    }
+    const title = htmlAttribute(match[1]!, "title");
+    if (title === undefined) {
+      continue;
+    }
+    const separator = title.indexOf(":");
+    return separator === -1 ? title : title.slice(separator + 1);
+  }
+  return undefined;
+}
+
+function htmlAttribute(attributes: string, name: string): string | undefined {
+  const value = new RegExp(`(?:^|\\s)${escapeRegex(name)}="([^"]*)"`).exec(attributes)?.[1];
+  return value === undefined || value === "" ? undefined : decodeHTML(value);
+}
+
+function firstTimestamp(items: Record<string, unknown>[], field: string): string | null {
+  const values = items
+    .map((item) => item[field])
+    .filter((value): value is string => typeof value === "string")
+    .sort();
+  return values[0] ?? null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function runState(label: string): RunState | undefined {
@@ -241,7 +400,7 @@ function addDuration(date: string, duration: string | undefined): string | undef
   }
   const timestamp = Date.parse(date);
   return matched && Number.isFinite(timestamp)
-    ? new Date(timestamp + seconds * 1000).toISOString()
+    ? new Date(timestamp + seconds * 1000).toISOString().replace(".000Z", "Z")
     : undefined;
 }
 
