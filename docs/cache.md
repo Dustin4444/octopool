@@ -36,10 +36,13 @@ Only `200` responses on cacheable routes are stored. The cache is **bypassed** w
 - the route is a log route, large-payload route, or `rate_limit`, or
 - the request carries a conditional header (`if-none-match` / `if-modified-since`).
 
-### Token-free web reads
+### Token-free GitHub reads
 
 After the public-repo guard passes and before a pooled identity is selected, Octopool
-serves these public shapes through GitHub web/raw endpoints:
+can use anonymous GitHub API, public page/raw, and Git smart HTTP endpoints. The
+canonical route-by-route inventory is [Token-Free GitHub Endpoints](token-free.md).
+
+The main transport classes are:
 
 - PR diff/patch media requests (`gh pr diff`, or `GET /pulls/{number}` with a diff or
   patch `Accept` header) via `github.com/{owner}/{repo}/pull/{number}.diff|patch`

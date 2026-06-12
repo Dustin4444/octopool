@@ -12,6 +12,10 @@
 - Skip legacy Gitcrawl and Octopool `gh` shims when resolving the real GitHub CLI, including copied Windows binaries and invalid `OCTOPOOL_GH_PATH` overrides.
 - Disable Sharp's install script so `pnpm install` uses its prebuilt package instead of failing on machines with a global Homebrew `libvips`.
 
+### Documentation
+
+- Add one canonical endpoint matrix for every token-free anonymous API and public web/raw/Git transport, including source URL shapes, limits, and explicit exclusions.
+
 ## 0.3.1 - 2026-06-01
 
 ### Fixes

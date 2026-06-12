@@ -165,6 +165,8 @@ gated by the pool's `allow_logs` policy.
 
 Every repo route additionally passes a public-visibility check before a pooled identity
 or cache entry is used — see [Cache & public-repo guard](cache.md).
+The complete list of relay paths eligible for anonymous API or public web/raw/Git
+transport is in [Token-Free GitHub Endpoints](token-free.md).
 
 `route_hint.pr_head_sha` and `route_hint.pr_state` are validated, optional cache
 discriminators for PR file lists. They do not bypass policy or visibility checks; they

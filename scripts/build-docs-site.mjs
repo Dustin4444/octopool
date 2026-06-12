@@ -32,7 +32,7 @@ const MARK_RE = new RegExp(`${MARK}(\\d+)${MARK}`, "g");
 const STASH_RE = new RegExp("[\\uE000-\\uF8FF]", "g");
 
 const sections = [
-  ["Start", ["index.md", "cli.md", "relay.md"]],
+  ["Start", ["index.md", "cli.md", "relay.md", "token-free.md"]],
   ["Core", ["identities.md", "cache.md", "auth.md", "admin.md"]],
   ["Web", ["landing.md", "dashboard.md"]],
   ["Operations", ["operations.md"]],

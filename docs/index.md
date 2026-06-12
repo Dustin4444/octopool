@@ -26,6 +26,8 @@ the supported read shapes.
 
 - [GitHub read relay](relay.md) — the `POST /v1/github/request` endpoint, supported
   routes, response envelope, policy gates, and safety limits.
+- [Token-free GitHub endpoints](token-free.md) — the complete anonymous API and
+  no-API-quota endpoint matrix, source URLs, shape limits, and exclusions.
 - [Octopool CLI](cli.md) — `octopool login [server]`, discovery, `whoami`, the `gh` shim,
   and real-`gh` fallback.
 - [Pooled identities & routing](identities.md) — PAT and GitHub App identities, scopes,
