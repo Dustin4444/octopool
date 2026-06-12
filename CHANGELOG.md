@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Cache terminal Actions runs/jobs/checks/statuses for one hour with a 24-hour stale fallback, publish cache misses before responding, and prune entries older than the maximum stale window hourly.
 - Serve supported top-level Actions/release summaries from public GitHub pages, prefer public page/raw fallbacks below 50% anonymous API quota while preserving exact raw REST semantics, and prove public repository visibility from GitHub HTML when API proof quotas are depleted.
 - Serve workflow-filtered run lists and top-level `gh run view --json jobs` job/step metadata from public GitHub pages below 50% anonymous API quota, with bounded parsing and exact API fallback.
 - Serve shaped issue views, issue/PR lists, labels, and active workflow lists from token-free GitHub pages below 50% anonymous API quota when their requested fields are exactly representable.

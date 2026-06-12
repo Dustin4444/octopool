@@ -479,6 +479,22 @@ func (q *Queries) DashboardUsers(ctx context.Context, poolID string) ([]Dashboar
 	return items, nil
 }
 
+const deleteExpiredGitHubCacheBatch = `-- name: DeleteExpiredGitHubCacheBatch :exec
+DELETE FROM github_cache_entries
+WHERE cache_key IN (
+  SELECT cache_key
+  FROM github_cache_entries
+  WHERE expires_at <= datetime(CURRENT_TIMESTAMP, '-25 hours')
+  ORDER BY expires_at
+  LIMIT ?1
+)
+`
+
+func (q *Queries) DeleteExpiredGitHubCacheBatch(ctx context.Context, limit int64) error {
+	_, err := q.db.ExecContext(ctx, deleteExpiredGitHubCacheBatch, limit)
+	return err
+}
+
 const deleteIdentityScopes = `-- name: DeleteIdentityScopes :exec
 DELETE FROM identity_scopes
 WHERE identity_id = ?1

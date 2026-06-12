@@ -45,6 +45,8 @@ export const queries = {
     "SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at\nFROM github_cache_entries\nWHERE cache_key = ?1",
   writeGitHubCache:
     "INSERT INTO github_cache_entries\n  (cache_key, pool_id, method, path, query_json, headers_json, route_key, route_kind,\n   status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, expires_at)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)\nON CONFLICT(cache_key) DO UPDATE SET\n  status = excluded.status,\n  response_headers_json = excluded.response_headers_json,\n  body_json = excluded.body_json,\n  body_encoding = excluded.body_encoding,\n  identity_id = excluded.identity_id,\n  identity_kind = excluded.identity_kind,\n  created_at = CURRENT_TIMESTAMP,\n  expires_at = excluded.expires_at",
+  deleteExpiredGitHubCacheBatch:
+    "DELETE FROM github_cache_entries\nWHERE cache_key IN (\n  SELECT cache_key\n  FROM github_cache_entries\n  WHERE expires_at <= datetime(CURRENT_TIMESTAMP, '-25 hours')\n  ORDER BY expires_at\n  LIMIT ?1\n)",
   dashboardUsage:
     "SELECT\n  COUNT(*) AS requests_24h,\n  SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors_24h,\n  SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits_24h,\n  SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale_24h,\n  SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses_24h,\n  SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass_24h,\n  AVG(duration_ms) AS avg_duration_ms_24h,\n  MAX(created_at) AS latest_seen_at\nFROM audit_events\nWHERE pool_id = ?1\n  AND created_at >= datetime('now', '-24 hours')",
   dashboardIdentities:

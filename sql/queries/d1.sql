@@ -82,6 +82,16 @@ ON CONFLICT(cache_key) DO UPDATE SET
   created_at = CURRENT_TIMESTAMP,
   expires_at = excluded.expires_at;
 
+-- name: DeleteExpiredGitHubCacheBatch :exec
+DELETE FROM github_cache_entries
+WHERE cache_key IN (
+  SELECT cache_key
+  FROM github_cache_entries
+  WHERE expires_at <= datetime(CURRENT_TIMESTAMP, '-25 hours')
+  ORDER BY expires_at
+  LIMIT ?1
+);
+
 -- name: DashboardUsage :one
 SELECT
   COUNT(*) AS requests_24h,

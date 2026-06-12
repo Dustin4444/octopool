@@ -2,6 +2,10 @@ import { hashToken } from "./auth";
 import { queries } from "./generated/sql";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
+const TERMINAL_CI_TTL_SECONDS = 3_600;
+const TERMINAL_CI_STALE_SECONDS = 86_400;
+const TERMINAL_CI_TTL_DETECTION_SECONDS = 1_800;
+
 type CacheRow = {
   status: number;
   response_headers_json: string;
@@ -67,7 +71,14 @@ export async function readStaleGitHubCache(
   return cacheRowResponse(row);
 }
 
-export function staleCacheSeconds(route: RouteInfo): number {
+export function staleCacheSeconds(route: RouteInfo, freshTtlSeconds?: number): number {
+  if (
+    terminalCIRoute(route) &&
+    freshTtlSeconds !== undefined &&
+    freshTtlSeconds >= TERMINAL_CI_TTL_DETECTION_SECONDS
+  ) {
+    return TERMINAL_CI_STALE_SECONDS;
+  }
   switch (route.kind) {
     case "run_view":
     case "run_list":
@@ -197,11 +208,13 @@ function cacheRowResponse(row: CacheRow | null): CachedGitHubResponse | undefine
 }
 
 function staleCacheAllowed(row: CacheRow, route: RouteInfo): boolean {
+  const createdAt = Date.parse(`${row.created_at}Z`);
   const expiresAt = Date.parse(`${row.expires_at}Z`);
-  if (!Number.isFinite(expiresAt)) {
+  if (!Number.isFinite(createdAt) || !Number.isFinite(expiresAt)) {
     return false;
   }
-  const maxStaleMs = staleCacheSeconds(route) * 1000;
+  const freshTtlSeconds = Math.max(0, (expiresAt - createdAt) / 1000);
+  const maxStaleMs = staleCacheSeconds(route, freshTtlSeconds) * 1000;
   return Date.now() - expiresAt <= maxStaleMs;
 }
 
@@ -319,23 +332,23 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
     case "git_matching_refs":
       return 120;
     case "run_view":
-      return completedRun(response) ? 300 : 15;
+      return completedRun(response) ? TERMINAL_CI_TTL_SECONDS : 15;
     case "run_list":
     case "workflow_run_list":
       return completedRunList(response) ? 120 : 15;
     case "run_jobs":
-      return completedJobs(response) ? 300 : 15;
+      return completedJobs(response) ? TERMINAL_CI_TTL_SECONDS : 15;
     case "commit_check_runs":
-      return completedChecks(response) ? 300 : 15;
+      return completedChecks(response) ? TERMINAL_CI_TTL_SECONDS : 15;
     case "commit_check_suites":
-      return completedCheckSuites(response) ? 300 : 15;
+      return completedCheckSuites(response) ? TERMINAL_CI_TTL_SECONDS : 15;
     case "commit_status":
-      return completedStatus(response) ? 300 : 15;
+      return completedStatus(response) ? TERMINAL_CI_TTL_SECONDS : 15;
     case "commit_statuses":
     case "ref_statuses":
-      return completedStatusList(response) ? 300 : 15;
+      return completedStatusList(response) ? TERMINAL_CI_TTL_SECONDS : 15;
     case "job_view":
-      return 15;
+      return completedJob(response) ? TERMINAL_CI_TTL_SECONDS : 15;
     case "pr_files":
       return stateAwarePRSubresource(route, response) ? 300 : 60;
     case "pr_commits":
@@ -479,6 +492,10 @@ function completedJobs(response?: GitHubRelayResponse): boolean {
   );
 }
 
+function completedJob(response?: GitHubRelayResponse): boolean {
+  return isRecord(response?.body) && response.body.status === "completed";
+}
+
 function completedChecks(response?: GitHubRelayResponse): boolean {
   if (!isRecord(response?.body) || !Array.isArray(response.body.check_runs)) {
     return false;
@@ -539,6 +556,27 @@ function routeStateHint(route: RouteInfo): string | undefined {
 
 function stateAwarePRRoute(route: RouteInfo): boolean {
   return route.kind === "pr_files";
+}
+
+function terminalCIRoute(route: RouteInfo): boolean {
+  switch (route.kind) {
+    case "run_view":
+    case "run_jobs":
+    case "commit_check_runs":
+    case "commit_check_suites":
+    case "commit_status":
+    case "commit_statuses":
+    case "ref_statuses":
+    case "job_view":
+      return true;
+    default:
+      return false;
+  }
+}
+
+export async function pruneExpiredGitHubCache(env: Env, limit = 500): Promise<number> {
+  const result = await env.DB.prepare(queries.deleteExpiredGitHubCacheBatch).bind(limit).run();
+  return result.meta.changes;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

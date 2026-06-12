@@ -9,6 +9,7 @@ import {
 } from "./auth";
 import {
   githubCacheKey,
+  pruneExpiredGitHubCache,
   readGitHubCache,
   readStaleGitHubCache,
   shouldUseGitHubCache,
@@ -67,6 +68,14 @@ export default {
         return secureResponse(request, webErrorResponse(error, requestId));
       }
       return secureResponse(request, errorResponse(error, requestId));
+    }
+  },
+  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext) {
+    const batchSize = 500;
+    for (let batch = 0; batch < 20; batch++) {
+      if ((await pruneExpiredGitHubCache(env, batchSize)) < batchSize) {
+        break;
+      }
     }
   },
 };
@@ -432,21 +441,19 @@ async function relayGitHub(
       const webGitHub = await callGitHubWeb(env, relayRequest, route);
       if (webGitHub !== undefined) {
         const sanitizedWebGitHub = sanitizeGitHubResponse(route, webGitHub);
+        await publishGitHubCache(env, cacheKey, relayRequest, route, sanitizedWebGitHub);
         ctx.waitUntil(
-          Promise.all([
-            insertAudit(env, {
-              requestId,
-              callerId: caller.id,
-              pool: relayRequest.pool,
-              routeKey: route.routeKey,
-              routeKind: route.kind,
-              status: sanitizedWebGitHub.status,
-              durationMs: Date.now() - started,
-              cacheStatus: auditCacheStatus,
-              cacheable: auditCacheable,
-            }),
-            writeGitHubCache(env, cacheKey, relayRequest, route, sanitizedWebGitHub),
-          ]),
+          insertAudit(env, {
+            requestId,
+            callerId: caller.id,
+            pool: relayRequest.pool,
+            routeKey: route.routeKey,
+            routeKind: route.kind,
+            status: sanitizedWebGitHub.status,
+            durationMs: Date.now() - started,
+            cacheStatus: auditCacheStatus,
+            cacheable: auditCacheable,
+          }),
         );
         return jsonResponse({
           status: sanitizedWebGitHub.status,
@@ -494,23 +501,21 @@ async function relayGitHub(
           },
         );
       }
+      if (cacheKey !== undefined) {
+        await publishGitHubCache(env, cacheKey, relayRequest, route, github);
+      }
       ctx.waitUntil(
-        Promise.all([
-          insertAudit(env, {
-            requestId,
-            callerId: caller.id,
-            pool: relayRequest.pool,
-            routeKey: route.routeKey,
-            routeKind: route.kind,
-            status: github.status,
-            durationMs: Date.now() - started,
-            cacheStatus: auditCacheStatus,
-            cacheable: auditCacheable,
-          }),
-          ...(cacheKey === undefined
-            ? []
-            : [writeGitHubCache(env, cacheKey, relayRequest, route, github)]),
-        ]),
+        insertAudit(env, {
+          requestId,
+          callerId: caller.id,
+          pool: relayRequest.pool,
+          routeKey: route.routeKey,
+          routeKind: route.kind,
+          status: github.status,
+          durationMs: Date.now() - started,
+          cacheStatus: auditCacheStatus,
+          cacheable: auditCacheable,
+        }),
       );
       return jsonResponse({
         status: github.status,
@@ -566,6 +571,9 @@ async function relayGitHub(
         });
         continue;
       }
+      if (cacheKey !== undefined) {
+        await publishGitHubCache(env, cacheKey, relayRequest, route, github, identity);
+      }
       ctx.waitUntil(
         Promise.all([
           coordinator.recordResult({
@@ -587,9 +595,6 @@ async function relayGitHub(
             cacheStatus: auditCacheStatus,
             cacheable: auditCacheable,
           }),
-          ...(cacheKey === undefined
-            ? []
-            : [writeGitHubCache(env, cacheKey, relayRequest, route, github, identity)]),
         ]),
       );
       return jsonResponse({
@@ -749,6 +754,21 @@ function staleFallbackReason(reason: string): boolean {
       return true;
     default:
       return false;
+  }
+}
+
+async function publishGitHubCache(
+  env: Env,
+  cacheKey: string,
+  request: Parameters<typeof writeGitHubCache>[2],
+  route: Parameters<typeof writeGitHubCache>[3],
+  response: Parameters<typeof writeGitHubCache>[4],
+  identity?: Identity,
+): Promise<void> {
+  try {
+    await writeGitHubCache(env, cacheKey, request, route, response, identity);
+  } catch (error) {
+    console.error("github cache write failed", error);
   }
 }
 

@@ -232,6 +232,9 @@ Observability is enabled at full sampling. Every routed request writes an `audit
 row (caller, pool, route key/kind, identity, status, error code, duration, cache
 hit/miss/bypass status); secrets and request bodies are never recorded.
 
+The main Worker has an hourly cron trigger at minute 17. It deletes bounded batches of
+cache entries expired for more than 25 hours; this retains every configured stale window.
+
 `GET /v1/pools/<pool>/stats?since=24h` returns pool-wide and caller-specific cache stats.
 The CLI wraps this as `octopool stats`. The browser dashboard at `/dashboard` exposes the
 same data plus identity health, live leases, and per-caller usage — see

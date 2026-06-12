@@ -84,8 +84,10 @@ web hit still re-checks that public proof covers the entry before returning it.
 
 Per route kind and response state (`cacheTTLSeconds`):
 
-- workflow runs, run lists, job lists, checks, and commit statuses → 15s while active;
-  completed runs/checks get short extended TTLs
+- workflow runs, jobs, checks, check suites, and commit statuses → 15s while active;
+  terminal payloads get 1h fresh plus up to 24h bounded stale fallback
+- run/workflow lists → 15s while active, 2m when every returned run is completed; lists
+  remain mutable because new runs can appear
 - PR files with a validated state discriminator → 5m; PR commits, reviews,
   comments, issue comments/events/timeline, and undiscriminated PR files → 1m..5m
 - repository-scoped `gh search issues|prs` shim calls use cacheable GitHub Search
@@ -107,9 +109,14 @@ A fresh or bounded-stale hit is only served if:
 
 If every eligible identity is depleted, cooling down, missing, or rate-limited, Octopool may
 serve an expired public cache entry for a short route-specific grace window. Mutable CI
-routes get only minutes; PR/issue detail routes get up to an hour; immutable-ish commit
-views can get up to a day. Stale serves still run the public-repo guard and active-identity
-check before returning.
+payloads get only minutes; terminal CI payloads get up to a day; PR/issue detail routes
+get up to an hour; immutable-ish commit views can get up to a day. Stale serves still run
+the public-repo guard and active-identity check before returning.
+
+Cache publication is awaited before returning a miss response, closing the response/write
+race for immediate repeat reads. Audit writes remain deferred. An hourly scheduled task
+deletes cache entries that expired more than 25 hours ago in bounded batches, preserving
+the longest stale-serving window while keeping D1 growth bounded.
 
 Hits are still audited, with the cached identity attributed. Each audit row records cache
 status as `hit`, `stale`, `miss`, `bypass`, or `unknown`, which powers `octopool stats` and

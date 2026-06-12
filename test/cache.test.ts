@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   cacheTTLSeconds,
   githubCacheKey,
+  pruneExpiredGitHubCache,
   readStaleGitHubCache,
   shouldUseGitHubCache,
   staleCacheSeconds,
@@ -158,7 +159,7 @@ describe("github cache policy", () => {
     expect(shouldUseGitHubCache(rate, classifyRoute(rate, policy))).toBe(false);
   });
 
-  it("keeps mutable CI TTLs short and extends closed items", () => {
+  it("keeps mutable CI TTLs short and caches terminal CI for an hour", () => {
     const run = classifyRoute(
       validateRelayRequest({
         pool: "maintainers",
@@ -167,7 +168,7 @@ describe("github cache policy", () => {
       }),
       policy,
     );
-    expect(cacheTTLSeconds(run, response({ status: "completed" }))).toBe(300);
+    expect(cacheTTLSeconds(run, response({ status: "completed" }))).toBe(3_600);
     expect(cacheTTLSeconds(run, response({ status: "in_progress" }))).toBe(15);
 
     const runList = classifyRoute(
@@ -191,7 +192,9 @@ describe("github cache policy", () => {
       }),
       policy,
     );
-    expect(cacheTTLSeconds(checks, response({ check_runs: [{ status: "completed" }] }))).toBe(300);
+    expect(cacheTTLSeconds(checks, response({ check_runs: [{ status: "completed" }] }))).toBe(
+      3_600,
+    );
     expect(cacheTTLSeconds(checks, response({ check_runs: [] }))).toBe(15);
     const checkSuites = classifyRoute(
       validateRelayRequest({
@@ -203,7 +206,7 @@ describe("github cache policy", () => {
     );
     expect(
       cacheTTLSeconds(checkSuites, response({ check_suites: [{ status: "completed" }] })),
-    ).toBe(300);
+    ).toBe(3_600);
     expect(cacheTTLSeconds(checkSuites, response({ check_suites: [] }))).toBe(15);
     const statuses = classifyRoute(
       validateRelayRequest({
@@ -213,8 +216,18 @@ describe("github cache policy", () => {
       }),
       policy,
     );
-    expect(cacheTTLSeconds(statuses, response([{ state: "success" }]))).toBe(300);
+    expect(cacheTTLSeconds(statuses, response([{ state: "success" }]))).toBe(3_600);
     expect(cacheTTLSeconds(statuses, response([{ state: "pending" }]))).toBe(15);
+    const job = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/actions/jobs/123",
+      }),
+      policy,
+    );
+    expect(cacheTTLSeconds(job, response({ status: "completed" }))).toBe(3_600);
+    expect(cacheTTLSeconds(job, response({ status: "in_progress" }))).toBe(15);
 
     const files = classifyRoute(
       validateRelayRequest({
@@ -308,6 +321,7 @@ describe("github cache policy", () => {
       policy,
     );
     expect(staleCacheSeconds(run)).toBe(300);
+    expect(staleCacheSeconds(run, 3_600)).toBe(86_400);
 
     const pr = classifyRoute(
       validateRelayRequest({
@@ -376,6 +390,64 @@ describe("github cache policy", () => {
 
     expiresAt = sqliteUTC(Date.now() - 7_200_000);
     await expect(readStaleGitHubCache(env, "cache-key", route)).resolves.toBeUndefined();
+  });
+
+  it("extends stale fallback only for terminal CI cache entries", async () => {
+    const route = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/actions/runs/123",
+      }),
+      policy,
+    );
+    let createdAt = sqliteUTC(Date.now() - 13 * 60 * 60 * 1000);
+    let expiresAt = sqliteUTC(Date.now() - 12 * 60 * 60 * 1000);
+    const env = {
+      DB: {
+        prepare: () => ({
+          bind: () => ({
+            first: async () => ({
+              status: 200,
+              response_headers_json: "{}",
+              body_json: '{"status":"completed"}',
+              body_encoding: "json",
+              identity_id: null,
+              identity_kind: null,
+              created_at: createdAt,
+              expires_at: expiresAt,
+            }),
+          }),
+        }),
+      },
+    } as unknown as Env;
+
+    await expect(readStaleGitHubCache(env, "cache-key", route)).resolves.toMatchObject({
+      body: { status: "completed" },
+    });
+
+    createdAt = sqliteUTC(Date.now() - 12 * 60 * 60 * 1000 - 15_000);
+    expiresAt = sqliteUTC(Date.now() - 12 * 60 * 60 * 1000);
+    await expect(readStaleGitHubCache(env, "cache-key", route)).resolves.toBeUndefined();
+  });
+
+  it("prunes expired cache entries in bounded batches", async () => {
+    let boundLimit: unknown;
+    const env = {
+      DB: {
+        prepare: () => ({
+          bind: (limit: unknown) => {
+            boundLimit = limit;
+            return {
+              run: async () => ({ meta: { changes: 37 } }),
+            };
+          },
+        }),
+      },
+    } as unknown as Env;
+
+    await expect(pruneExpiredGitHubCache(env, 100)).resolves.toBe(37);
+    expect(boundLimit).toBe(100);
   });
 });
 
