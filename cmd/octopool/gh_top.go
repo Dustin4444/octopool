@@ -91,7 +91,12 @@ func runGHPR(ctx context.Context, args []string, stdout io.Writer) (bool, error)
 		if opts.state != "" {
 			query["state"] = opts.state
 		}
-		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "pulls"), query: query}, opts, fieldMapPR)
+		return true, relayTop(ctx, stdout, ghAPIRequest{
+			method:  "GET",
+			path:    repoPath(repo, "pulls"),
+			query:   query,
+			headers: publicShapeHeaders(opts, supportedPublicPRListFields, "pr-list-v1"),
+		}, opts, fieldMapPR)
 	case "diff":
 		repo, number, ok := repoNumber(opts)
 		if !ok || hasTopModifiersExceptPatch(opts) || machineReadable(opts) || opts.jq != "" {
@@ -198,7 +203,11 @@ func runGHIssue(ctx context.Context, args []string, stdout io.Writer) (bool, err
 		if !ok || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedIssueFields) {
 			return false, nil
 		}
-		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "issues", number)}, opts, fieldMapIssue)
+		return true, relayTop(ctx, stdout, ghAPIRequest{
+			method:  "GET",
+			path:    repoPath(repo, "issues", number),
+			headers: publicShapeHeaders(opts, supportedPublicIssueViewFields, "issue-summary-v1"),
+		}, opts, fieldMapIssue)
 	case "list":
 		repo, ok := repoOnly(opts)
 		if !ok || !machineReadable(opts) || !supportedJSONFields(opts, supportedIssueFields) || limitOverOnePage(opts) || hasCurrentUserFilter(opts) {
@@ -217,7 +226,12 @@ func runGHIssue(ctx context.Context, args []string, stdout io.Writer) (bool, err
 		if len(opts.labels) > 0 {
 			query["labels"] = strings.Join(opts.labels, ",")
 		}
-		return true, relayIssueList(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "issues"), query: query}, opts)
+		return true, relayIssueList(ctx, stdout, ghAPIRequest{
+			method:  "GET",
+			path:    repoPath(repo, "issues"),
+			query:   query,
+			headers: publicShapeHeaders(opts, supportedPublicIssueListFields, "issue-list-v1"),
+		}, opts)
 	default:
 		return false, nil
 	}
@@ -397,7 +411,12 @@ func runGHLabel(ctx context.Context, args []string, stdout io.Writer) (bool, err
 	if !ok {
 		return false, nil
 	}
-	return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "labels"), query: listQuery(opts)}, opts, fieldMapLabel)
+	return true, relayTop(ctx, stdout, ghAPIRequest{
+		method:  "GET",
+		path:    repoPath(repo, "labels"),
+		query:   listQuery(opts),
+		headers: map[string]string{"x-octopool-public-shape": "label-list-v1"},
+	}, opts, fieldMapLabel)
 }
 
 func runGHGist(ctx context.Context, args []string, stdout io.Writer) (bool, error) {
@@ -851,38 +870,31 @@ func relayWorkflowList(ctx context.Context, stdout io.Writer, repo string, opts 
 	}
 	limit := desiredLimitDefault(opts, 50)
 	items := make([]any, 0, limit)
-	for page := 1; page <= 10 && len(items) < limit; page++ {
-		envelope, err := client.do(ctx, ghAPIRequest{
-			method: "GET",
-			path:   repoPath(repo, "actions", "workflows"),
-			query:  map[string]any{"per_page": "100", "page": strconv.Itoa(page)},
-		})
-		if err != nil {
-			return err
-		}
-		body, err := envelopeBodyBytes(envelope)
-		if err != nil {
-			return err
-		}
-		var response map[string]any
-		if err := json.Unmarshal(body, &response); err != nil {
-			return err
-		}
-		workflows, ok := response["workflows"].([]any)
-		if !ok {
-			return errors.New("workflow list response did not include workflows")
-		}
-		for _, item := range workflows {
-			if !workflowActive(item) {
-				continue
-			}
+	// Native gh fetches one page at --limit, then drops disabled workflows without backfilling.
+	envelope, err := client.do(ctx, ghAPIRequest{
+		method:  "GET",
+		path:    repoPath(repo, "actions", "workflows"),
+		query:   map[string]any{"per_page": strconv.Itoa(limit), "page": "1"},
+		headers: map[string]string{"x-octopool-public-shape": "workflow-list-v1"},
+	})
+	if err != nil {
+		return err
+	}
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return err
+	}
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		return err
+	}
+	workflows, ok := response["workflows"].([]any)
+	if !ok {
+		return errors.New("workflow list response did not include workflows")
+	}
+	for _, item := range workflows {
+		if workflowActive(item) {
 			items = append(items, item)
-			if len(items) >= limit {
-				break
-			}
-		}
-		if len(workflows) < 100 {
-			break
 		}
 	}
 	raw, err := json.Marshal(items)
@@ -1371,6 +1383,13 @@ func supportedJSONFields(opts ghTopOptions, supported map[string]bool) bool {
 	return true
 }
 
+func publicShapeHeaders(opts ghTopOptions, supported map[string]bool, shape string) map[string]string {
+	if supportedJSONFields(opts, supported) {
+		return map[string]string{"x-octopool-public-shape": shape}
+	}
+	return nil
+}
+
 func needsHydratedPR(fields []string) bool {
 	for _, field := range fields {
 		switch field {
@@ -1741,6 +1760,11 @@ var supportedPRListFields = supportedFields(
 	"mergedAt", "headRefName", "headRefOid", "baseRefName", "baseRefOid", "isDraft", "labels",
 )
 
+var supportedPublicPRListFields = supportedFields(
+	"number", "title", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
+	"mergedAt", "isDraft", "labels",
+)
+
 var supportedPRSearchFields = supportedFields(
 	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
 	"labels",
@@ -1749,6 +1773,14 @@ var supportedPRSearchFields = supportedFields(
 var supportedIssueFields = supportedFields(
 	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
 	"labels", "assignees", "milestone",
+)
+
+var supportedPublicIssueViewFields = supportedFields(
+	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "labels",
+)
+
+var supportedPublicIssueListFields = supportedFields(
+	"number", "title", "state", "url", "author", "createdAt", "updatedAt", "closedAt", "labels",
 )
 
 var supportedRunListFields = supportedFields(
@@ -1780,7 +1812,7 @@ var supportedCheckRunFields = supportedFields(
 )
 
 var supportedWorkflowFields = supportedFields(
-	"id", "name", "path", "state", "url", "createdAt", "updatedAt",
+	"id", "name", "path", "state",
 )
 
 var supportedLabelFields = supportedFields(

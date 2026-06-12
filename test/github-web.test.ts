@@ -783,27 +783,298 @@ describe("github web provider", () => {
     );
   });
 
-  it("does not synthesize partial Actions or release objects for raw API requests", async () => {
-    const fetchMock = vi.fn(async () => new Response("rate limited", { status: 403 }));
+  it("falls back to embedded issue data for shaped issue views", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+      .mockResolvedValueOnce(
+        new Response(
+          embeddedPage("IssueViewerViewQuery", {
+            issue: {
+              __typename: "Issue",
+              number: 5,
+              title: "Sign in fails",
+              body: "Public body",
+              state: "CLOSED",
+              url: "https://github.com/openclaw/octopool/issues/5",
+              createdAt: "2026-05-27T23:17:12Z",
+              updatedAt: "2026-05-27T23:19:04Z",
+              author: actor("phoward38", "Patrick Howard"),
+              labels: connection([]),
+              assignedActors: { nodes: [] },
+              milestone: null,
+            },
+          }),
+        ),
+      );
     vi.stubGlobal("fetch", fetchMock);
-    const actions = validateRelayRequest({
+    const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
-      path: "/repos/openclaw/octopool/actions/runs",
-    });
-    const release = validateRelayRequest({
-      pool: "maintainers",
-      method: "GET",
-      path: "/repos/openclaw/octopool/releases/tags/v0.8.0",
+      path: "/repos/openclaw/octopool/issues/5",
+      headers: { "x-octopool-public-shape": "issue-summary-v1" },
     });
 
-    await expect(callGitHubWeb(env(), actions, classifyRoute(actions, policy))).resolves.toBe(
-      undefined,
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://github.com/openclaw/octopool/issues/5",
+      expect.any(Object),
     );
-    await expect(callGitHubWeb(env(), release, classifyRoute(release, policy))).resolves.toBe(
-      undefined,
+    expect(response?.body).toEqual({
+      number: 5,
+      title: "Sign in fails",
+      body: "Public body",
+      state: "CLOSED",
+      html_url: "https://github.com/openclaw/octopool/issues/5",
+      user: {
+        id: "user-phoward38",
+        login: "phoward38",
+        name: "Patrick Howard",
+        is_bot: false,
+      },
+      created_at: "2026-05-27T23:17:12Z",
+      updated_at: "2026-05-27T23:19:04Z",
+      labels: [],
+      assignees: [],
+      milestone: null,
+    });
+  });
+
+  it("falls back to embedded issue and PR lists when the whole result fits", async () => {
+    const issueNode = {
+      __typename: "Issue",
+      number: 5,
+      titleHtml: "Sign in <code>fails</code>",
+      state: "CLOSED",
+      createdAt: "2026-05-27T23:17:12Z",
+      updatedAt: "2026-05-27T23:19:04Z",
+      closedAt: "2026-05-27T23:19:04Z",
+      author: actor("phoward38", "Patrick Howard"),
+      labels: connection([]),
+      assignedActors: connection([]),
+      milestone: null,
+    };
+    const prNode = {
+      __typename: "PullRequest",
+      number: 11,
+      titleHTML: "Clarify login",
+      pullRequestState: "MERGED",
+      isDraft: false,
+      createdAt: "2026-06-03T18:13:12Z",
+      updatedAt: "2026-06-10T00:52:44Z",
+      closedAt: "2026-06-10T00:52:44Z",
+      author: actor("RomneyDa", "Dallin Romney"),
+      labels: connection([]),
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+      .mockResolvedValueOnce(new Response(issueListPage([issueNode])))
+      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+      .mockResolvedValueOnce(new Response(issueListPage([prNode])));
+    vi.stubGlobal("fetch", fetchMock);
+    const issueRequest = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/issues",
+      query: {
+        per_page: "30",
+        page: "1",
+        state: "all",
+        creator: "phoward38",
+        assignee: "steipete",
+      },
+      headers: { "x-octopool-public-shape": "issue-list-v1" },
+    });
+    const prRequest = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/pulls",
+      query: { per_page: "30", state: "all" },
+      headers: { "x-octopool-public-shape": "pr-list-v1" },
+    });
+
+    const issueResponse = await callGitHubWeb(
+      env(),
+      issueRequest,
+      classifyRoute(issueRequest, policy),
     );
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const prResponse = await callGitHubWeb(env(), prRequest, classifyRoute(prRequest, policy));
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://github.com/openclaw/octopool/issues?q=is%3Aissue+author%3A%22phoward38%22+assignee%3A%22steipete%22",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "https://github.com/openclaw/octopool/issues?q=is%3Apr",
+      expect.any(Object),
+    );
+    expect(issueResponse?.body).toMatchObject([
+      { number: 5, title: "Sign in fails", state: "CLOSED" },
+    ]);
+    expect(prResponse?.body).toMatchObject([
+      {
+        number: 11,
+        state: "MERGED",
+        merged_at: "2026-06-10T00:52:44Z",
+      },
+    ]);
+  });
+
+  it("falls back to embedded labels with GraphQL IDs and URLs", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+      .mockResolvedValueOnce(
+        new Response(
+          embeddedPage("RepositoryLabelIndexPageQuery", {
+            labels: {
+              totalCount: 1,
+              edges: [
+                {
+                  node: {
+                    id: "LA_bug",
+                    name: "good first issue",
+                    color: "7057ff",
+                    description: "Good for newcomers",
+                  },
+                },
+              ],
+            },
+          }),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/labels",
+      query: { per_page: "100" },
+      headers: { "x-octopool-public-shape": "label-list-v1" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({
+      body: [
+        {
+          id: "LA_bug",
+          name: "good first issue",
+          url: "https://github.com/openclaw/octopool/labels/good%20first%20issue",
+        },
+      ],
+    });
+  });
+
+  it("paginates token-free workflow HTML and preserves workflow state/order", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+      .mockResolvedValueOnce(
+        new Response(
+          workflowPage(
+            [
+              [284355045, "CI", "ci.yml"],
+              [283839619, "pages-build-deployment", "pages/pages-build-deployment"],
+              [231435713, "Disabled", "disabled.yml", true],
+            ],
+            2,
+          ),
+        ),
+      )
+      .mockResolvedValueOnce(new Response(workflowPage([[284355048, "release", "release.yml"]])));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/workflows",
+      query: { per_page: "100", page: "1" },
+      headers: { "x-octopool-public-shape": "workflow-list-v1" },
+    });
+
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://github.com/openclaw/octopool/actions/workflows_partial?query=&page=2",
+      expect.any(Object),
+    );
+    expect(response?.body).toEqual({
+      total_count: 4,
+      workflows: [
+        { id: 284355045, name: "CI", path: ".github/workflows/ci.yml", state: "active" },
+        {
+          id: 231435713,
+          name: "Disabled",
+          path: ".github/workflows/disabled.yml",
+          state: "disabled_manually",
+        },
+        {
+          id: 284355048,
+          name: "release",
+          path: ".github/workflows/release.yml",
+          state: "active",
+        },
+        {
+          id: 283839619,
+          name: "pages-build-deployment",
+          path: "dynamic/pages/pages-build-deployment",
+          state: "active",
+        },
+      ],
+    });
+  });
+
+  it("rejects workflow HTML without pagination completeness proof", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+        .mockResolvedValueOnce(new Response(workflowPage([[284355045, "CI", "ci.yml"]]))),
+    );
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/workflows",
+      query: { per_page: "50", page: "1" },
+      headers: { "x-octopool-public-shape": "workflow-list-v1" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not synthesize shaped page objects for raw API requests", async () => {
+    const fetchMock = vi.fn(async () => new Response("rate limited", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const requests = [
+      "/repos/openclaw/octopool/actions/runs",
+      "/repos/openclaw/octopool/releases/tags/v0.8.0",
+      "/repos/openclaw/octopool/issues/5",
+      "/repos/openclaw/octopool/issues",
+      "/repos/openclaw/octopool/pulls",
+      "/repos/openclaw/octopool/labels",
+      "/repos/openclaw/octopool/actions/workflows",
+    ].map((path) =>
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path,
+      }),
+    );
+
+    for (const request of requests) {
+      await expect(
+        callGitHubWeb(env(), request, classifyRoute(request, policy)),
+      ).resolves.toBeUndefined();
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(requests.length);
   });
 
   it("drops draft releases from web-origin release responses", async () => {
@@ -1233,4 +1504,49 @@ function actionsListHTML(title: string): string {
       <a class="branch-name" title="main" href="/openclaw/octopool/tree/refs/heads/main">main</a>
     </div>
   `;
+}
+
+function embeddedPage(queryName: string, repository: Record<string, unknown>): string {
+  return `<script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({
+    payload: {
+      preloadedQueries: [{ queryName, result: { data: { repository } } }],
+    },
+  })}</script>`;
+}
+
+function issueListPage(nodes: Record<string, unknown>[]): string {
+  return embeddedPage("IssueIndexPageQuery", {
+    search: {
+      edges: nodes.map((node) => ({ node })),
+      issueCount: nodes.length,
+      pageInfo: { hasNextPage: false },
+    },
+  });
+}
+
+function actor(login: string, name: string): Record<string, unknown> {
+  return { __typename: "User", id: `user-${login}`, login, name };
+}
+
+function connection(nodes: Record<string, unknown>[]): Record<string, unknown> {
+  return {
+    edges: nodes.map((node) => ({ node })),
+    pageInfo: { hasNextPage: false },
+  };
+}
+
+function workflowPage(
+  workflows: [number, string, string, boolean?][],
+  totalPages?: number,
+): string {
+  return `${workflows
+    .map(
+      ([id, name, ref, disabled]) => `
+        <li data-test-selector="workflow-rendered" data-item-id="${id}">
+          <tool-tip>${name}</tool-tip>
+          <a href="/openclaw/octopool/actions/workflows/${ref}">${name}</a>
+          ${disabled === true ? '<span class="color-fg-muted text-small">Disabled</span>' : ""}
+        </li>`,
+    )
+    .join("")}${totalPages === undefined ? "" : `<div data-total-pages="${totalPages}"></div>`}`;
 }

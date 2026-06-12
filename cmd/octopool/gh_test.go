@@ -505,24 +505,26 @@ func TestRunGHWorkflowListRelays(t *testing.T) {
 		if body["path"] != "/repos/openclaw/octopool/actions/workflows" {
 			t.Fatalf("path = %v", body["path"])
 		}
+		headers, ok := body["headers"].(map[string]any)
+		if !ok || headers["x-octopool-public-shape"] != "workflow-list-v1" {
+			t.Fatalf("headers = %#v", body["headers"])
+		}
 		query, _ := body["query"].(map[string]any)
-		if query["per_page"] != "100" {
+		if query["per_page"] != "50" || query["page"] != "1" {
 			t.Fatalf("query = %#v", query)
 		}
 		return map[string]any{"workflows": []map[string]any{
 			{
-				"id":         1,
-				"name":       "CI",
-				"path":       ".github/workflows/ci.yml",
-				"state":      "active",
-				"created_at": "2026-01-01T00:00:00Z",
+				"id":    1,
+				"name":  "CI",
+				"path":  ".github/workflows/ci.yml",
+				"state": "active",
 			},
 			{
-				"id":         2,
-				"name":       "Disabled",
-				"path":       ".github/workflows/disabled.yml",
-				"state":      "disabled_manually",
-				"created_at": "2026-01-02T00:00:00Z",
+				"id":    2,
+				"name":  "Disabled",
+				"path":  ".github/workflows/disabled.yml",
+				"state": "disabled_manually",
 			},
 		}}
 	})
@@ -530,12 +532,12 @@ func TestRunGHWorkflowListRelays(t *testing.T) {
 	handled, err := runGHWorkflow(t.Context(), []string{
 		"list",
 		"-R", "openclaw/octopool",
-		"--json", "id,name,path,state,createdAt",
+		"--json", "id,name,path,state",
 	}, &out)
 	if err != nil || !handled {
 		t.Fatalf("handled=%v err=%v", handled, err)
 	}
-	if got := out.String(); !strings.Contains(got, `"createdAt":"2026-01-01T00:00:00Z"`) {
+	if got := out.String(); !strings.Contains(got, `"name":"CI"`) {
 		t.Fatalf("out = %s", got)
 	}
 	if got := out.String(); strings.Contains(got, "Disabled") {
@@ -547,6 +549,10 @@ func TestRunGHLabelListRelays(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		if body["path"] != "/repos/openclaw/octopool/labels" {
 			t.Fatalf("path = %v", body["path"])
+		}
+		headers, ok := body["headers"].(map[string]any)
+		if !ok || headers["x-octopool-public-shape"] != "label-list-v1" {
+			t.Fatalf("headers = %#v", body["headers"])
 		}
 		return []map[string]any{{"name": "bug", "color": "d73a4a", "description": "Bug"}}
 	})
@@ -561,6 +567,66 @@ func TestRunGHLabelListRelays(t *testing.T) {
 	}
 	if got := out.String(); !strings.Contains(got, `"name":"bug"`) {
 		t.Fatalf("out = %s", got)
+	}
+}
+
+func TestRunGHPublicSummaryShapesFollowRequestedFields(t *testing.T) {
+	var requests []map[string]any
+	relayTestServer(t, func(body map[string]any) any {
+		requests = append(requests, body)
+		switch body["path"] {
+		case "/repos/openclaw/octopool/pulls":
+			return []map[string]any{}
+		case "/repos/openclaw/octopool/issues/5":
+			return map[string]any{"number": 5, "closed_at": "2026-05-27T23:19:04Z"}
+		case "/repos/openclaw/octopool/issues":
+			return []map[string]any{}
+		default:
+			t.Fatalf("path = %v", body["path"])
+			return nil
+		}
+	})
+
+	for _, args := range [][]string{
+		{"list", "-R", "openclaw/octopool", "--json", "number,title"},
+		{"list", "-R", "openclaw/octopool", "--json", "number,body"},
+	} {
+		var out bytes.Buffer
+		handled, err := runGHPR(t.Context(), args, &out)
+		if err != nil || !handled {
+			t.Fatalf("pr handled=%v err=%v", handled, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"view", "5", "-R", "openclaw/octopool", "--json", "number,title"},
+		{"view", "5", "-R", "openclaw/octopool", "--json", "number,closedAt"},
+	} {
+		var out bytes.Buffer
+		handled, err := runGHIssue(t.Context(), args, &out)
+		if err != nil || !handled {
+			t.Fatalf("issue view handled=%v err=%v", handled, err)
+		}
+	}
+	var out bytes.Buffer
+	handled, err := runGHIssue(t.Context(), []string{
+		"list",
+		"-R", "openclaw/octopool",
+		"--json", "number,closedAt",
+	}, &out)
+	if err != nil || !handled {
+		t.Fatalf("issue list handled=%v err=%v", handled, err)
+	}
+
+	wantShapes := []string{"pr-list-v1", "", "issue-summary-v1", "", "issue-list-v1"}
+	if len(requests) != len(wantShapes) {
+		t.Fatalf("requests = %d", len(requests))
+	}
+	for index, want := range wantShapes {
+		headers, _ := requests[index]["headers"].(map[string]any)
+		got, _ := headers["x-octopool-public-shape"].(string)
+		if got != want {
+			t.Fatalf("request %d shape = %q, want %q", index, got, want)
+		}
 	}
 }
 

@@ -6,7 +6,12 @@ import {
   parseActionsRunHTML,
   parseActionsRunListHTML,
   parseCommitPatchSHA,
+  parseIssueHTML,
+  parseIssueListHTML,
+  parseLabelListHTML,
   parseReleaseHTML,
+  parseWorkflowListHTML,
+  parseWorkflowPageCount,
 } from "./github-html";
 import { queries } from "./generated/sql";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
@@ -23,8 +28,14 @@ const MEDIA_PATCH = new Set([
 ]);
 const ACTIONS_SUMMARY_SHAPE = "actions-summary-v1";
 const ACTIONS_JOBS_SHAPE = "actions-jobs-v1";
+const ISSUE_SUMMARY_SHAPE = "issue-summary-v1";
+const ISSUE_LIST_SHAPE = "issue-list-v1";
+const PR_LIST_SHAPE = "pr-list-v1";
+const LABEL_LIST_SHAPE = "label-list-v1";
+const WORKFLOW_LIST_SHAPE = "workflow-list-v1";
 const RELEASE_SUMMARY_SHAPE = "release-summary-v1";
 const MAX_PUBLIC_JOB_PAGES = 25;
+const MAX_PUBLIC_WORKFLOW_PAGES = 10;
 
 export async function callGitHubWeb(
   env: Env,
@@ -175,6 +186,10 @@ function webRequests(env: Env, request: RelayRequest, route: RouteInfo): WebRequ
   if (publicApi !== undefined) {
     out.push(publicApi);
   }
+  const summaryPage = summaryPageRequest(env, request, route);
+  if (summaryPage !== undefined) {
+    out.push(summaryPage);
+  }
   const actions = actionsPageRequest(env, request, route);
   if (actions !== undefined) {
     out.push(actions);
@@ -188,6 +203,227 @@ function webRequests(env: Env, request: RelayRequest, route: RouteInfo): WebRequ
     out.push(rawContent);
   }
   return out;
+}
+
+function summaryPageRequest(
+  env: Env,
+  request: RelayRequest,
+  route: RouteInfo,
+): WebRequest | undefined {
+  if (
+    request.method !== "GET" ||
+    route.owner === undefined ||
+    route.repo === undefined ||
+    !defaultJSONAccept(request.headers?.accept)
+  ) {
+    return undefined;
+  }
+  const shape = request.headers?.["x-octopool-public-shape"];
+  let url: URL;
+  let parse: (html: string) => unknown | undefined;
+  if (route.kind === "issue_view" && shape === ISSUE_SUMMARY_SHAPE) {
+    if (Object.keys(request.query ?? {}).length !== 0) {
+      return undefined;
+    }
+    const number = /\/issues\/([0-9]+)$/.exec(request.path)?.[1];
+    if (number === undefined) {
+      return undefined;
+    }
+    url = new URL(
+      `https://github.com/${pathSegments([route.owner, route.repo, "issues", number])}`,
+    );
+    parse = (html) => parseIssueHTML(html, route.owner!, route.repo!, Number(number));
+  } else if (
+    (route.kind === "issue_list" && shape === ISSUE_LIST_SHAPE) ||
+    (route.kind === "pr_list" && shape === PR_LIST_SHAPE)
+  ) {
+    const kind = route.kind === "pr_list" ? "pr" : "issue";
+    const query = issueListPageQuery(request.query, kind);
+    if (query === undefined) {
+      return undefined;
+    }
+    url = new URL(`https://github.com/${pathSegments([route.owner, route.repo, "issues"])}`);
+    url.searchParams.set("q", query.search);
+    parse = (html) => {
+      const items = parseIssueListHTML(html, route.owner!, route.repo!, kind);
+      return items === undefined ? undefined : items.slice(0, query.perPage);
+    };
+  } else if (route.kind === "label_list" && shape === LABEL_LIST_SHAPE) {
+    const query = simplePageQuery(request.query);
+    if (query === undefined) {
+      return undefined;
+    }
+    url = new URL(`https://github.com/${pathSegments([route.owner, route.repo, "labels"])}`);
+    parse = (html) => {
+      const items = parseLabelListHTML(html, route.owner!, route.repo!);
+      return items === undefined ? undefined : items.slice(0, query.perPage);
+    };
+  } else if (route.kind === "workflow_list" && shape === WORKFLOW_LIST_SHAPE) {
+    const query = simplePageQuery(request.query);
+    if (query === undefined) {
+      return undefined;
+    }
+    url = new URL(`https://github.com/${pathSegments([route.owner, route.repo, "actions"])}`);
+    return {
+      url: url.toString(),
+      headers: { accept: "text/html", "user-agent": "octopool" },
+      capBytes: responseCapBytes(env, route),
+      usesApiQuota: false,
+      payload: async (body, headers, status) => {
+        const html = new TextDecoder().decode(body);
+        const pageCount = parseWorkflowPageCount(html);
+        const first = parseWorkflowListHTML(html, route.owner!, route.repo!);
+        // Missing pagination metadata cannot prove the first page is complete.
+        if (
+          pageCount === undefined ||
+          pageCount > MAX_PUBLIC_WORKFLOW_PAGES ||
+          first === undefined
+        ) {
+          return undefined;
+        }
+        const workflows = [...first];
+        for (let page = 2; page <= pageCount; page++) {
+          const next = await fetchPublicPage(
+            `https://github.com/${pathSegments([
+              route.owner!,
+              route.repo!,
+              "actions",
+              "workflows_partial",
+            ])}?query=&page=${page}`,
+            responseCapBytes(env, route),
+            env,
+          );
+          const parsed =
+            next === undefined ? undefined : parseWorkflowListHTML(next, route.owner!, route.repo!);
+          if (parsed === undefined) {
+            return undefined;
+          }
+          workflows.push(...parsed);
+        }
+        const unique = new Map(workflows.map((workflow) => [workflow.id, workflow]));
+        if (unique.size !== workflows.length) {
+          return undefined;
+        }
+        const sorted = [...unique.values()].sort((left, right) =>
+          compareStrings(String(left.path), String(right.path)),
+        );
+        return {
+          status,
+          headers: webHeaders(headers, "application/json"),
+          body: {
+            total_count: sorted.length,
+            workflows: sorted.slice(0, query.perPage),
+          },
+          body_encoding: "json",
+          backend: "web",
+        };
+      },
+    };
+  } else {
+    return undefined;
+  }
+  return {
+    url: url.toString(),
+    headers: { accept: "text/html", "user-agent": "octopool" },
+    capBytes: responseCapBytes(env, route),
+    usesApiQuota: false,
+    payload: (body, headers, status) => {
+      const parsed = parse(new TextDecoder().decode(body));
+      return parsed === undefined
+        ? undefined
+        : {
+            status,
+            headers: webHeaders(headers, "application/json"),
+            body: parsed,
+            body_encoding: "json",
+            backend: "web",
+          };
+    },
+  };
+}
+
+function issueListPageQuery(
+  query: Record<string, string | string[]> | undefined,
+  kind: "issue" | "pr",
+): { perPage: number; search: string } | undefined {
+  const allowed =
+    kind === "issue"
+      ? new Set(["per_page", "page", "state", "creator", "assignee", "labels"])
+      : new Set(["per_page", "page", "state"]);
+  if (
+    Object.entries(query ?? {}).some(
+      ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
+    )
+  ) {
+    return undefined;
+  }
+  const pageQuery = simplePageQuery(query, allowed);
+  if (pageQuery === undefined) {
+    return undefined;
+  }
+  const state = stringQuery(query, "state") ?? "open";
+  if (!["open", "closed", "all"].includes(state)) {
+    return undefined;
+  }
+  const qualifiers = [`is:${kind}`];
+  if (state !== "all") {
+    qualifiers.push(`state:${state}`);
+  }
+  for (const key of ["creator", "assignee"] as const) {
+    const value = stringQuery(query, key);
+    if (value === undefined) {
+      continue;
+    }
+    const encoded = searchQualifier(key === "creator" ? "author" : key, value);
+    if (encoded === undefined) {
+      return undefined;
+    }
+    qualifiers.push(encoded);
+  }
+  const labels = stringQuery(query, "labels");
+  if (labels !== undefined) {
+    for (const label of labels.split(",")) {
+      const encoded = searchQualifier("label", label);
+      if (encoded === undefined) {
+        return undefined;
+      }
+      qualifiers.push(encoded);
+    }
+  }
+  return { perPage: pageQuery.perPage, search: qualifiers.join(" ") };
+}
+
+function simplePageQuery(
+  query: Record<string, string | string[]> | undefined,
+  allowed = new Set(["per_page", "page"]),
+): { perPage: number } | undefined {
+  if (
+    Object.entries(query ?? {}).some(
+      ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
+    ) ||
+    (stringQuery(query, "page") !== undefined && stringQuery(query, "page") !== "1")
+  ) {
+    return undefined;
+  }
+  const perPage = Number(stringQuery(query, "per_page") ?? "30");
+  return Number.isInteger(perPage) && perPage >= 1 && perPage <= 100 ? { perPage } : undefined;
+}
+
+function searchQualifier(key: string, value: string): string | undefined {
+  if (
+    value === "" ||
+    value.length > 200 ||
+    value.includes("\0") ||
+    value.includes('"') ||
+    value.includes("\\")
+  ) {
+    return undefined;
+  }
+  return `${key}:"${value}"`;
+}
+
+function compareStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function actionsPageRequest(
