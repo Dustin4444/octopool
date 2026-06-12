@@ -475,7 +475,13 @@ function normalizeHeaders(value: unknown): Record<string, string> | undefined {
   if (!isObject(value)) {
     throw new HttpError(400, "invalid_headers", "headers must be an object");
   }
-  const allowed = new Set(["accept", "x-github-api-version", "if-none-match", "if-modified-since"]);
+  const allowed = new Set([
+    "accept",
+    "x-github-api-version",
+    "if-none-match",
+    "if-modified-since",
+    "x-octopool-public-shape",
+  ]);
   const out: Record<string, string> = {};
   for (const [key, raw] of Object.entries(value)) {
     const lower = key.toLowerCase();

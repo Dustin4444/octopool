@@ -589,6 +589,26 @@ func (q *Queries) FreshPRStateProof(ctx context.Context, arg FreshPRStateProofPa
 	return column_1, err
 }
 
+const freshPublicApiRate = `-- name: FreshPublicApiRate :one
+SELECT limit_count, remaining
+FROM github_public_api_rates
+WHERE resource = ?1
+  AND reset_at > unixepoch()
+LIMIT 1
+`
+
+type FreshPublicApiRateRow struct {
+	LimitCount int64 `json:"limit_count"`
+	Remaining  int64 `json:"remaining"`
+}
+
+func (q *Queries) FreshPublicApiRate(ctx context.Context, resource string) (FreshPublicApiRateRow, error) {
+	row := q.db.QueryRowContext(ctx, freshPublicApiRate, resource)
+	var i FreshPublicApiRateRow
+	err := row.Scan(&i.LimitCount, &i.Remaining)
+	return i, err
+}
+
 const freshPublicRepoProof = `-- name: FreshPublicRepoProof :one
 SELECT 1
 FROM github_public_repos
@@ -1521,6 +1541,33 @@ func (q *Queries) UpsertPRStateProof(ctx context.Context, arg UpsertPRStateProof
 		arg.Number,
 		arg.StateHint,
 		arg.Datetime,
+	)
+	return err
+}
+
+const upsertPublicApiRate = `-- name: UpsertPublicApiRate :exec
+INSERT INTO github_public_api_rates (resource, limit_count, remaining, reset_at, updated_at)
+VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP)
+ON CONFLICT(resource) DO UPDATE SET
+  limit_count = excluded.limit_count,
+  remaining = excluded.remaining,
+  reset_at = excluded.reset_at,
+  updated_at = CURRENT_TIMESTAMP
+`
+
+type UpsertPublicApiRateParams struct {
+	Resource   string `json:"resource"`
+	LimitCount int64  `json:"limit_count"`
+	Remaining  int64  `json:"remaining"`
+	ResetAt    int64  `json:"reset_at"`
+}
+
+func (q *Queries) UpsertPublicApiRate(ctx context.Context, arg UpsertPublicApiRateParams) error {
+	_, err := q.db.ExecContext(ctx, upsertPublicApiRate,
+		arg.Resource,
+		arg.LimitCount,
+		arg.Remaining,
+		arg.ResetAt,
 	)
 	return err
 }

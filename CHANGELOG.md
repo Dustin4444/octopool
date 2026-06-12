@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Serve supported top-level Actions/release summaries from public GitHub pages, prefer public page/raw fallbacks below 50% anonymous API quota while preserving exact raw REST semantics, and prove public repository visibility from GitHub HTML when API proof quotas are depleted.
 - Let verified OpenClaw org members self-enroll into the default Octopool login pool instead of requiring an admin-created caller grant first.
 - Skip legacy Gitcrawl and Octopool `gh` shims when resolving the real GitHub CLI, including copied Windows binaries and invalid `OCTOPOOL_GH_PATH` overrides.
 - Disable Sharp's install script so `pnpm install` uses its prebuilt package instead of failing on machines with a global Homebrew `libvips`.

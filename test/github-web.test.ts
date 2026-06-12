@@ -183,6 +183,451 @@ describe("github web provider", () => {
     });
   });
 
+  it("falls back to public HTML for common Actions run lists after anonymous quota exhaustion", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+      .mockResolvedValueOnce(
+        new Response(`
+          <strong>1 workflow run result</strong>
+          <div class="Box-row js-socket-channel js-updatable-content">
+            <a href="/openclaw/octopool/actions/runs/27328786454" aria-label="completed successfully: Run 79 of CI. fix: harden setup">
+              <span class="h4 markdown-title">fix: harden setup</span>
+            </a>
+            <span class="text-bold">CI</span> #79:
+            Commit <a href="/openclaw/octopool/commit/1e6a563d13924ba423febe3a4cb47eeb9d594322">1e6a563</a>
+            pushed
+            <relative-time datetime="2026-06-11T06:38:49Z"></relative-time>
+            <a class="branch-name" title="main" href="/openclaw/octopool/tree/refs/heads/main">main</a>
+            <svg aria-label="Run duration"></svg><span>2m 49s</span>
+          </div>
+          <div class="paginate-container"></div>
+        `),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { per_page: "20", branch: "main" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://github.com/openclaw/octopool/actions?query=branch%3Amain",
+      expect.objectContaining({
+        headers: expect.not.objectContaining({ authorization: expect.any(String) }),
+      }),
+    );
+    expect(response?.body).toMatchObject({
+      total_count: 1,
+      workflow_runs: [
+        {
+          id: 27328786454,
+          name: "CI",
+          display_title: "fix: harden setup",
+          status: "completed",
+          conclusion: "success",
+          head_branch: "main",
+          head_sha: "1e6a563d13924ba423febe3a4cb47eeb9d594322",
+          event: "push",
+          created_at: "2026-06-11T06:38:49Z",
+          updated_at: "2026-06-11T06:41:38.000Z",
+        },
+      ],
+    });
+  });
+
+  it("persists exhausted anonymous API quota before using Actions HTML", async () => {
+    const bound: unknown[][] = [];
+    const database = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn((...values: unknown[]) => {
+          bound.push(values);
+          return {
+            first: vi.fn(async () => null),
+            run: vi.fn(async () => ({})),
+          };
+        }),
+      })),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response("rate limited", {
+            status: 403,
+            headers: {
+              "x-ratelimit-limit": "60",
+              "x-ratelimit-remaining": "0",
+              "x-ratelimit-reset": "4102444800",
+            },
+          }),
+        )
+        .mockResolvedValueOnce(new Response(actionsListHTML("after exhaustion"))),
+    );
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+    const route = classifyRoute(request, policy);
+
+    await callGitHubWeb({ ...env(), DB: database } as unknown as Env, request, route);
+
+    expect(bound).toContainEqual([route.resource, 60, 0, 4102444800]);
+  });
+
+  it("falls back to 25 public Actions runs when per_page is omitted", async () => {
+    const cards = Array.from(
+      { length: 30 },
+      (_, index) => `
+        <div class="js-updatable-content extra-class Box-row js-socket-channel">
+          <a href="/openclaw/octopool/actions/runs/${index + 1}" aria-label="completed successfully: Run ${index + 1} of CI. run ${index + 1}">
+            <span class="h4 markdown-title">run ${index + 1}</span>
+          </a>
+          <span class="text-bold">CI</span> #${index + 1}:
+          Commit <a href="/openclaw/octopool/commit/1e6a563d13924ba423febe3a4cb47eeb9d594322">1e6a563</a>
+          pushed
+          <relative-time datetime="2026-06-11T06:38:49Z"></relative-time>
+          <a class="branch-name" title="main" href="/openclaw/octopool/tree/refs/heads/main">main</a>
+        </div>
+      `,
+    ).join("");
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+        .mockResolvedValueOnce(new Response(`<strong>30 workflow runs</strong>${cards}`)),
+    );
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+
+    expect(response?.body).toMatchObject({ total_count: 30 });
+    const body = response?.body as { workflow_runs: unknown[] } | undefined;
+    expect(body?.workflow_runs).toHaveLength(25);
+  });
+
+  it("does not drop repeated Actions list filters in the HTML fallback", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response("rate limited", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { per_page: "10", branch: ["main", "release"] },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("prefers exact anonymous Actions JSON while API quota is available", async () => {
+    const exact = {
+      total_count: 1,
+      workflow_runs: [{ id: 27328786454, unexpected_exact_field: "kept" }],
+    };
+    const fetchMock = vi.fn(async () => Response.json(exact));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { per_page: "20" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({
+      body: exact,
+      backend: "web",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/openclaw/octopool/actions/runs?per_page=20",
+      expect.any(Object),
+    );
+  });
+
+  it("switches to Actions HTML when an API response drops below half quota", async () => {
+    const exact = {
+      total_count: 1,
+      workflow_runs: [{ id: 27328786454, unexpected_exact_field: "deferred" }],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(exact, {
+          headers: {
+            "x-ratelimit-limit": "60",
+            "x-ratelimit-remaining": "29",
+            "x-ratelimit-reset": "4102444800",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(actionsListHTML("from HTML")));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { per_page: "20" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(response?.body).toMatchObject({
+      workflow_runs: [{ display_title: "from HTML" }],
+    });
+  });
+
+  it("keeps the successful API response when low-quota HTML parsing fails", async () => {
+    const exact = {
+      total_count: 1,
+      workflow_runs: [{ id: 27328786454, unexpected_exact_field: "kept" }],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json(exact, {
+            headers: {
+              "x-ratelimit-limit": "60",
+              "x-ratelimit-remaining": "29",
+              "x-ratelimit-reset": "4102444800",
+            },
+          }),
+        )
+        .mockResolvedValueOnce(new Response("<html>unexpected</html>")),
+    );
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { per_page: "20" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({ body: exact });
+  });
+
+  it("uses stored low quota to try Actions HTML before the API", async () => {
+    const fetchMock = vi.fn(async () => new Response(actionsListHTML("stored low quota")));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { per_page: "20" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+
+    const response = await callGitHubWeb(
+      rateEnv({ limit_count: 60, remaining: 20 }),
+      request,
+      classifyRoute(request, policy),
+    );
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://github.com/openclaw/octopool/actions",
+      expect.any(Object),
+    );
+    expect(response?.body).toMatchObject({
+      workflow_runs: [{ display_title: "stored low quota" }],
+    });
+  });
+
+  it("does not switch at exactly half quota", async () => {
+    const exact = { total_count: 0, workflow_runs: [] };
+    const fetchMock = vi.fn(async () =>
+      Response.json(exact, {
+        headers: {
+          "x-ratelimit-limit": "60",
+          "x-ratelimit-remaining": "30",
+          "x-ratelimit-reset": "4102444800",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({ body: exact });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to public HTML for Actions run views after anonymous quota exhaustion", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+        .mockResolvedValueOnce(
+          new Response(`
+            <span class="PageHeader-parentLink-label"> CI</span>
+            <span class="actions-workflow-runs-status"><svg aria-label="completed successfully: "></svg></span>
+            <h1 class="PageHeader-title"><span class="markdown-title">fix: harden setup</span><span>#79</span></h1>
+            <span>Triggered via pull request <relative-time datetime="2026-06-11T06:38:49Z"></relative-time></span>
+            <a href="/openclaw/octopool/commit/1e6a563d13924ba423febe3a4cb47eeb9d594322">1e6a563</a>
+            <a class="branch-name" title="main" href="/openclaw/octopool/tree/refs/heads/main">main</a>
+            <span>Total duration</span><a class="h4 color-fg-default">2m 49s</a>
+          `),
+        ),
+    );
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs/27328786454",
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({
+      body: {
+        id: 27328786454,
+        name: "CI",
+        display_title: "fix: harden setup",
+        status: "completed",
+        conclusion: "success",
+        event: "pull_request",
+      },
+      backend: "web",
+    });
+  });
+
+  it("falls back to release HTML when anonymous API quota is exhausted", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+      .mockResolvedValueOnce(
+        new Response(`
+          <nav><li class="breadcrumb-item-selected">v0.8.0</li></nav>
+          <h1>0.8.0</h1>
+          released this <relative-time datetime="2026-06-10T07:55:39Z"></relative-time>
+          <div data-test-selector="body-content" class="markdown-body"><h2>Fixed</h2><ul><li>Use public HTML.</li></ul></div>
+          </div>
+          <div class="Box-footer"></div>
+        `),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/releases/tags/v0.8.0",
+      headers: { "x-octopool-public-shape": "release-summary-v1" },
+    });
+
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://github.com/openclaw/octopool/releases/tag/v0.8.0",
+      expect.any(Object),
+    );
+    expect(response?.body).toMatchObject({
+      tag_name: "v0.8.0",
+      name: "0.8.0",
+      draft: false,
+      prerelease: false,
+      published_at: "2026-06-10T07:55:39Z",
+      body: "Fixed\n\n- Use public HTML.",
+    });
+  });
+
+  it("follows relative latest-release redirects for summary HTML", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { location: "/openclaw/octopool/releases/tag/v0.8.0" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(`
+          <nav><li class="breadcrumb-item-selected">v0.8.0</li></nav>
+          <h1>0.8.0</h1>
+          released this <relative-time datetime="2026-06-10T07:55:39Z"></relative-time>
+          <div data-test-selector="body-content" class="markdown-body"></div>
+          </div>
+          <div class="Box-footer"></div>
+        `),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/releases/latest",
+      headers: { "x-octopool-public-shape": "release-summary-v1" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({
+      body: { tag_name: "v0.8.0" },
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://github.com/openclaw/octopool/releases/tag/v0.8.0",
+      expect.any(Object),
+    );
+  });
+
+  it("does not synthesize partial Actions or release objects for raw API requests", async () => {
+    const fetchMock = vi.fn(async () => new Response("rate limited", { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const actions = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+    });
+    const release = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/releases/tags/v0.8.0",
+    });
+
+    await expect(callGitHubWeb(env(), actions, classifyRoute(actions, policy))).resolves.toBe(
+      undefined,
+    );
+    await expect(callGitHubWeb(env(), release, classifyRoute(release, policy))).resolves.toBe(
+      undefined,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("drops draft releases from web-origin release responses", async () => {
     vi.stubGlobal(
       "fetch",
@@ -586,4 +1031,28 @@ describe("github web provider", () => {
 
 function env(overrides: Record<string, string> = {}): Env {
   return { REQUEST_TIMEOUT_MS: "15000", ...overrides } as unknown as Env;
+}
+
+function rateEnv(rate: { limit_count: number; remaining: number }): Env {
+  const first = vi.fn(async () => rate);
+  const run = vi.fn(async () => ({}));
+  const bind = vi.fn(() => ({ first, run }));
+  const prepare = vi.fn(() => ({ bind }));
+  return { ...env(), DB: { prepare } } as unknown as Env;
+}
+
+function actionsListHTML(title: string): string {
+  return `
+    <strong>1 workflow run result</strong>
+    <div class="Box-row js-socket-channel js-updatable-content">
+      <a href="/openclaw/octopool/actions/runs/27328786454" aria-label="completed successfully: Run 79 of CI. ${title}">
+        <span class="h4 markdown-title">${title}</span>
+      </a>
+      <span class="text-bold">CI</span> #79:
+      Commit <a href="/openclaw/octopool/commit/1e6a563d13924ba423febe3a4cb47eeb9d594322">1e6a563</a>
+      pushed
+      <relative-time datetime="2026-06-11T06:38:49Z"></relative-time>
+      <a class="branch-name" title="main" href="/openclaw/octopool/tree/refs/heads/main">main</a>
+    </div>
+  `;
 }

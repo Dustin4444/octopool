@@ -141,7 +141,8 @@ describe("public repo guard", () => {
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ message: "abuse limited" }), { status: 429 }),
-      );
+      )
+      .mockResolvedValueOnce(new Response("temporary web failure", { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);
     const first = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ "1": 1 });
     const run = vi.fn(async () => ({}));
@@ -154,7 +155,78 @@ describe("public repo guard", () => {
       "2026-05-28 00:00:00",
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("proves public visibility from the repository page when API quotas are exhausted", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "rate limited" }), {
+          status: 403,
+          headers: { "x-ratelimit-remaining": "0" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "rate limited" }), {
+          status: 403,
+          headers: { "x-ratelimit-remaining": "0" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('<meta name="octolytics-dimension-repository_public" content="true" />'),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await ensurePublicGitHubRepo(env(), route());
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "https://github.com/openclaw/octopool",
+      expect.objectContaining({
+        headers: expect.not.objectContaining({ authorization: expect.any(String) }),
+      }),
+    );
+  });
+
+  it("recognizes a streamed public marker split across response chunks", async () => {
+    const page = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            '<meta name="octolytics-dimension-repository_public" content="tr',
+          ),
+        );
+        controller.enqueue(new TextEncoder().encode('ue" />'));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
+        .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
+        .mockResolvedValueOnce(new Response(page)),
+    );
+
+    await expect(ensurePublicGitHubRepo(env(), route())).resolves.toBeUndefined();
+  });
+
+  it("does not accept repository HTML without an explicit public marker", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
+        .mockResolvedValueOnce(new Response("rate limited", { status: 429 }))
+        .mockResolvedValueOnce(new Response("<html>repository</html>")),
+    );
+
+    await expect(ensurePublicGitHubRepo(env(), route())).rejects.toMatchObject({
+      status: 502,
+      code: "repo_public_check_failed",
+    });
   });
 });
 

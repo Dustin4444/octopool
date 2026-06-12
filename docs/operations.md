@@ -175,6 +175,9 @@ D1 schema lives in `migrations/`:
   plus stats indexes for route and hit-rate aggregates.
 - `0006_pr_state_proofs.sql` — short-lived validated PR state discriminators for
   state-aware PR subresource cache keys.
+- `0007_audit_cache_stale.sql` — stale-cache audit status and cacheability metrics.
+- `0008_public_api_rates.sql` — anonymous GitHub API quota snapshots used to prefer
+  public-page/raw reads below 50% remaining.
 
 Apply with `wrangler d1 migrations apply octopool` (add `--remote` for production).
 

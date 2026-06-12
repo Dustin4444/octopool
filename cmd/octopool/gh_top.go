@@ -257,7 +257,12 @@ func runGHRun(ctx context.Context, args []string, stdout io.Writer) (bool, error
 		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRunFields) || limitOverOnePage(opts) {
 			return false, nil
 		}
-		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: path, query: query}, opts, fieldMapRun)
+		return true, relayTop(ctx, stdout, ghAPIRequest{
+			method:  "GET",
+			path:    path,
+			query:   query,
+			headers: map[string]string{"x-octopool-public-shape": "actions-summary-v1"},
+		}, opts, fieldMapRun)
 	case "view":
 		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedRunFields) {
 			return false, nil
@@ -266,7 +271,11 @@ func runGHRun(ctx context.Context, args []string, stdout io.Writer) (bool, error
 		if !ok {
 			return false, nil
 		}
-		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "actions", "runs", opts.positionals[0])}, opts, fieldMapRun)
+		return true, relayTop(ctx, stdout, ghAPIRequest{
+			method:  "GET",
+			path:    repoPath(repo, "actions", "runs", opts.positionals[0]),
+			headers: map[string]string{"x-octopool-public-shape": "actions-summary-v1"},
+		}, opts, fieldMapRun)
 	default:
 		return false, nil
 	}
@@ -324,7 +333,7 @@ func runGHRelease(ctx context.Context, args []string, stdout io.Writer) (bool, e
 		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "releases"), query: listQuery(opts)}, opts, fieldMapRelease)
 	case "view":
 		repo, ok := repoFromOptionOrCurrent(opts.repo)
-		if !ok || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedReleaseFields) {
+		if !ok || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedReleaseViewFields) {
 			return false, nil
 		}
 		path := repoPath(repo, "releases", "latest")
@@ -333,7 +342,11 @@ func runGHRelease(ctx context.Context, args []string, stdout io.Writer) (bool, e
 		} else if len(opts.positionals) > 1 {
 			return false, nil
 		}
-		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: path}, opts, fieldMapRelease)
+		return true, relayTop(ctx, stdout, ghAPIRequest{
+			method:  "GET",
+			path:    path,
+			headers: map[string]string{"x-octopool-public-shape": "release-summary-v1"},
+		}, opts, fieldMapRelease)
 	default:
 		return false, nil
 	}
@@ -1627,6 +1640,10 @@ var supportedRepoFields = supportedFields(
 
 var supportedReleaseFields = supportedFields(
 	"id", "tagName", "name", "url", "isDraft", "isPrerelease", "createdAt", "publishedAt", "body",
+)
+
+var supportedReleaseViewFields = supportedFields(
+	"tagName", "name", "url", "isDraft", "isPrerelease", "createdAt", "publishedAt", "body",
 )
 
 var supportedCheckRunFields = supportedFields(

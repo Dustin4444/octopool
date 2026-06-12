@@ -46,7 +46,8 @@ Request body:
 
 `path` must be an absolute GitHub API path. It is rejected (`400 invalid_path`) if it
 contains `://`, `\`, `?`, `#`, `..`, a bare dot segment, or percent-encoded path
-traversal (`%2e`, `%5c`). The relay only ever talks to `api.github.com`.
+traversal (`%2e`, `%5c`). The relay only talks to approved GitHub API, web, raw-content,
+and patch hosts.
 
 ## Response envelope
 
@@ -79,9 +80,11 @@ traversal (`%2e`, `%5c`). The relay only ever talks to `api.github.com`.
 - `body_encoding` is `json`, `text`, or `base64`. Binary responses are base64-encoded.
 - `repo_view` returns a fixed public metadata subset before caching so token-specific
   repository fields such as identity permissions are not shared.
-- Release list/latest/tag/id reads are relayed only through unauthenticated public GitHub API
-  reads; Octopool does not use pooled credentials for releases, so draft/private release
-  visibility is not shared.
+- Release list/latest/tag/id reads use unauthenticated public GitHub API reads; supported
+  top-level `gh release view` summaries prefer public GitHub release HTML once anonymous
+  quota falls below 50%. Raw API requests retain exact REST response semantics.
+  Octopool does not use pooled credentials for releases, so draft/private release visibility
+  is not shared.
 - Public org repository/member/event reads, user/gist collection reads, global metadata reads,
   and public repository metadata collections can be served from unauthenticated GitHub API
   responses before spending pooled identity quota.

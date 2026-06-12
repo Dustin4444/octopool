@@ -262,10 +262,32 @@ func TestRunGHReleaseListRelays(t *testing.T) {
 	}
 }
 
+func TestRunGHReleaseListKeepsIDSupport(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		return []map[string]any{{"id": 123}}
+	})
+	var out bytes.Buffer
+	handled, err := runGHRelease(t.Context(), []string{
+		"list",
+		"-R", "openclaw/octopool",
+		"--json", "id",
+	}, &out)
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	if got := out.String(); !strings.Contains(got, `"id":123`) {
+		t.Fatalf("out = %s", got)
+	}
+}
+
 func TestRunGHReleaseViewRelaysTag(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		if body["path"] != "/repos/openclaw/octopool/releases/tags/v0.2.5" {
 			t.Fatalf("path = %v", body["path"])
+		}
+		headers, ok := body["headers"].(map[string]any)
+		if !ok || headers["x-octopool-public-shape"] != "release-summary-v1" {
+			t.Fatalf("headers = %#v", body["headers"])
 		}
 		return map[string]any{
 			"tag_name": "v0.2.5",
@@ -284,6 +306,19 @@ func TestRunGHReleaseViewRelaysTag(t *testing.T) {
 	}
 	if got := out.String(); !strings.Contains(got, `"tagName":"v0.2.5"`) {
 		t.Fatalf("out = %s", got)
+	}
+}
+
+func TestRunGHReleaseViewIDStaysLocal(t *testing.T) {
+	var out bytes.Buffer
+	handled, err := runGHRelease(t.Context(), []string{
+		"view",
+		"v0.2.5",
+		"-R", "openclaw/octopool",
+		"--json", "id",
+	}, &out)
+	if err != nil || handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
 	}
 }
 

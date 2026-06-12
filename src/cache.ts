@@ -388,11 +388,15 @@ function cacheVaryHeaders(headers: RelayRequest["headers"]): Record<string, stri
   const out: Record<string, string> = {};
   const accept = headers?.accept;
   const version = headers?.["x-github-api-version"];
+  const publicShape = headers?.["x-octopool-public-shape"];
   if (accept !== undefined && !defaultJSONAccept(accept)) {
     out.accept = accept.toLowerCase();
   }
   if (version !== undefined) {
     out["x-github-api-version"] = version;
+  }
+  if (publicShape !== undefined) {
+    out["x-octopool-public-shape"] = publicShape;
   }
   return out;
 }

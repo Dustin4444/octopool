@@ -45,6 +45,9 @@ serves these public shapes through GitHub web/raw endpoints:
   patch `Accept` header) via `github.com/{owner}/{repo}/pull/{number}.diff|patch`
 - commit diff/patch media requests via `github.com/{owner}/{repo}/commit/{sha}.diff|patch`
 - compare diff/patch media requests via `github.com/{owner}/{repo}/compare/{base...head}.diff|patch`
+- supported top-level `gh run list/view` summaries (up to 25 results, with branch/status
+  filters) prefer public `github.com/{owner}/{repo}/actions` pages once anonymous API quota
+  falls below 50%; raw API requests retain exact REST semantics
 - exact public GitHub API reads without caller credentials for repo metadata, commits,
   compare JSON, contents, README, PRs, issues, checks/statuses, Actions run/workflow
   metadata, branches, tags, labels, milestones, topics, community profiles, forks,
@@ -54,10 +57,16 @@ serves these public shapes through GitHub web/raw endpoints:
   reactions, assignees, repo-wide issue/PR comments and events, commit pull/check-suite/
   branch/status metadata, network events, repository stats, repository search, and
   repo-scoped issue/commit search
-- explicit-ref contents reads can fall back to `raw.githubusercontent.com`, returned as an
-  API-shaped JSON file payload, if the public contents API is unavailable
+- explicit-ref contents reads can prefer `raw.githubusercontent.com`, returned as an
+  API-shaped JSON file payload, once anonymous API quota falls below 50%
 - release list/latest/tag/id/asset reads via unauthenticated `api.github.com` requests so pooled
-  credentials never expose draft releases
+  credentials never expose draft releases; supported top-level `gh release view` summaries
+  prefer public release HTML once anonymous API quota falls below 50%, while raw API requests
+  retain exact REST semantics
+
+Anonymous API rate snapshots are stored by GitHub resource until their advertised reset time.
+When a public-page/raw parser cannot satisfy a request, Octopool retains the successful
+anonymous API response as the fallback.
 
 Successful web reads are cached in the same D1 table with no source identity. A cached
 web hit still re-checks that public proof covers the entry before returning it.
@@ -109,6 +118,8 @@ is public.
   check to avoid shared unauthenticated GitHub quota; Octopool still requires the
   response body to say `private: false`.
 - `404` or `private !== false` → `403 repo_not_public`.
+- If both authenticated and anonymous API checks are rate-limited or unavailable, Octopool
+  can prove visibility from GitHub's public repository page marker without an API token.
 - A successful public check is recorded in `github_public_repos` with a TTL
   (`PUBLIC_REPO_TTL_SECONDS`, default 30s); subsequent requests reuse the fresh proof
   instead of re-hitting GitHub.

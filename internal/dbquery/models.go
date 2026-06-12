@@ -79,6 +79,14 @@ type GithubPrStateProof struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
+type GithubPublicApiRate struct {
+	Resource   string `json:"resource"`
+	LimitCount int64  `json:"limit_count"`
+	Remaining  int64  `json:"remaining"`
+	ResetAt    int64  `json:"reset_at"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
 type GithubPublicRepo struct {
 	Owner     string `json:"owner"`
 	Repo      string `json:"repo"`

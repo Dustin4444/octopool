@@ -1,5 +1,7 @@
 import { HttpError, parsePositiveInt } from "./http";
 import { responseCapBytes } from "./github";
+import { parseActionsRunHTML, parseActionsRunListHTML, parseReleaseHTML } from "./github-html";
+import { queries } from "./generated/sql";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 const MEDIA_DIFF = new Set([
@@ -12,18 +14,31 @@ const MEDIA_PATCH = new Set([
   "application/vnd.github.v3.patch",
   "application/vnd.github.v3+patch",
 ]);
+const ACTIONS_SUMMARY_SHAPE = "actions-summary-v1";
+const RELEASE_SUMMARY_SHAPE = "release-summary-v1";
 
 export async function callGitHubWeb(
   env: Env,
   request: RelayRequest,
   route: RouteInfo,
 ): Promise<GitHubRelayResponse | undefined> {
-  const requests = webRequests(env, request, route);
+  let requests = webRequests(env, request, route);
   if (requests.length === 0) {
     return undefined;
   }
-  for (const web of requests) {
+  const hasPublicAlternative =
+    requests.some((candidate) => candidate.usesApiQuota) &&
+    requests.some((candidate) => !candidate.usesApiQuota);
+  if (hasPublicAlternative && (await storedPublicApiRateBelowHalf(env, route.resource))) {
+    requests = [
+      ...requests.filter((candidate) => !candidate.usesApiQuota),
+      ...requests.filter((candidate) => candidate.usesApiQuota),
+    ];
+  }
+  let deferredApiPayload: GitHubRelayResponse | undefined;
+  for (const [index, web] of requests.entries()) {
     let response: Response;
+    let responseURL = web.url;
     const timeoutMs = parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000);
     try {
       response = await fetch(web.url, {
@@ -35,27 +50,46 @@ export async function callGitHubWeb(
     } catch {
       continue;
     }
+    responseURL = response.url || web.url;
     if (response.status >= 300 && response.status < 400 && response.status !== 304) {
-      const redirected = await fetchAllowedRedirect(response, web, timeoutMs);
+      const redirected = await fetchAllowedRedirect(response, web, timeoutMs, responseURL);
       if (redirected === undefined) {
         continue;
       }
-      response = redirected;
+      response = redirected.response;
+      responseURL = redirected.url;
+    }
+    if (web.usesApiQuota) {
+      await storePublicApiRate(env, route.resource, response.headers);
     }
     if (response.status < 200 || response.status >= 300) {
       continue;
     }
     try {
       const body = await readBodyCapped(response, web.capBytes);
-      const payload = web.payload(new Uint8Array(body), response.headers, response.status);
+      const payload = web.payload(
+        new Uint8Array(body),
+        response.headers,
+        response.status,
+        responseURL,
+      );
       if (payload !== undefined) {
+        if (web.usesApiQuota) {
+          if (
+            publicApiRateBelowHalf(response.headers) &&
+            requests.slice(index + 1).some((candidate) => !candidate.usesApiQuota)
+          ) {
+            deferredApiPayload = payload;
+            continue;
+          }
+        }
         return payload;
       }
     } catch {
       continue;
     }
   }
-  return undefined;
+  return deferredApiPayload;
 }
 
 async function fetchAllowedRedirect(
@@ -64,14 +98,15 @@ async function fetchAllowedRedirect(
     headers: Record<string, string>;
   },
   timeoutMs: number,
-): Promise<Response | undefined> {
+  responseURL: string,
+): Promise<{ response: Response; url: string } | undefined> {
   const location = response.headers.get("location");
   if (location === null) {
     return undefined;
   }
   let url: URL;
   try {
-    url = new URL(location);
+    url = new URL(location, responseURL);
   } catch {
     return undefined;
   }
@@ -88,7 +123,7 @@ async function fetchAllowedRedirect(
     if (redirected.status >= 300 && redirected.status < 400) {
       return undefined;
     }
-    return redirected;
+    return { response: redirected, url: redirected.url || url.toString() };
   } catch {
     return undefined;
   }
@@ -107,7 +142,13 @@ type WebRequest = {
   url: string;
   headers: Record<string, string>;
   capBytes: number;
-  payload: (body: Uint8Array, headers: Headers, status: number) => GitHubRelayResponse | undefined;
+  usesApiQuota: boolean;
+  payload: (
+    body: Uint8Array,
+    headers: Headers,
+    status: number,
+    responseURL: string,
+  ) => GitHubRelayResponse | undefined;
 };
 
 function webRequests(env: Env, request: RelayRequest, route: RouteInfo): WebRequest[] {
@@ -125,11 +166,131 @@ function webRequests(env: Env, request: RelayRequest, route: RouteInfo): WebRequ
   if (publicApi !== undefined) {
     out.push(publicApi);
   }
+  const actions = actionsPageRequest(env, request, route);
+  if (actions !== undefined) {
+    out.push(actions);
+  }
+  const releasePage = releasePageRequest(env, request, route);
+  if (releasePage !== undefined) {
+    out.push(releasePage);
+  }
   const rawContent = rawContentRequest(env, request, route);
   if (rawContent !== undefined) {
     out.push(rawContent);
   }
   return out;
+}
+
+function actionsPageRequest(
+  env: Env,
+  request: RelayRequest,
+  route: RouteInfo,
+): WebRequest | undefined {
+  if (
+    request.method !== "GET" ||
+    route.owner === undefined ||
+    route.repo === undefined ||
+    request.headers?.["x-octopool-public-shape"] !== ACTIONS_SUMMARY_SHAPE ||
+    !defaultJSONAccept(request.headers?.accept)
+  ) {
+    return undefined;
+  }
+  if (route.kind === "run_list") {
+    const query = actionsListQuery(request.query);
+    if (query === undefined) {
+      return undefined;
+    }
+    const url = new URL(`https://github.com/${pathSegments([route.owner, route.repo, "actions"])}`);
+    if (query.search !== "") {
+      url.searchParams.set("query", query.search);
+    }
+    return {
+      url: url.toString(),
+      headers: { accept: "text/html", "user-agent": "octopool" },
+      capBytes: responseCapBytes(env, route),
+      usesApiQuota: false,
+      payload: (body, headers, status) => {
+        const parsed = parseActionsRunListHTML(
+          new TextDecoder().decode(body),
+          route.owner!,
+          route.repo!,
+        );
+        if (parsed === undefined) {
+          return undefined;
+        }
+        parsed.workflow_runs = parsed.workflow_runs.slice(0, query.perPage);
+        return {
+          status,
+          headers: webHeaders(headers, "application/json"),
+          body: parsed,
+          body_encoding: "json",
+          backend: "web",
+        };
+      },
+    };
+  }
+  if (route.kind === "run_view" && Object.keys(request.query ?? {}).length === 0) {
+    const id = /\/actions\/runs\/([0-9]+)$/.exec(request.path)?.[1];
+    if (id === undefined) {
+      return undefined;
+    }
+    return {
+      url: `https://github.com/${pathSegments([route.owner, route.repo, "actions", "runs", id])}`,
+      headers: { accept: "text/html", "user-agent": "octopool" },
+      capBytes: responseCapBytes(env, route),
+      usesApiQuota: false,
+      payload: (body, headers, status) => {
+        const parsed = parseActionsRunHTML(
+          new TextDecoder().decode(body),
+          route.owner!,
+          route.repo!,
+          Number(id),
+        );
+        return parsed === undefined
+          ? undefined
+          : {
+              status,
+              headers: webHeaders(headers, "application/json"),
+              body: parsed,
+              body_encoding: "json",
+              backend: "web",
+            };
+      },
+    };
+  }
+  return undefined;
+}
+
+function actionsListQuery(
+  query: Record<string, string | string[]> | undefined,
+): { perPage: number; search: string } | undefined {
+  const allowed = new Set(["per_page", "page", "branch", "status"]);
+  if (
+    Object.entries(query ?? {}).some(
+      ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
+    )
+  ) {
+    return undefined;
+  }
+  if (stringQuery(query, "page") !== undefined && stringQuery(query, "page") !== "1") {
+    return undefined;
+  }
+  const perPage = Number(stringQuery(query, "per_page") ?? "25");
+  if (!Number.isInteger(perPage) || perPage < 1 || perPage > 25) {
+    return undefined;
+  }
+  const qualifiers: string[] = [];
+  for (const key of ["branch", "status"] as const) {
+    const value = stringQuery(query, key);
+    if (value === undefined) {
+      continue;
+    }
+    if (value.length > 200 || value.includes("\0") || /[\s"\\]/.test(value)) {
+      return undefined;
+    }
+    qualifiers.push(`${key}:${value}`);
+  }
+  return { perPage, search: qualifiers.join(" ") };
 }
 
 function mediaWebRequest(
@@ -150,6 +311,7 @@ function mediaWebRequest(
     url: mediaURL,
     headers: { accept: `${contentType}, text/plain, */*`, "user-agent": "octopool" },
     capBytes: responseCapBytes(env, route),
+    usesApiQuota: false,
     payload: (body, headers, status) => ({
       status,
       headers: webHeaders(headers, contentType),
@@ -184,6 +346,7 @@ function rawContentRequest(
     url: rawURL,
     headers: { accept: "text/plain, */*", "user-agent": "octopool" },
     capBytes: responseCapBytes(env, route),
+    usesApiQuota: false,
     payload: (body, headers, status) => {
       const sha = gitBlobSHA(body);
       const apiPath = `/repos/${route.owner}/${route.repo}/contents/${contentPath}`;
@@ -235,6 +398,7 @@ function releaseRequest(env: Env, request: RelayRequest, route: RouteInfo): WebR
       "x-github-api-version": request.headers?.["x-github-api-version"] ?? "2022-11-28",
     },
     capBytes: responseCapBytes(env, route),
+    usesApiQuota: true,
     payload: (body, headers, status) => {
       const parsed = parsePublicReleaseBody(body, route);
       if (parsed === undefined) {
@@ -247,6 +411,62 @@ function releaseRequest(env: Env, request: RelayRequest, route: RouteInfo): WebR
         body_encoding: "json",
         backend: "web",
       };
+    },
+  };
+}
+
+function releasePageRequest(
+  env: Env,
+  request: RelayRequest,
+  route: RouteInfo,
+): WebRequest | undefined {
+  if (
+    request.method !== "GET" ||
+    route.owner === undefined ||
+    route.repo === undefined ||
+    request.headers?.["x-octopool-public-shape"] !== RELEASE_SUMMARY_SHAPE ||
+    !defaultJSONAccept(request.headers?.accept) ||
+    Object.keys(request.query ?? {}).length !== 0
+  ) {
+    return undefined;
+  }
+  let url: string;
+  if (route.kind === "release_latest") {
+    url = `https://github.com/${pathSegments([route.owner, route.repo, "releases", "latest"])}`;
+  } else if (route.kind === "release_view") {
+    const encodedTag = /\/releases\/tags\/([^/?#]+)$/.exec(request.path)?.[1];
+    if (encodedTag === undefined) {
+      return undefined;
+    }
+    const tag = decodePathComponent(encodedTag);
+    if (tag === undefined) {
+      return undefined;
+    }
+    url = `https://github.com/${pathSegments([route.owner, route.repo, "releases", "tag"])}/${encodeURIComponent(tag)}`;
+  } else {
+    return undefined;
+  }
+  return {
+    url,
+    headers: { accept: "text/html", "user-agent": "octopool" },
+    capBytes: responseCapBytes(env, route),
+    usesApiQuota: false,
+    payload: (body, headers, status, responseURL) => {
+      const parsed = parseReleaseHTML(
+        new TextDecoder().decode(body),
+        route.owner!,
+        route.repo!,
+        responseURL,
+      );
+      return parsed === undefined
+        ? undefined
+        : {
+            status,
+            headers: webHeaders(headers, "application/json"),
+            body: parsed,
+            body_encoding: "json",
+            backend: "web",
+          };
     },
   };
 }
@@ -273,6 +493,7 @@ function publicApiRequest(
       "x-github-api-version": request.headers?.["x-github-api-version"] ?? "2022-11-28",
     },
     capBytes: responseCapBytes(env, route),
+    usesApiQuota: true,
     payload: (body, headers, status) => {
       if (body.byteLength === 0) {
         return {
@@ -309,6 +530,48 @@ function releaseRoute(route: RouteInfo): boolean {
     route.kind === "release_latest" ||
     route.kind === "release_view"
   );
+}
+
+async function storedPublicApiRateBelowHalf(env: Env, resource: string): Promise<boolean> {
+  try {
+    const rate = await env.DB.prepare(queries.freshPublicApiRate)
+      .bind(resource)
+      .first<{ limit_count: number; remaining: number }>();
+    return rate !== null && rate.remaining * 2 < rate.limit_count;
+  } catch {
+    return false;
+  }
+}
+
+async function storePublicApiRate(env: Env, resource: string, headers: Headers): Promise<void> {
+  const limit = headerInt(headers, "x-ratelimit-limit");
+  const remaining = headerInt(headers, "x-ratelimit-remaining");
+  const resetAt = headerInt(headers, "x-ratelimit-reset");
+  if (limit === undefined || remaining === undefined || resetAt === undefined || limit <= 0) {
+    return;
+  }
+  try {
+    await env.DB.prepare(queries.upsertPublicApiRate)
+      .bind(resource, limit, remaining, resetAt)
+      .run();
+  } catch {
+    // Rate persistence is advisory; public reads still work without it.
+  }
+}
+
+function publicApiRateBelowHalf(headers: Headers): boolean {
+  const limit = headerInt(headers, "x-ratelimit-limit");
+  const remaining = headerInt(headers, "x-ratelimit-remaining");
+  return limit !== undefined && remaining !== undefined && limit > 0 && remaining * 2 < limit;
+}
+
+function headerInt(headers: Headers, name: string): number | undefined {
+  const value = headers.get(name);
+  if (value === null || !/^[0-9]+$/.test(value)) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
 function publicApiRoute(route: RouteInfo): boolean {

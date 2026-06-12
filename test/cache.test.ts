@@ -92,6 +92,25 @@ describe("github cache policy", () => {
     );
   });
 
+  it("keeps public summary shapes separate from exact REST cache entries", async () => {
+    const summary = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/actions/runs",
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+    const exact = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/actions/runs",
+    });
+    const route = classifyRoute(summary, policy);
+
+    await expect(githubCacheKey("maintainers", summary, route)).resolves.not.toBe(
+      await githubCacheKey("maintainers", exact, classifyRoute(exact, policy)),
+    );
+  });
+
   it("uses verified PR state hints as cache-key discriminators", async () => {
     const request = validateRelayRequest({
       pool: "maintainers",

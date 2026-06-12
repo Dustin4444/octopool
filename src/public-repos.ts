@@ -31,6 +31,16 @@ export async function ensurePublicGitHubRepo(
     }
     response = await fetchPublicRepoProof(env, owner, repo, false);
   }
+  if (!response.ok && publicCheckMayUseHistoricalProof(response)) {
+    const pageProof = await fetchPublicRepoPageProof(env, owner, repo);
+    if (pageProof === false) {
+      throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
+    }
+    if (pageProof === true) {
+      await storePublicRepoProof(env, owner, repo);
+      return;
+    }
+  }
   if (response.status === 404) {
     throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
   }
@@ -53,13 +63,7 @@ export async function ensurePublicGitHubRepo(
   if (body.private !== false) {
     throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
   }
-  const ttlSeconds = parsePositiveInt(
-    (env as unknown as Record<string, string | undefined>).PUBLIC_REPO_TTL_SECONDS,
-    30,
-  );
-  await env.DB.prepare(queries.upsertPublicRepoProof)
-    .bind(owner, repo, `+${ttlSeconds} seconds`)
-    .run();
+  await storePublicRepoProof(env, owner, repo);
 }
 
 function fetchPublicRepoProof(
@@ -88,6 +92,76 @@ function publicRepoCheckHeaders(env: Env, authenticated: boolean): Record<string
     headers.authorization = `Bearer ${token}`;
   }
   return headers;
+}
+
+async function fetchPublicRepoPageProof(
+  env: Env,
+  owner: string,
+  repo: string,
+): Promise<boolean | undefined> {
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+      {
+        headers: { accept: "text/html", "user-agent": "octopool" },
+        redirect: "manual",
+        signal: AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000)),
+      },
+    );
+  } catch {
+    return undefined;
+  }
+  if (response.status === 404) {
+    return false;
+  }
+  if (!response.ok || response.body === null) {
+    return undefined;
+  }
+  const marker = 'name="octolytics-dimension-repository_public" content="';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      total += value.byteLength;
+      if (total > 524_288) {
+        await reader.cancel();
+        return undefined;
+      }
+      text += decoder.decode(value, { stream: true });
+      const index = text.indexOf(marker);
+      if (index !== -1) {
+        const valueStart = index + marker.length;
+        const match = /^(true|false)"/.exec(text.slice(valueStart));
+        if (match !== null) {
+          await reader.cancel();
+          return match[1] === "true";
+        }
+        text = text.slice(index);
+        continue;
+      }
+      text = text.slice(-2048);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return undefined;
+}
+
+async function storePublicRepoProof(env: Env, owner: string, repo: string): Promise<void> {
+  const ttlSeconds = parsePositiveInt(
+    (env as unknown as Record<string, string | undefined>).PUBLIC_REPO_TTL_SECONDS,
+    30,
+  );
+  await env.DB.prepare(queries.upsertPublicRepoProof)
+    .bind(owner, repo, `+${ttlSeconds} seconds`)
+    .run();
 }
 
 function publicCheckMayRetryUnauthenticated(response: Response): boolean {
