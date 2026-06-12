@@ -81,7 +81,11 @@ func runGHPR(ctx context.Context, args []string, stdout io.Writer) (bool, error)
 		if needsHydratedPR(opts.json) {
 			return true, relayHydratedPRView(ctx, stdout, repo, number, opts)
 		}
-		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "pulls", number)}, opts, fieldMapPR)
+		return true, relayTop(ctx, stdout, ghAPIRequest{
+			method:  "GET",
+			path:    repoPath(repo, "pulls", number),
+			headers: publicShapeHeaders(opts, supportedPublicPRViewFields, "pr-summary-v1"),
+		}, opts, fieldMapPR)
 	case "list":
 		repo, ok := repoOnly(opts)
 		if !ok || !machineReadable(opts) || !supportedJSONFields(opts, supportedPRListFields) || !supportedPRListState(opts.state) || limitOverOnePage(opts) || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 {
@@ -387,7 +391,11 @@ func runGHWorkflow(ctx context.Context, args []string, stdout io.Writer) (bool, 
 		if len(opts.positionals) != 1 || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedWorkflowFields) || !supportedWorkflowRef(opts.positionals[0]) {
 			return false, nil
 		}
-		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "actions", "workflows", opts.positionals[0])}, opts, fieldMapWorkflow)
+		return true, relayTop(ctx, stdout, ghAPIRequest{
+			method:  "GET",
+			path:    repoPath(repo, "actions", "workflows", opts.positionals[0]),
+			headers: map[string]string{"x-octopool-public-shape": "workflow-view-v1"},
+		}, opts, fieldMapWorkflow)
 	default:
 		return false, nil
 	}
@@ -1763,6 +1771,11 @@ var supportedPRListFields = supportedFields(
 var supportedPublicPRListFields = supportedFields(
 	"number", "title", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
 	"mergedAt", "isDraft", "labels",
+)
+
+var supportedPublicPRViewFields = supportedFields(
+	"number", "title", "state", "url", "createdAt", "closedAt", "mergedAt",
+	"headRefName", "headRefOid", "baseRefName",
 )
 
 var supportedPRSearchFields = supportedFields(

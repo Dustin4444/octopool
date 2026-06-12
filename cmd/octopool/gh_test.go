@@ -545,6 +545,34 @@ func TestRunGHWorkflowListRelays(t *testing.T) {
 	}
 }
 
+func TestRunGHWorkflowViewUsesPublicShape(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		if body["path"] != "/repos/openclaw/octopool/actions/workflows/ci.yml" {
+			t.Fatalf("path = %v", body["path"])
+		}
+		headers, ok := body["headers"].(map[string]any)
+		if !ok || headers["x-octopool-public-shape"] != "workflow-view-v1" {
+			t.Fatalf("headers = %#v", body["headers"])
+		}
+		return map[string]any{
+			"id":    1,
+			"name":  "CI",
+			"path":  ".github/workflows/ci.yml",
+			"state": "active",
+		}
+	})
+	var out bytes.Buffer
+	handled, err := runGHWorkflow(t.Context(), []string{
+		"view",
+		"ci.yml",
+		"-R", "openclaw/octopool",
+		"--json", "id,name,path,state",
+	}, &out)
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+}
+
 func TestRunGHLabelListRelays(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		if body["path"] != "/repos/openclaw/octopool/labels" {
@@ -577,6 +605,8 @@ func TestRunGHPublicSummaryShapesFollowRequestedFields(t *testing.T) {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/pulls":
 			return []map[string]any{}
+		case "/repos/openclaw/octopool/pulls/11":
+			return map[string]any{"number": 11, "body": "Public body"}
 		case "/repos/openclaw/octopool/issues/5":
 			return map[string]any{"number": 5, "closed_at": "2026-05-27T23:19:04Z"}
 		case "/repos/openclaw/octopool/issues":
@@ -595,6 +625,16 @@ func TestRunGHPublicSummaryShapesFollowRequestedFields(t *testing.T) {
 		handled, err := runGHPR(t.Context(), args, &out)
 		if err != nil || !handled {
 			t.Fatalf("pr handled=%v err=%v", handled, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"view", "11", "-R", "openclaw/octopool", "--json", "number,headRefOid"},
+		{"view", "11", "-R", "openclaw/octopool", "--json", "number,body"},
+	} {
+		var out bytes.Buffer
+		handled, err := runGHPR(t.Context(), args, &out)
+		if err != nil || !handled {
+			t.Fatalf("pr view handled=%v err=%v", handled, err)
 		}
 	}
 	for _, args := range [][]string{
@@ -617,7 +657,7 @@ func TestRunGHPublicSummaryShapesFollowRequestedFields(t *testing.T) {
 		t.Fatalf("issue list handled=%v err=%v", handled, err)
 	}
 
-	wantShapes := []string{"pr-list-v1", "", "issue-summary-v1", "", "issue-list-v1"}
+	wantShapes := []string{"pr-list-v1", "", "pr-summary-v1", "", "issue-summary-v1", "", "issue-list-v1"}
 	if len(requests) != len(wantShapes) {
 		t.Fatalf("requests = %d", len(requests))
 	}

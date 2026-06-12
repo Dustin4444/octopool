@@ -60,6 +60,11 @@ serves these public shapes through GitHub web/raw endpoints:
   repo-scoped issue/commit search
 - explicit-ref contents reads can prefer `raw.githubusercontent.com`, returned as an
   API-shaped JSON file payload, once anonymous API quota falls below 50%
+- branch refs, matching branch prefixes, and annotated-tag refs can use Git smart HTTP
+  advertisements with exact REST-compatible IDs and object metadata below 50% anonymous
+  API quota; ambiguous lightweight tags remain API-only
+- supported top-level `gh pr view` summaries and `gh workflow view` metadata can use bounded
+  public GitHub page data below 50% anonymous API quota
 - release list/latest/tag/id/asset reads via unauthenticated `api.github.com` requests so pooled
   credentials never expose draft releases; supported top-level `gh release view` summaries
   prefer public release HTML once anonymous API quota falls below 50%, while raw API requests

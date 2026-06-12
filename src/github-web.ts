@@ -1,5 +1,6 @@
 import { HttpError, parsePositiveInt } from "./http";
 import { responseCapBytes } from "./github";
+import { gitRefResponse, parseGitUploadPackAdvertisement } from "./github-git";
 import {
   parseActionsJobGroupsJSON,
   parseActionsJobHTML,
@@ -9,7 +10,9 @@ import {
   parseIssueHTML,
   parseIssueListHTML,
   parseLabelListHTML,
+  parsePullRequestHTML,
   parseReleaseHTML,
+  parseRepositoryNodeIDHTML,
   parseWorkflowListHTML,
   parseWorkflowPageCount,
 } from "./github-html";
@@ -31,8 +34,10 @@ const ACTIONS_JOBS_SHAPE = "actions-jobs-v1";
 const ISSUE_SUMMARY_SHAPE = "issue-summary-v1";
 const ISSUE_LIST_SHAPE = "issue-list-v1";
 const PR_LIST_SHAPE = "pr-list-v1";
+const PR_SUMMARY_SHAPE = "pr-summary-v1";
 const LABEL_LIST_SHAPE = "label-list-v1";
 const WORKFLOW_LIST_SHAPE = "workflow-list-v1";
+const WORKFLOW_VIEW_SHAPE = "workflow-view-v1";
 const RELEASE_SUMMARY_SHAPE = "release-summary-v1";
 const MAX_PUBLIC_JOB_PAGES = 25;
 const MAX_PUBLIC_WORKFLOW_PAGES = 10;
@@ -186,6 +191,10 @@ function webRequests(env: Env, request: RelayRequest, route: RouteInfo): WebRequ
   if (publicApi !== undefined) {
     out.push(publicApi);
   }
+  const gitRef = gitRefRequest(env, request, route);
+  if (gitRef !== undefined) {
+    out.push(gitRef);
+  }
   const summaryPage = summaryPageRequest(env, request, route);
   if (summaryPage !== undefined) {
     out.push(summaryPage);
@@ -221,7 +230,17 @@ function summaryPageRequest(
   const shape = request.headers?.["x-octopool-public-shape"];
   let url: URL;
   let parse: (html: string) => unknown | undefined;
-  if (route.kind === "issue_view" && shape === ISSUE_SUMMARY_SHAPE) {
+  if (route.kind === "pr_view" && shape === PR_SUMMARY_SHAPE) {
+    if (Object.keys(request.query ?? {}).length !== 0) {
+      return undefined;
+    }
+    const number = /\/pulls\/([0-9]+)$/.exec(request.path)?.[1];
+    if (number === undefined) {
+      return undefined;
+    }
+    url = new URL(`https://github.com/${pathSegments([route.owner, route.repo, "pull", number])}`);
+    parse = (html) => parsePullRequestHTML(html, route.owner!, route.repo!, Number(number));
+  } else if (route.kind === "issue_view" && shape === ISSUE_SUMMARY_SHAPE) {
     if (Object.keys(request.query ?? {}).length !== 0) {
       return undefined;
     }
@@ -258,9 +277,24 @@ function summaryPageRequest(
       const items = parseLabelListHTML(html, route.owner!, route.repo!);
       return items === undefined ? undefined : items.slice(0, query.perPage);
     };
-  } else if (route.kind === "workflow_list" && shape === WORKFLOW_LIST_SHAPE) {
-    const query = simplePageQuery(request.query);
+  } else if (
+    (route.kind === "workflow_list" && shape === WORKFLOW_LIST_SHAPE) ||
+    (route.kind === "workflow_view" && shape === WORKFLOW_VIEW_SHAPE)
+  ) {
+    const query =
+      route.kind === "workflow_list"
+        ? simplePageQuery(request.query)
+        : Object.keys(request.query ?? {}).length === 0
+          ? { perPage: 100 }
+          : undefined;
     if (query === undefined) {
+      return undefined;
+    }
+    const workflowRef =
+      route.kind === "workflow_view"
+        ? decodePathComponent(/\/actions\/workflows\/([^/?#]+)$/.exec(request.path)?.[1] ?? "")
+        : undefined;
+    if (route.kind === "workflow_view" && workflowRef === undefined) {
       return undefined;
     }
     url = new URL(`https://github.com/${pathSegments([route.owner, route.repo, "actions"])}`);
@@ -271,49 +305,28 @@ function summaryPageRequest(
       usesApiQuota: false,
       payload: async (body, headers, status) => {
         const html = new TextDecoder().decode(body);
-        const pageCount = parseWorkflowPageCount(html);
-        const first = parseWorkflowListHTML(html, route.owner!, route.repo!);
-        // Missing pagination metadata cannot prove the first page is complete.
-        if (
-          pageCount === undefined ||
-          pageCount > MAX_PUBLIC_WORKFLOW_PAGES ||
-          first === undefined
-        ) {
+        const workflows = await completeWorkflowList(env, route, html);
+        if (workflows === undefined) {
           return undefined;
         }
-        const workflows = [...first];
-        for (let page = 2; page <= pageCount; page++) {
-          const next = await fetchPublicPage(
-            `https://github.com/${pathSegments([
-              route.owner!,
-              route.repo!,
-              "actions",
-              "workflows_partial",
-            ])}?query=&page=${page}`,
-            responseCapBytes(env, route),
-            env,
-          );
-          const parsed =
-            next === undefined ? undefined : parseWorkflowListHTML(next, route.owner!, route.repo!);
-          if (parsed === undefined) {
-            return undefined;
-          }
-          workflows.push(...parsed);
-        }
-        const unique = new Map(workflows.map((workflow) => [workflow.id, workflow]));
-        if (unique.size !== workflows.length) {
+        const bodyValue =
+          route.kind === "workflow_view"
+            ? workflows.find(
+                (workflow) =>
+                  String(workflow.id) === workflowRef ||
+                  workflow.path === `.github/workflows/${workflowRef}`,
+              )
+            : {
+                total_count: workflows.length,
+                workflows: workflows.slice(0, query.perPage),
+              };
+        if (bodyValue === undefined) {
           return undefined;
         }
-        const sorted = [...unique.values()].sort((left, right) =>
-          compareStrings(String(left.path), String(right.path)),
-        );
         return {
           status,
           headers: webHeaders(headers, "application/json"),
-          body: {
-            total_count: sorted.length,
-            workflows: sorted.slice(0, query.perPage),
-          },
+          body: bodyValue,
           body_encoding: "json",
           backend: "web",
         };
@@ -329,6 +342,115 @@ function summaryPageRequest(
     usesApiQuota: false,
     payload: (body, headers, status) => {
       const parsed = parse(new TextDecoder().decode(body));
+      return parsed === undefined
+        ? undefined
+        : {
+            status,
+            headers: webHeaders(headers, "application/json"),
+            body: parsed,
+            body_encoding: "json",
+            backend: "web",
+          };
+    },
+  };
+}
+
+async function completeWorkflowList(
+  env: Env,
+  route: RouteInfo,
+  html: string,
+): Promise<Record<string, unknown>[] | undefined> {
+  const pageCount = parseWorkflowPageCount(html);
+  const first = parseWorkflowListHTML(html, route.owner!, route.repo!);
+  // Missing pagination metadata cannot prove the first page is complete.
+  if (pageCount === undefined || pageCount > MAX_PUBLIC_WORKFLOW_PAGES || first === undefined) {
+    return undefined;
+  }
+  const workflows = [...first];
+  for (let page = 2; page <= pageCount; page++) {
+    const next = await fetchPublicPage(
+      `https://github.com/${pathSegments([
+        route.owner!,
+        route.repo!,
+        "actions",
+        "workflows_partial",
+      ])}?query=&page=${page}`,
+      responseCapBytes(env, route),
+      env,
+    );
+    const parsed =
+      next === undefined ? undefined : parseWorkflowListHTML(next, route.owner!, route.repo!);
+    if (parsed === undefined) {
+      return undefined;
+    }
+    workflows.push(...parsed);
+  }
+  const unique = new Map(workflows.map((workflow) => [workflow.id, workflow]));
+  if (unique.size !== workflows.length) {
+    return undefined;
+  }
+  return [...unique.values()].sort((left, right) =>
+    compareStrings(String(left.path), String(right.path)),
+  );
+}
+
+function gitRefRequest(env: Env, request: RelayRequest, route: RouteInfo): WebRequest | undefined {
+  if (
+    request.method !== "GET" ||
+    route.owner === undefined ||
+    route.repo === undefined ||
+    (route.kind !== "git_ref" && route.kind !== "git_matching_refs") ||
+    !defaultJSONAccept(request.headers?.accept) ||
+    Object.keys(request.query ?? {}).length !== 0
+  ) {
+    return undefined;
+  }
+  const prefix =
+    route.kind === "git_ref"
+      ? `/repos/${route.owner}/${route.repo}/git/ref/`
+      : `/repos/${route.owner}/${route.repo}/git/matching-refs/`;
+  const requested = decodePathComponent(request.path.slice(prefix.length));
+  if (
+    requested === undefined ||
+    !safeGitRefPath(requested) ||
+    (requested !== "heads" &&
+      !requested.startsWith("heads/") &&
+      requested !== "tags" &&
+      !requested.startsWith("tags/"))
+  ) {
+    return undefined;
+  }
+  return {
+    url: `https://github.com/${pathSegments([route.owner, `${route.repo}.git`])}/info/refs?service=git-upload-pack`,
+    headers: {
+      accept: "application/x-git-upload-pack-advertisement",
+      "user-agent": "octopool",
+    },
+    capBytes: responseCapBytes(env, route),
+    usesApiQuota: false,
+    payload: async (body, headers, status) => {
+      const refs = parseGitUploadPackAdvertisement(body);
+      if (refs === undefined) {
+        return undefined;
+      }
+      const repositoryPage = await fetchPublicPage(
+        `https://github.com/${pathSegments([route.owner!, route.repo!, "issues"])}?q=is%3Aissue`,
+        responseCapBytes(env, route),
+        env,
+      );
+      const repositoryNodeID =
+        repositoryPage === undefined ? undefined : parseRepositoryNodeIDHTML(repositoryPage);
+      if (repositoryNodeID === undefined) {
+        return undefined;
+      }
+      const parsed = gitRefResponse(
+        refs,
+        repositoryNodeID,
+        route.owner!,
+        route.repo!,
+        requested,
+        route.kind === "git_matching_refs",
+      );
       return parsed === undefined
         ? undefined
         : {

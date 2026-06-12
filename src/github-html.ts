@@ -401,6 +401,54 @@ export function parseIssueListHTML(
   return items;
 }
 
+export function parsePullRequestHTML(
+  html: string,
+  owner: string,
+  repo: string,
+  number: number,
+): Record<string, unknown> | undefined {
+  const embedded = embeddedAppJSON(html);
+  const payload = embedded === undefined ? undefined : recordValue(embedded.payload);
+  const layout = payload === undefined ? undefined : recordValue(payload.pullRequestsLayoutRoute);
+  const pullRequest = layout === undefined ? undefined : recordValue(layout.pullRequest);
+  const repository = layout === undefined ? undefined : recordValue(layout.repository);
+  if (
+    pullRequest === undefined ||
+    repository === undefined ||
+    repository.ownerLogin !== owner ||
+    repository.name !== repo ||
+    pullRequest.number !== number ||
+    typeof pullRequest.relayId !== "string" ||
+    typeof pullRequest.title !== "string" ||
+    typeof pullRequest.state !== "string" ||
+    typeof pullRequest.createdTime !== "string" ||
+    (typeof pullRequest.closedTime !== "string" && pullRequest.closedTime !== null) ||
+    (typeof pullRequest.mergedTime !== "string" && pullRequest.mergedTime !== null) ||
+    typeof pullRequest.headBranch !== "string" ||
+    typeof pullRequest.headSha !== "string" ||
+    typeof pullRequest.baseBranch !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    number,
+    node_id: pullRequest.relayId,
+    title: pullRequest.title,
+    state: pullRequest.state,
+    html_url: `https://github.com/${owner}/${repo}/pull/${number}`,
+    created_at: pullRequest.createdTime,
+    closed_at: pullRequest.closedTime,
+    merged_at: pullRequest.mergedTime,
+    head: { ref: pullRequest.headBranch, sha: pullRequest.headSha },
+    base: { ref: pullRequest.baseBranch },
+  };
+}
+
+export function parseRepositoryNodeIDHTML(html: string): string | undefined {
+  const id = preloadedRepository(html, "IssueIndexPageQuery")?.id;
+  return typeof id === "string" ? id : undefined;
+}
+
 export function parseLabelListHTML(
   html: string,
   owner: string,

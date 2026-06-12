@@ -842,6 +842,54 @@ describe("github web provider", () => {
     });
   });
 
+  it("falls back to embedded PR data for shaped PR views", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+      .mockResolvedValueOnce(
+        new Response(
+          pullRequestPage({
+            author: { login: "RomneyDa" },
+            baseBranch: "main",
+            closedTime: "2026-06-10T00:52:44Z",
+            createdTime: "2026-06-03T18:13:12Z",
+            headBranch: "fix/login-provisioning-guidance",
+            headSha: "ef53e13233adb1af0730f8239d87149d60cb42ac",
+            mergedTime: "2026-06-10T00:52:44Z",
+            number: 11,
+            relayId: "PR_kwDOSoyMq87iWrbq",
+            state: "MERGED",
+            title: "Clarify login access provisioning failures",
+          }),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/pulls/11",
+      headers: { "x-octopool-public-shape": "pr-summary-v1" },
+    });
+
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+
+    expect(response?.body).toEqual({
+      number: 11,
+      node_id: "PR_kwDOSoyMq87iWrbq",
+      title: "Clarify login access provisioning failures",
+      state: "MERGED",
+      html_url: "https://github.com/openclaw/octopool/pull/11",
+      created_at: "2026-06-03T18:13:12Z",
+      closed_at: "2026-06-10T00:52:44Z",
+      merged_at: "2026-06-10T00:52:44Z",
+      head: {
+        ref: "fix/login-provisioning-guidance",
+        sha: "ef53e13233adb1af0730f8239d87149d60cb42ac",
+      },
+      base: { ref: "main" },
+    });
+  });
+
   it("falls back to embedded issue and PR lists when the whole result fits", async () => {
     const issueNode = {
       __typename: "Issue",
@@ -1029,6 +1077,120 @@ describe("github web provider", () => {
     });
   });
 
+  it("falls back to the complete workflow list for shaped workflow views", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
+      .mockResolvedValueOnce(
+        new Response(
+          workflowPage(
+            [
+              [284355045, "CI", "ci.yml"],
+              [284355048, "release", "release.yml"],
+            ],
+            1,
+          ),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/workflows/ci.yml",
+      headers: { "x-octopool-public-shape": "workflow-view-v1" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({
+      body: {
+        id: 284355045,
+        name: "CI",
+        path: ".github/workflows/ci.yml",
+        state: "active",
+      },
+    });
+  });
+
+  it("resolves exact branch refs from Git smart HTTP below half quota", async () => {
+    const sha = "e05a16c766609e722571a448f606f6820a0bf249";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(gitAdvertisement([[sha, "refs/heads/main"]]), {
+          headers: { "content-type": "application/x-git-upload-pack-advertisement" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(embeddedPage("IssueIndexPageQuery", { id: "R_kgDOSoyMqw" })),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/git/ref/heads/main",
+    });
+
+    const response = await callGitHubWeb(
+      rateEnv({ limit_count: 60, remaining: 29 }),
+      request,
+      classifyRoute(request, policy),
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://github.com/openclaw/octopool.git/info/refs?service=git-upload-pack",
+      expect.any(Object),
+    );
+    expect(response?.body).toEqual({
+      ref: "refs/heads/main",
+      node_id: "REF_kwDOSoyMq69yZWZzL2hlYWRzL21haW4",
+      url: "https://api.github.com/repos/openclaw/octopool/git/refs/heads/main",
+      object: {
+        sha,
+        type: "commit",
+        url: `https://api.github.com/repos/openclaw/octopool/git/commits/${sha}`,
+      },
+    });
+  });
+
+  it("retains the exact API response for ambiguous lightweight tags", async () => {
+    const apiBody = {
+      ref: "refs/tags/v1.0.0",
+      node_id: "REF_exact",
+      object: { sha: "0123456789012345678901234567890123456789", type: "commit" },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(apiBody), {
+          headers: {
+            "x-ratelimit-limit": "60",
+            "x-ratelimit-remaining": "29",
+            "x-ratelimit-reset": "2000000000",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          gitAdvertisement([["0123456789012345678901234567890123456789", "refs/tags/v1.0.0"]]),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(embeddedPage("IssueIndexPageQuery", { id: "R_kgDOSoyMqw" })),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/git/ref/tags/v1.0.0",
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({ body: apiBody });
+  });
+
   it("rejects workflow HTML without pagination completeness proof", async () => {
     vi.stubGlobal(
       "fetch",
@@ -1057,10 +1219,12 @@ describe("github web provider", () => {
       "/repos/openclaw/octopool/actions/runs",
       "/repos/openclaw/octopool/releases/tags/v0.8.0",
       "/repos/openclaw/octopool/issues/5",
+      "/repos/openclaw/octopool/pulls/11",
       "/repos/openclaw/octopool/issues",
       "/repos/openclaw/octopool/pulls",
       "/repos/openclaw/octopool/labels",
       "/repos/openclaw/octopool/actions/workflows",
+      "/repos/openclaw/octopool/actions/workflows/ci.yml",
     ].map((path) =>
       validateRelayRequest({
         pool: "maintainers",
@@ -1522,6 +1686,31 @@ function issueListPage(nodes: Record<string, unknown>[]): string {
       pageInfo: { hasNextPage: false },
     },
   });
+}
+
+function pullRequestPage(pullRequest: Record<string, unknown>): string {
+  return `<script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({
+    payload: {
+      pullRequestsLayoutRoute: {
+        pullRequest,
+        repository: { ownerLogin: "openclaw", name: "octopool" },
+      },
+    },
+  })}</script>`;
+}
+
+function gitAdvertisement(lines: [string, string][]): Uint8Array {
+  const packet = (value: string): string =>
+    (new TextEncoder().encode(value).byteLength + 4).toString(16).padStart(4, "0") + value;
+  return new TextEncoder().encode(
+    [
+      packet("# service=git-upload-pack\n"),
+      "0000",
+      packet(`${lines[0]![0]} HEAD\0multi_ack thin-pack symref=HEAD:${lines[0]![1]}\n`),
+      ...lines.map(([sha, ref]) => packet(`${sha} ${ref}\n`)),
+      "0000",
+    ].join(""),
+  );
 }
 
 function actor(login: string, name: string): Record<string, unknown> {
