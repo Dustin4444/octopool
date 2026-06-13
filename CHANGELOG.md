@@ -8,6 +8,8 @@
 
 ### Fixes
 
+- Give the dashboard account row balanced spacing and full-width alignment below the pool controls on tablet-sized screens.
+
 ## 0.3.2 - 2026-06-13
 
 ### Fixes
