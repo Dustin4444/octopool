@@ -2,6 +2,10 @@
 
 ## 0.3.3 - Unreleased
 
+### Changes
+
+- Redesign the operator dashboard as a responsive relay control room with clearer telemetry hierarchy, latency and cache-size metrics, accessible loading/error states, and scroll-safe data tables.
+
 ### Fixes
 
 ## 0.3.2 - 2026-06-13
