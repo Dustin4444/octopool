@@ -5,6 +5,7 @@ const DASHBOARD_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#07110f">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230d1917'/%3E%3Ccircle cx='16' cy='14' r='7' fill='none' stroke='%2365e6b4' stroke-width='2'/%3E%3Cpath d='M10 22c2-2 3 2 6 0s4 2 6 0' fill='none' stroke='%2365e6b4' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
 <title>octopool dashboard</title>
 <style>
   :root{color-scheme:dark;--bg:#07110f;--panel:#0d1917;--panel-strong:#11211e;--line:#203a34;--line-soft:rgba(115,160,148,.16);--text:#f2f7f4;--muted:#8fa9a1;--dim:#648078;--mint:#65e6b4;--mint-soft:rgba(101,230,180,.12);--coral:#ff7a73;--coral-soft:rgba(255,122,115,.12);--amber:#f3c96b;--ink:#06100d;--shadow:0 24px 70px rgba(0,0,0,.28)}
