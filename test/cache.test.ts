@@ -169,7 +169,7 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(run, response({ status: "completed" }))).toBe(3_600);
-    expect(cacheTTLSeconds(run, response({ status: "in_progress" }))).toBe(15);
+    expect(cacheTTLSeconds(run, response({ status: "in_progress" }))).toBe(30);
 
     const runList = classifyRoute(
       validateRelayRequest({
@@ -182,7 +182,7 @@ describe("github cache policy", () => {
     expect(cacheTTLSeconds(runList, response({ workflow_runs: [{ status: "completed" }] }))).toBe(
       120,
     );
-    expect(cacheTTLSeconds(runList, response({ workflow_runs: [] }))).toBe(15);
+    expect(cacheTTLSeconds(runList, response({ workflow_runs: [] }))).toBe(30);
 
     const checks = classifyRoute(
       validateRelayRequest({
@@ -195,7 +195,7 @@ describe("github cache policy", () => {
     expect(cacheTTLSeconds(checks, response({ check_runs: [{ status: "completed" }] }))).toBe(
       3_600,
     );
-    expect(cacheTTLSeconds(checks, response({ check_runs: [] }))).toBe(15);
+    expect(cacheTTLSeconds(checks, response({ check_runs: [] }))).toBe(30);
     const checkSuites = classifyRoute(
       validateRelayRequest({
         pool: "maintainers",
@@ -207,7 +207,7 @@ describe("github cache policy", () => {
     expect(
       cacheTTLSeconds(checkSuites, response({ check_suites: [{ status: "completed" }] })),
     ).toBe(3_600);
-    expect(cacheTTLSeconds(checkSuites, response({ check_suites: [] }))).toBe(15);
+    expect(cacheTTLSeconds(checkSuites, response({ check_suites: [] }))).toBe(30);
     const statuses = classifyRoute(
       validateRelayRequest({
         pool: "maintainers",
@@ -217,7 +217,7 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(statuses, response([{ state: "success" }]))).toBe(3_600);
-    expect(cacheTTLSeconds(statuses, response([{ state: "pending" }]))).toBe(15);
+    expect(cacheTTLSeconds(statuses, response([{ state: "pending" }]))).toBe(30);
     const job = classifyRoute(
       validateRelayRequest({
         pool: "maintainers",
@@ -227,7 +227,7 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(job, response({ status: "completed" }))).toBe(3_600);
-    expect(cacheTTLSeconds(job, response({ status: "in_progress" }))).toBe(15);
+    expect(cacheTTLSeconds(job, response({ status: "in_progress" }))).toBe(30);
 
     const files = classifyRoute(
       validateRelayRequest({

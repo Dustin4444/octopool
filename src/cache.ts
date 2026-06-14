@@ -332,23 +332,23 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
     case "git_matching_refs":
       return 120;
     case "run_view":
-      return completedRun(response) ? TERMINAL_CI_TTL_SECONDS : 15;
+      return completedRun(response) ? TERMINAL_CI_TTL_SECONDS : 30;
     case "run_list":
     case "workflow_run_list":
-      return completedRunList(response) ? 120 : 15;
+      return completedRunList(response) ? 120 : 30;
     case "run_jobs":
-      return completedJobs(response) ? TERMINAL_CI_TTL_SECONDS : 15;
+      return completedJobs(response) ? TERMINAL_CI_TTL_SECONDS : 30;
     case "commit_check_runs":
-      return completedChecks(response) ? TERMINAL_CI_TTL_SECONDS : 15;
+      return completedChecks(response) ? TERMINAL_CI_TTL_SECONDS : 30;
     case "commit_check_suites":
-      return completedCheckSuites(response) ? TERMINAL_CI_TTL_SECONDS : 15;
+      return completedCheckSuites(response) ? TERMINAL_CI_TTL_SECONDS : 30;
     case "commit_status":
-      return completedStatus(response) ? TERMINAL_CI_TTL_SECONDS : 15;
+      return completedStatus(response) ? TERMINAL_CI_TTL_SECONDS : 30;
     case "commit_statuses":
     case "ref_statuses":
-      return completedStatusList(response) ? TERMINAL_CI_TTL_SECONDS : 15;
+      return completedStatusList(response) ? TERMINAL_CI_TTL_SECONDS : 30;
     case "job_view":
-      return completedJob(response) ? TERMINAL_CI_TTL_SECONDS : 15;
+      return completedJob(response) ? TERMINAL_CI_TTL_SECONDS : 30;
     case "pr_files":
       return stateAwarePRSubresource(route, response) ? 300 : 60;
     case "pr_commits":

@@ -12,6 +12,8 @@ type RateRow = {
   reset_at: number;
 };
 
+const CACHE_FILL_LEASE_MS = 8_000;
+
 export class PoolCoordinator extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -19,7 +21,30 @@ export class PoolCoordinator extends DurableObject<Env> {
       this.ctx.storage.sql.exec(queries.createLeasesTable);
       this.ctx.storage.sql.exec(queries.createRateStatesTable);
       this.ctx.storage.sql.exec(queries.createCooldownsTable);
+      this.ctx.storage.sql.exec(queries.createCacheFillsTable);
     });
+  }
+
+  claimCacheFill(cacheKey: string): string | null {
+    const now = Date.now();
+    const fill = this.ctx.storage.sql
+      .exec<{ owner_token: string; expires_at: number }>(queries.getCacheFill, cacheKey)
+      .toArray()[0];
+    if (fill !== undefined && fill.expires_at > now) {
+      return null;
+    }
+    const ownerToken = crypto.randomUUID();
+    this.ctx.storage.sql.exec(
+      queries.upsertCacheFill,
+      cacheKey,
+      ownerToken,
+      now + CACHE_FILL_LEASE_MS,
+    );
+    return ownerToken;
+  }
+
+  finishCacheFill(cacheKey: string, ownerToken: string): void {
+    this.ctx.storage.sql.exec(queries.deleteCacheFill, cacheKey, ownerToken);
   }
 
   selectIdentity(request: SelectionRequest): SelectionResult {

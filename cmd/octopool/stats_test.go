@@ -14,12 +14,17 @@ func TestRenderStats(t *testing.T) {
 		Operator: statsOperator{GitHubLogin: "steipete"},
 		PoolUsage: statsAggregate{
 			Requests:         12,
-			Errors:           1,
+			Errors:           3,
+			ServiceErrors:    1,
+			Fallbacks:        2,
 			CacheHits:        5,
 			CacheStale:       2,
 			CacheMisses:      3,
 			CacheBypass:      4,
 			CacheHitRate:     &rate,
+			EligibleRequests: 8,
+			EligibleHitRate:  &rate,
+			Coalesced:        2,
 			SavedGitHubCalls: 7,
 			BackendRequests:  7,
 		},
@@ -36,12 +41,13 @@ func TestRenderStats(t *testing.T) {
 		Routes: []statsRoute{{
 			RouteKind: "pr_view",
 			statsAggregate: statsAggregate{
-				Requests:     6,
-				Errors:       0,
-				CacheStale:   1,
-				CacheMisses:  1,
-				CacheBypass:  2,
-				CacheHitRate: &rate,
+				Requests:        6,
+				ServiceErrors:   0,
+				Fallbacks:       1,
+				CacheStale:      1,
+				CacheMisses:     1,
+				CacheBypass:     2,
+				EligibleHitRate: &rate,
 			},
 		}},
 	}
@@ -54,10 +60,11 @@ func TestRenderStats(t *testing.T) {
 		"pool: maintainers",
 		"operator: steipete",
 		"cache: 62.5% hit (5 hits, 2 stale, 3 misses, 4 bypass, 0 unknown)",
-		"cacheable: 0/12 requests",
+		"eligible: 8/12 requests, 62.5% hit",
+		"coalesced: 2 duplicate misses",
 		"github: 7 saved, 7 backend",
 		"entries: 7 fresh / 9 total, 2 expired, 1.5 KiB",
-		"  pr_view: 6 req, 62.5% hit, 1 stale, 1 miss, 2 bypass, 0 errors",
+		"  pr_view: 6 req, 62.5% eligible hit, 1 stale, 1 miss, 2 bypass, 0 errors, 1 fallback",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in:\n%s", want, got)

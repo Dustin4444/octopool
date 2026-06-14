@@ -64,9 +64,11 @@ export async function insertAudit(
     identityId?: string;
     status: number;
     errorCode?: string;
+    fallbackReason?: string;
     durationMs: number;
     cacheStatus?: "hit" | "miss" | "bypass" | "stale" | "unknown";
     cacheable?: boolean;
+    coalesced?: boolean;
   },
 ): Promise<void> {
   await env.DB.prepare(queries.insertAudit)
@@ -79,9 +81,11 @@ export async function insertAudit(
       event.identityId ?? null,
       event.status,
       event.errorCode ?? null,
+      event.fallbackReason ?? null,
       event.durationMs,
       event.cacheStatus ?? "unknown",
       event.cacheable === true ? 1 : 0,
+      event.coalesced === true ? 1 : 0,
     )
     .run();
 }

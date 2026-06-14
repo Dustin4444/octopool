@@ -15,6 +15,7 @@ import {
   shouldUseGitHubCache,
   writeGitHubCache,
 } from "./cache";
+import { coalesceGitHubCacheMiss, finishGitHubCacheFill } from "./cache-coalesce";
 import { dashboardResponse } from "./dashboard";
 import { ensurePool, insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, callPublicGitHub, rateFromHeaders } from "./github";
@@ -178,6 +179,8 @@ async function dashboardData(request: Request, env: Env): Promise<Response> {
     users,
     recent,
     routeUsage,
+    routeKeys7d,
+    errorCodes7d,
     identityUsage,
     publicRepos,
     coordinatorSnapshot,
@@ -188,6 +191,8 @@ async function dashboardData(request: Request, env: Env): Promise<Response> {
     dashboardUsers(env, pool),
     dashboardRecent(env, pool),
     dashboardRouteUsage(env, pool),
+    dashboardRouteKeys7d(env, pool),
+    dashboardErrorCodes7d(env, pool),
     dashboardIdentityUsage(env, pool),
     dashboardPublicRepos(env),
     coordinator.snapshot(),
@@ -210,6 +215,8 @@ async function dashboardData(request: Request, env: Env): Promise<Response> {
     users,
     recent,
     route_usage: routeUsage,
+    route_keys_7d: routeKeys7d,
+    error_codes_7d: errorCodes7d,
     identity_usage: identityUsage,
     public_repos: publicRepos,
     coordinator: coordinatorSnapshot,
@@ -220,10 +227,16 @@ async function dashboardUsage(env: Env, pool: string) {
   const row = await env.DB.prepare(queries.dashboardUsage).bind(pool).first<{
     requests_24h: number;
     errors_24h: number | null;
+    service_errors_24h: number | null;
+    fallbacks_24h: number | null;
+    denied_24h: number | null;
     cache_hits_24h: number | null;
     cache_stale_24h: number | null;
     cache_misses_24h: number | null;
     cache_bypass_24h: number | null;
+    coalesced_24h: number | null;
+    eligible_hits_24h: number | null;
+    eligible_misses_24h: number | null;
     avg_duration_ms_24h: number | null;
     latest_seen_at: string | null;
   }>();
@@ -231,14 +244,23 @@ async function dashboardUsage(env: Env, pool: string) {
   const cacheStale = row?.cache_stale_24h ?? 0;
   const cacheMisses = row?.cache_misses_24h ?? 0;
   const cacheDenominator = cacheHits + cacheStale + cacheMisses;
+  const eligibleHits = row?.eligible_hits_24h ?? 0;
+  const eligibleMisses = row?.eligible_misses_24h ?? 0;
+  const eligibleDenominator = eligibleHits + eligibleMisses;
   return {
     requests_24h: row?.requests_24h ?? 0,
     errors_24h: row?.errors_24h ?? 0,
+    service_errors_24h: row?.service_errors_24h ?? 0,
+    fallbacks_24h: row?.fallbacks_24h ?? 0,
+    denied_24h: row?.denied_24h ?? 0,
     cache_hits_24h: cacheHits,
     cache_stale_24h: cacheStale,
     cache_misses_24h: cacheMisses,
     cache_bypass_24h: row?.cache_bypass_24h ?? 0,
+    coalesced_24h: row?.coalesced_24h ?? 0,
     cache_hit_rate_24h: cacheDenominator === 0 ? null : (cacheHits + cacheStale) / cacheDenominator,
+    eligible_cache_hit_rate_24h:
+      eligibleDenominator === 0 ? null : eligibleHits / eligibleDenominator,
     avg_duration_ms_24h: row?.avg_duration_ms_24h ?? null,
     latest_seen_at: row?.latest_seen_at ?? null,
   };
@@ -312,6 +334,7 @@ async function dashboardRecent(env: Env, pool: string) {
     identity_id: string | null;
     status: number;
     error_code: string | null;
+    fallback_reason: string | null;
     duration_ms: number;
   }>();
   return rows.results;
@@ -322,26 +345,71 @@ async function dashboardRouteUsage(env: Env, pool: string) {
     route_kind: string;
     requests: number;
     errors: number | null;
+    service_errors: number | null;
+    fallbacks: number | null;
     cache_hits: number | null;
     cache_stale: number | null;
     cache_misses: number | null;
     cache_bypass: number | null;
+    coalesced: number | null;
+    eligible_hits: number | null;
+    eligible_misses: number | null;
   }>();
   return rows.results.map((row) => {
     const cacheHits = row.cache_hits ?? 0;
     const cacheStale = row.cache_stale ?? 0;
     const cacheMisses = row.cache_misses ?? 0;
     const cacheDenominator = cacheHits + cacheStale + cacheMisses;
+    const eligibleHits = row.eligible_hits ?? 0;
+    const eligibleMisses = row.eligible_misses ?? 0;
+    const eligibleDenominator = eligibleHits + eligibleMisses;
     return {
       ...row,
       errors: row.errors ?? 0,
+      service_errors: row.service_errors ?? 0,
+      fallbacks: row.fallbacks ?? 0,
       cache_hits: cacheHits,
       cache_stale: cacheStale,
       cache_misses: cacheMisses,
       cache_bypass: row.cache_bypass ?? 0,
+      coalesced: row.coalesced ?? 0,
       cache_hit_rate: cacheDenominator === 0 ? null : (cacheHits + cacheStale) / cacheDenominator,
+      eligible_cache_hit_rate:
+        eligibleDenominator === 0 ? null : eligibleHits / eligibleDenominator,
     };
   });
+}
+
+async function dashboardRouteKeys7d(env: Env, pool: string) {
+  const rows = await env.DB.prepare(queries.dashboardRouteKeys7d).bind(pool).all<{
+    route_kind: string;
+    route_key: string;
+    requests: number;
+    cache_hits: number | null;
+    cache_misses: number | null;
+    coalesced: number | null;
+    fallbacks: number | null;
+    service_errors: number | null;
+    latest_seen_at: string | null;
+  }>();
+  return rows.results.map((row) => ({
+    ...row,
+    cache_hits: row.cache_hits ?? 0,
+    cache_misses: row.cache_misses ?? 0,
+    coalesced: row.coalesced ?? 0,
+    fallbacks: row.fallbacks ?? 0,
+    service_errors: row.service_errors ?? 0,
+  }));
+}
+
+async function dashboardErrorCodes7d(env: Env, pool: string) {
+  const rows = await env.DB.prepare(queries.dashboardErrorCodes7d).bind(pool).all<{
+    outcome: string;
+    route_kind: string;
+    requests: number;
+    latest_seen_at: string | null;
+  }>();
+  return rows.results;
 }
 
 async function dashboardIdentityUsage(env: Env, pool: string) {
@@ -378,9 +446,11 @@ async function relayGitHub(
   if (policy === null) {
     throw new HttpError(404, "pool_not_found", "Pool not found");
   }
+  const coordinator = env.POOL_COORDINATOR.getByName(`pool:${relayRequest.pool}`);
   let route: ReturnType<typeof classifyRoute> | undefined;
   let cacheKey: string | undefined;
   let identity: Identity | undefined;
+  let cacheFillToken: string | undefined;
   let auditCacheStatus: "hit" | "miss" | "bypass" | "stale" | "unknown" = "unknown";
   let auditCacheable = false;
   try {
@@ -438,10 +508,30 @@ async function relayGitHub(
       });
     }
     if (cacheKey !== undefined) {
+      const fill = await coalesceGitHubCacheMiss(env, coordinator, cacheKey);
+      cacheFillToken = fill.leaseToken;
+      if (
+        fill.cached !== undefined &&
+        (await cachedIdentityAvailable(env, relayRequest.pool, route, fill.cached.identity))
+      ) {
+        return serveCachedGitHubResponse(env, ctx, {
+          requestId,
+          callerId: caller.id,
+          pool: relayRequest.pool,
+          route,
+          cached: fill.cached,
+          started,
+          cacheStatus: "hit",
+          coalesced: true,
+        });
+      }
+    }
+    if (cacheKey !== undefined) {
       const webGitHub = await callGitHubWeb(env, relayRequest, route);
       if (webGitHub !== undefined) {
         const sanitizedWebGitHub = sanitizeGitHubResponse(route, webGitHub);
         await publishGitHubCache(env, cacheKey, relayRequest, route, sanitizedWebGitHub);
+        await finishGitHubCacheFill(coordinator, cacheKey, cacheFillToken);
         ctx.waitUntil(
           insertAudit(env, {
             requestId,
@@ -503,6 +593,7 @@ async function relayGitHub(
       }
       if (cacheKey !== undefined) {
         await publishGitHubCache(env, cacheKey, relayRequest, route, github);
+        await finishGitHubCacheFill(coordinator, cacheKey, cacheFillToken);
       }
       ctx.waitUntil(
         insertAudit(env, {
@@ -537,7 +628,6 @@ async function relayGitHub(
     if (identities.length === 0) {
       throw new HttpError(503, "no_identity", "No active identity can serve this route");
     }
-    const coordinator = env.POOL_COORDINATOR.getByName(`pool:${relayRequest.pool}`);
     const attemptedIdentityIds = new Set<string>();
     let fallbackReason = "identity_pool_depleted";
     for (let attempt = 0; attempt < identities.length; attempt++) {
@@ -573,6 +663,7 @@ async function relayGitHub(
       }
       if (cacheKey !== undefined) {
         await publishGitHubCache(env, cacheKey, relayRequest, route, github, identity);
+        await finishGitHubCacheFill(coordinator, cacheKey, cacheFillToken);
       }
       ctx.waitUntil(
         Promise.all([
@@ -623,6 +714,7 @@ async function relayGitHub(
         cached !== undefined &&
         (await staleCachedIdentityAvailable(env, relayRequest.pool, route, cached.identity))
       ) {
+        await finishGitHubCacheFill(coordinator, cacheKey, cacheFillToken);
         return serveCachedGitHubResponse(env, ctx, {
           requestId,
           callerId: caller.id,
@@ -640,6 +732,9 @@ async function relayGitHub(
     });
   } catch (error) {
     const reported = localFallbackError(error) ?? error;
+    if (cacheKey !== undefined) {
+      await finishGitHubCacheFill(coordinator, cacheKey, cacheFillToken);
+    }
     const staleReason = staleFallbackReasonFromError(reported);
     if (cacheKey !== undefined && route !== undefined && staleReason !== undefined) {
       const cached = await readStaleGitHubCache(env, cacheKey, route);
@@ -660,6 +755,7 @@ async function relayGitHub(
       }
     }
     const audit = auditError(reported);
+    const fallbackReason = auditFallbackReason(reported);
     ctx.waitUntil(
       insertAudit(env, {
         requestId,
@@ -669,6 +765,7 @@ async function relayGitHub(
         routeKind: route?.kind ?? "denied",
         status: audit.status,
         errorCode: audit.code,
+        ...(fallbackReason === undefined ? {} : { fallbackReason }),
         durationMs: Date.now() - started,
         cacheStatus: auditCacheStatus,
         cacheable: auditCacheable,
@@ -684,6 +781,13 @@ function auditError(error: unknown): { status: number; code: string } {
     return { status: error.status, code: error.code };
   }
   return { status: 500, code: "internal_error" };
+}
+
+function auditFallbackReason(error: unknown): string | undefined {
+  if (!(error instanceof HttpError) || error.code !== "fallback_local") {
+    return undefined;
+  }
+  return typeof error.details?.reason === "string" ? error.details.reason : undefined;
 }
 
 async function serveCachedGitHubResponse(
@@ -702,6 +806,7 @@ async function serveCachedGitHubResponse(
     started: number;
     cacheStatus: "hit" | "stale";
     staleReason?: string;
+    coalesced?: boolean;
   },
 ): Promise<Response> {
   await ensurePublicGitHubRepo(env, params.route, params.cached.created_at);
@@ -718,6 +823,7 @@ async function serveCachedGitHubResponse(
       ...(params.cached.identity === undefined ? {} : { identityId: params.cached.identity.id }),
       cacheStatus: params.cacheStatus,
       cacheable: true,
+      ...(params.coalesced === undefined ? {} : { coalesced: params.coalesced }),
     }),
   );
   return jsonResponse({
@@ -733,6 +839,7 @@ async function serveCachedGitHubResponse(
       cache: params.cacheStatus,
       stale_ok: params.cacheStatus === "stale",
       ...(params.staleReason === undefined ? {} : { stale_reason: params.staleReason }),
+      ...(params.coalesced === true ? { coalesced: true } : {}),
       ...(params.cached.expires_at === undefined
         ? {}
         : { cache_expires_at: params.cached.expires_at }),

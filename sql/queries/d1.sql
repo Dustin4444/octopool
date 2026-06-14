@@ -53,8 +53,9 @@ WHERE identities.pool_id = ?1
 
 -- name: InsertAudit :exec
 INSERT INTO audit_events
-  (request_id, caller_id, pool_id, route_key, route_kind, identity_id, status, error_code, duration_ms, cache_status, cacheable)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);
+  (request_id, caller_id, pool_id, route_key, route_kind, identity_id, status, error_code,
+   fallback_reason, duration_ms, cache_status, cacheable, coalesced)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13);
 
 -- name: ReadGitHubCache :one
 SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at
@@ -96,10 +97,39 @@ WHERE cache_key IN (
 SELECT
   COUNT(*) AS requests_24h,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors_24h,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors_24h,
+  SUM(CASE
+    WHEN error_code = 'fallback_local'
+      AND COALESCE(fallback_reason, '') NOT IN (
+        'logs_denied', 'owner_denied', 'repo_not_public', 'repo_public_check_failed',
+        'route_denied', 'search_denied'
+      )
+    THEN 1 ELSE 0
+  END) AS fallbacks_24h,
+  SUM(CASE
+    WHEN error_code = 'fallback_local'
+      AND fallback_reason IN (
+        'logs_denied', 'owner_denied', 'repo_not_public', 'repo_public_check_failed',
+        'route_denied', 'search_denied'
+      )
+    THEN 1 ELSE 0
+  END) AS denied_24h,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits_24h,
   SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale_24h,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses_24h,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass_24h,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced_24h,
+  SUM(CASE
+    WHEN status < 400 AND cache_status IN ('hit', 'stale') THEN 1
+    ELSE 0
+  END) AS eligible_hits_24h,
+  SUM(CASE
+    WHEN status < 400 AND cache_status = 'miss' THEN 1
+    ELSE 0
+  END) AS eligible_misses_24h,
   AVG(duration_ms) AS avg_duration_ms_24h,
   MAX(created_at) AS latest_seen_at
 FROM audit_events
@@ -161,6 +191,7 @@ SELECT
   audit_events.identity_id,
   audit_events.status,
   audit_events.error_code,
+  audit_events.fallback_reason,
   audit_events.duration_ms
 FROM audit_events
 JOIN callers ON callers.id = audit_events.caller_id
@@ -173,16 +204,69 @@ SELECT
   route_kind,
   COUNT(*) AS requests,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors,
+  SUM(CASE WHEN error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
   SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
-  SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass
+  SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced,
+  SUM(CASE
+    WHEN status < 400 AND cache_status IN ('hit', 'stale') THEN 1
+    ELSE 0
+  END) AS eligible_hits,
+  SUM(CASE
+    WHEN status < 400 AND cache_status = 'miss' THEN 1
+    ELSE 0
+  END) AS eligible_misses
 FROM audit_events
 WHERE pool_id = ?1
   AND created_at >= datetime('now', '-24 hours')
 GROUP BY route_kind
 ORDER BY requests DESC
 LIMIT 12;
+
+-- name: DashboardRouteKeys7d :many
+SELECT
+  route_kind,
+  route_key,
+  COUNT(*) AS requests,
+  SUM(CASE WHEN cache_status IN ('hit', 'stale') THEN 1 ELSE 0 END) AS cache_hits,
+  SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced,
+  SUM(CASE WHEN error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors,
+  MAX(created_at) AS latest_seen_at
+FROM audit_events
+WHERE pool_id = ?1
+  AND created_at >= datetime('now', '-7 days')
+GROUP BY route_kind, route_key
+ORDER BY requests DESC, latest_seen_at DESC
+LIMIT 16;
+
+-- name: DashboardErrorCodes7d :many
+SELECT
+  CASE
+    WHEN error_code = 'fallback_local' THEN COALESCE(fallback_reason, error_code)
+    WHEN error_code IS NOT NULL THEN error_code
+    ELSE 'github_status_' || status
+  END AS outcome,
+  route_kind,
+  COUNT(*) AS requests,
+  MAX(created_at) AS latest_seen_at
+FROM audit_events
+WHERE pool_id = ?1
+  AND created_at >= datetime('now', '-7 days')
+  AND status >= 400
+GROUP BY outcome, route_kind
+ORDER BY requests DESC, latest_seen_at DESC
+LIMIT 16;
 
 -- name: DashboardIdentityUsage :many
 SELECT identity_id, COUNT(*) AS requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors
@@ -392,13 +476,23 @@ ON CONFLICT(resource) DO UPDATE SET
 SELECT
   COUNT(*) AS requests,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors,
+  SUM(CASE WHEN error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
   SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
-  SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests
+  SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests,
+  SUM(CASE
+    WHEN status < 400 AND cache_status IN ('hit', 'stale', 'miss') THEN 1
+    ELSE 0
+  END) AS eligible_cache_requests,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced
 FROM audit_events
 WHERE pool_id = ?1
   AND created_at >= datetime('now', ?2);
@@ -407,13 +501,23 @@ WHERE pool_id = ?1
 SELECT
   COUNT(*) AS requests,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors,
+  SUM(CASE WHEN error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
   SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
-  SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests
+  SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests,
+  SUM(CASE
+    WHEN status < 400 AND cache_status IN ('hit', 'stale', 'miss') THEN 1
+    ELSE 0
+  END) AS eligible_cache_requests,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced
 FROM audit_events
 WHERE pool_id = ?1
   AND created_at >= datetime('now', ?2)
@@ -424,6 +528,11 @@ SELECT
   route_kind,
   COUNT(*) AS requests,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors,
+  SUM(CASE WHEN error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
   SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
@@ -431,6 +540,11 @@ SELECT
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
   SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests,
+  SUM(CASE
+    WHEN status < 400 AND cache_status IN ('hit', 'stale', 'miss') THEN 1
+    ELSE 0
+  END) AS eligible_cache_requests,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced,
   MAX(created_at) AS latest_seen_at
 FROM audit_events
 WHERE pool_id = ?1
@@ -444,6 +558,11 @@ SELECT
   route_kind,
   COUNT(*) AS requests,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors,
+  SUM(CASE WHEN error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
   SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
@@ -451,6 +570,11 @@ SELECT
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
   SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests,
+  SUM(CASE
+    WHEN status < 400 AND cache_status IN ('hit', 'stale', 'miss') THEN 1
+    ELSE 0
+  END) AS eligible_cache_requests,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced,
   MAX(created_at) AS latest_seen_at
 FROM audit_events
 WHERE pool_id = ?1

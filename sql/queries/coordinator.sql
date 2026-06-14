@@ -24,6 +24,13 @@ CREATE TABLE IF NOT EXISTS cooldowns (
   PRIMARY KEY (identity_id, route_key)
 );
 
+-- name: CreateCacheFillsTable :exec
+CREATE TABLE IF NOT EXISTS cache_fills (
+  cache_key TEXT PRIMARY KEY,
+  owner_token TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+
 -- name: GetLease :one
 SELECT identity_id, expires_at
 FROM leases
@@ -80,3 +87,20 @@ SELECT expires_at
 FROM cooldowns
 WHERE identity_id = ?
   AND route_key = ?;
+
+-- name: GetCacheFill :one
+SELECT owner_token, expires_at
+FROM cache_fills
+WHERE cache_key = ?;
+
+-- name: UpsertCacheFill :exec
+INSERT INTO cache_fills (cache_key, owner_token, expires_at)
+VALUES (?1, ?2, ?3)
+ON CONFLICT(cache_key) DO UPDATE SET
+  owner_token = excluded.owner_token,
+  expires_at = excluded.expires_at;
+
+-- name: DeleteCacheFill :exec
+DELETE FROM cache_fills
+WHERE cache_key = ?1
+  AND owner_token = ?2;

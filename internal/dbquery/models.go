@@ -9,18 +9,26 @@ import (
 )
 
 type AuditEvent struct {
-	RequestID   string         `json:"request_id"`
-	CallerID    string         `json:"caller_id"`
-	PoolID      string         `json:"pool_id"`
-	RouteKey    string         `json:"route_key"`
-	RouteKind   string         `json:"route_kind"`
-	IdentityID  sql.NullString `json:"identity_id"`
-	Status      int64          `json:"status"`
-	ErrorCode   sql.NullString `json:"error_code"`
-	CreatedAt   string         `json:"created_at"`
-	DurationMs  int64          `json:"duration_ms"`
-	CacheStatus string         `json:"cache_status"`
-	Cacheable   int64          `json:"cacheable"`
+	RequestID      string         `json:"request_id"`
+	CallerID       string         `json:"caller_id"`
+	PoolID         string         `json:"pool_id"`
+	RouteKey       string         `json:"route_key"`
+	RouteKind      string         `json:"route_kind"`
+	IdentityID     sql.NullString `json:"identity_id"`
+	Status         int64          `json:"status"`
+	ErrorCode      sql.NullString `json:"error_code"`
+	CreatedAt      string         `json:"created_at"`
+	DurationMs     int64          `json:"duration_ms"`
+	CacheStatus    string         `json:"cache_status"`
+	Cacheable      int64          `json:"cacheable"`
+	FallbackReason sql.NullString `json:"fallback_reason"`
+	Coalesced      int64          `json:"coalesced"`
+}
+
+type CacheFill struct {
+	CacheKey   string `json:"cache_key"`
+	OwnerToken string `json:"owner_token"`
+	ExpiresAt  int64  `json:"expires_at"`
 }
 
 type Caller struct {

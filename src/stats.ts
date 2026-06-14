@@ -12,6 +12,8 @@ export type StatsWindow = {
 export type CacheAggregate = {
   requests: number;
   errors: number;
+  service_errors: number;
+  fallbacks: number;
   avg_duration_ms: number | null;
   cache_hits: number;
   cache_stale: number;
@@ -19,9 +21,12 @@ export type CacheAggregate = {
   cache_bypass: number;
   cache_unknown: number;
   cacheable_requests: number;
+  eligible_cache_requests: number;
   cache_hit_rate: number | null;
   cacheable_hit_rate: number | null;
+  eligible_cache_hit_rate: number | null;
   bypass_rate: number | null;
+  coalesced: number;
   saved_github_requests: number;
   backend_requests: number;
 };
@@ -29,6 +34,8 @@ export type CacheAggregate = {
 export type AggregateRow = {
   requests: number;
   errors: number | null;
+  service_errors: number | null;
+  fallbacks: number | null;
   avg_duration_ms: number | null;
   cache_hits: number | null;
   cache_stale: number | null;
@@ -36,6 +43,8 @@ export type AggregateRow = {
   cache_bypass: number | null;
   cache_unknown: number | null;
   cacheable_requests: number | null;
+  eligible_cache_requests: number | null;
+  coalesced: number | null;
 };
 
 type RouteRow = AggregateRow & {
@@ -148,9 +157,12 @@ export function normalizeAggregate(row: AggregateRow | null): CacheAggregate {
   const cacheBypass = row?.cache_bypass ?? 0;
   const cacheUnknown = row?.cache_unknown ?? 0;
   const cacheableRequests = row?.cacheable_requests ?? 0;
+  const eligibleCacheRequests = row?.eligible_cache_requests ?? 0;
   return {
     requests,
     errors: row?.errors ?? 0,
+    service_errors: row?.service_errors ?? 0,
+    fallbacks: row?.fallbacks ?? 0,
     avg_duration_ms: row?.avg_duration_ms ?? null,
     cache_hits: cacheHits,
     cache_stale: cacheStale,
@@ -158,9 +170,12 @@ export function normalizeAggregate(row: AggregateRow | null): CacheAggregate {
     cache_bypass: cacheBypass,
     cache_unknown: cacheUnknown,
     cacheable_requests: cacheableRequests,
+    eligible_cache_requests: eligibleCacheRequests,
     cache_hit_rate: denominator === 0 ? null : saved / denominator,
     cacheable_hit_rate: cacheableRequests === 0 ? null : saved / cacheableRequests,
+    eligible_cache_hit_rate: eligibleCacheRequests === 0 ? null : saved / eligibleCacheRequests,
     bypass_rate: requests === 0 ? null : cacheBypass / requests,
+    coalesced: row?.coalesced ?? 0,
     saved_github_requests: saved,
     backend_requests: cacheMisses + cacheBypass,
   };

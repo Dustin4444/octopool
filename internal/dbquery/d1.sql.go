@@ -151,6 +151,60 @@ func (q *Queries) DashboardCacheRoutes(ctx context.Context, poolID string) ([]Da
 	return items, nil
 }
 
+const dashboardErrorCodes7d = `-- name: DashboardErrorCodes7d :many
+SELECT
+  CASE
+    WHEN error_code = 'fallback_local' THEN COALESCE(fallback_reason, error_code)
+    WHEN error_code IS NOT NULL THEN error_code
+    ELSE 'github_status_' || status
+  END AS outcome,
+  route_kind,
+  COUNT(*) AS requests,
+  MAX(created_at) AS latest_seen_at
+FROM audit_events
+WHERE pool_id = ?1
+  AND created_at >= datetime('now', '-7 days')
+  AND status >= 400
+GROUP BY outcome, route_kind
+ORDER BY requests DESC, latest_seen_at DESC
+LIMIT 16
+`
+
+type DashboardErrorCodes7dRow struct {
+	Outcome      interface{} `json:"outcome"`
+	RouteKind    string      `json:"route_kind"`
+	Requests     int64       `json:"requests"`
+	LatestSeenAt interface{} `json:"latest_seen_at"`
+}
+
+func (q *Queries) DashboardErrorCodes7d(ctx context.Context, poolID string) ([]DashboardErrorCodes7dRow, error) {
+	rows, err := q.db.QueryContext(ctx, dashboardErrorCodes7d, poolID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DashboardErrorCodes7dRow
+	for rows.Next() {
+		var i DashboardErrorCodes7dRow
+		if err := rows.Scan(
+			&i.Outcome,
+			&i.RouteKind,
+			&i.Requests,
+			&i.LatestSeenAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const dashboardIdentities = `-- name: DashboardIdentities :many
 SELECT id, kind, login, installation_id, status, weight, updated_at
 FROM identities
@@ -269,6 +323,7 @@ SELECT
   audit_events.identity_id,
   audit_events.status,
   audit_events.error_code,
+  audit_events.fallback_reason,
   audit_events.duration_ms
 FROM audit_events
 JOIN callers ON callers.id = audit_events.caller_id
@@ -278,14 +333,15 @@ LIMIT 20
 `
 
 type DashboardRecentRow struct {
-	CreatedAt   string         `json:"created_at"`
-	GithubLogin string         `json:"github_login"`
-	RouteKind   string         `json:"route_kind"`
-	RouteKey    string         `json:"route_key"`
-	IdentityID  sql.NullString `json:"identity_id"`
-	Status      int64          `json:"status"`
-	ErrorCode   sql.NullString `json:"error_code"`
-	DurationMs  int64          `json:"duration_ms"`
+	CreatedAt      string         `json:"created_at"`
+	GithubLogin    string         `json:"github_login"`
+	RouteKind      string         `json:"route_kind"`
+	RouteKey       string         `json:"route_key"`
+	IdentityID     sql.NullString `json:"identity_id"`
+	Status         int64          `json:"status"`
+	ErrorCode      sql.NullString `json:"error_code"`
+	FallbackReason sql.NullString `json:"fallback_reason"`
+	DurationMs     int64          `json:"duration_ms"`
 }
 
 func (q *Queries) DashboardRecent(ctx context.Context, poolID string) ([]DashboardRecentRow, error) {
@@ -305,7 +361,75 @@ func (q *Queries) DashboardRecent(ctx context.Context, poolID string) ([]Dashboa
 			&i.IdentityID,
 			&i.Status,
 			&i.ErrorCode,
+			&i.FallbackReason,
 			&i.DurationMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const dashboardRouteKeys7d = `-- name: DashboardRouteKeys7d :many
+SELECT
+  route_kind,
+  route_key,
+  COUNT(*) AS requests,
+  SUM(CASE WHEN cache_status IN ('hit', 'stale') THEN 1 ELSE 0 END) AS cache_hits,
+  SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced,
+  SUM(CASE WHEN error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors,
+  MAX(created_at) AS latest_seen_at
+FROM audit_events
+WHERE pool_id = ?1
+  AND created_at >= datetime('now', '-7 days')
+GROUP BY route_kind, route_key
+ORDER BY requests DESC, latest_seen_at DESC
+LIMIT 16
+`
+
+type DashboardRouteKeys7dRow struct {
+	RouteKind     string          `json:"route_kind"`
+	RouteKey      string          `json:"route_key"`
+	Requests      int64           `json:"requests"`
+	CacheHits     sql.NullFloat64 `json:"cache_hits"`
+	CacheMisses   sql.NullFloat64 `json:"cache_misses"`
+	Coalesced     sql.NullFloat64 `json:"coalesced"`
+	Fallbacks     sql.NullFloat64 `json:"fallbacks"`
+	ServiceErrors sql.NullFloat64 `json:"service_errors"`
+	LatestSeenAt  interface{}     `json:"latest_seen_at"`
+}
+
+func (q *Queries) DashboardRouteKeys7d(ctx context.Context, poolID string) ([]DashboardRouteKeys7dRow, error) {
+	rows, err := q.db.QueryContext(ctx, dashboardRouteKeys7d, poolID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DashboardRouteKeys7dRow
+	for rows.Next() {
+		var i DashboardRouteKeys7dRow
+		if err := rows.Scan(
+			&i.RouteKind,
+			&i.RouteKey,
+			&i.Requests,
+			&i.CacheHits,
+			&i.CacheMisses,
+			&i.Coalesced,
+			&i.Fallbacks,
+			&i.ServiceErrors,
+			&i.LatestSeenAt,
 		); err != nil {
 			return nil, err
 		}
@@ -325,10 +449,24 @@ SELECT
   route_kind,
   COUNT(*) AS requests,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors,
+  SUM(CASE WHEN error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
   SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
-  SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass
+  SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced,
+  SUM(CASE
+    WHEN status < 400 AND cache_status IN ('hit', 'stale') THEN 1
+    ELSE 0
+  END) AS eligible_hits,
+  SUM(CASE
+    WHEN status < 400 AND cache_status = 'miss' THEN 1
+    ELSE 0
+  END) AS eligible_misses
 FROM audit_events
 WHERE pool_id = ?1
   AND created_at >= datetime('now', '-24 hours')
@@ -338,13 +476,18 @@ LIMIT 12
 `
 
 type DashboardRouteUsageRow struct {
-	RouteKind   string          `json:"route_kind"`
-	Requests    int64           `json:"requests"`
-	Errors      sql.NullFloat64 `json:"errors"`
-	CacheHits   sql.NullFloat64 `json:"cache_hits"`
-	CacheStale  sql.NullFloat64 `json:"cache_stale"`
-	CacheMisses sql.NullFloat64 `json:"cache_misses"`
-	CacheBypass sql.NullFloat64 `json:"cache_bypass"`
+	RouteKind      string          `json:"route_kind"`
+	Requests       int64           `json:"requests"`
+	Errors         sql.NullFloat64 `json:"errors"`
+	ServiceErrors  sql.NullFloat64 `json:"service_errors"`
+	Fallbacks      sql.NullFloat64 `json:"fallbacks"`
+	CacheHits      sql.NullFloat64 `json:"cache_hits"`
+	CacheStale     sql.NullFloat64 `json:"cache_stale"`
+	CacheMisses    sql.NullFloat64 `json:"cache_misses"`
+	CacheBypass    sql.NullFloat64 `json:"cache_bypass"`
+	Coalesced      sql.NullFloat64 `json:"coalesced"`
+	EligibleHits   sql.NullFloat64 `json:"eligible_hits"`
+	EligibleMisses sql.NullFloat64 `json:"eligible_misses"`
 }
 
 func (q *Queries) DashboardRouteUsage(ctx context.Context, poolID string) ([]DashboardRouteUsageRow, error) {
@@ -360,10 +503,15 @@ func (q *Queries) DashboardRouteUsage(ctx context.Context, poolID string) ([]Das
 			&i.RouteKind,
 			&i.Requests,
 			&i.Errors,
+			&i.ServiceErrors,
+			&i.Fallbacks,
 			&i.CacheHits,
 			&i.CacheStale,
 			&i.CacheMisses,
 			&i.CacheBypass,
+			&i.Coalesced,
+			&i.EligibleHits,
+			&i.EligibleMisses,
 		); err != nil {
 			return nil, err
 		}
@@ -382,10 +530,39 @@ const dashboardUsage = `-- name: DashboardUsage :one
 SELECT
   COUNT(*) AS requests_24h,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors_24h,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors_24h,
+  SUM(CASE
+    WHEN error_code = 'fallback_local'
+      AND COALESCE(fallback_reason, '') NOT IN (
+        'logs_denied', 'owner_denied', 'repo_not_public', 'repo_public_check_failed',
+        'route_denied', 'search_denied'
+      )
+    THEN 1 ELSE 0
+  END) AS fallbacks_24h,
+  SUM(CASE
+    WHEN error_code = 'fallback_local'
+      AND fallback_reason IN (
+        'logs_denied', 'owner_denied', 'repo_not_public', 'repo_public_check_failed',
+        'route_denied', 'search_denied'
+      )
+    THEN 1 ELSE 0
+  END) AS denied_24h,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits_24h,
   SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale_24h,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses_24h,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass_24h,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced_24h,
+  SUM(CASE
+    WHEN status < 400 AND cache_status IN ('hit', 'stale') THEN 1
+    ELSE 0
+  END) AS eligible_hits_24h,
+  SUM(CASE
+    WHEN status < 400 AND cache_status = 'miss' THEN 1
+    ELSE 0
+  END) AS eligible_misses_24h,
   AVG(duration_ms) AS avg_duration_ms_24h,
   MAX(created_at) AS latest_seen_at
 FROM audit_events
@@ -394,14 +571,20 @@ WHERE pool_id = ?1
 `
 
 type DashboardUsageRow struct {
-	Requests24h      int64           `json:"requests_24h"`
-	Errors24h        sql.NullFloat64 `json:"errors_24h"`
-	CacheHits24h     sql.NullFloat64 `json:"cache_hits_24h"`
-	CacheStale24h    sql.NullFloat64 `json:"cache_stale_24h"`
-	CacheMisses24h   sql.NullFloat64 `json:"cache_misses_24h"`
-	CacheBypass24h   sql.NullFloat64 `json:"cache_bypass_24h"`
-	AvgDurationMs24h sql.NullFloat64 `json:"avg_duration_ms_24h"`
-	LatestSeenAt     interface{}     `json:"latest_seen_at"`
+	Requests24h       int64           `json:"requests_24h"`
+	Errors24h         sql.NullFloat64 `json:"errors_24h"`
+	ServiceErrors24h  sql.NullFloat64 `json:"service_errors_24h"`
+	Fallbacks24h      sql.NullFloat64 `json:"fallbacks_24h"`
+	Denied24h         sql.NullFloat64 `json:"denied_24h"`
+	CacheHits24h      sql.NullFloat64 `json:"cache_hits_24h"`
+	CacheStale24h     sql.NullFloat64 `json:"cache_stale_24h"`
+	CacheMisses24h    sql.NullFloat64 `json:"cache_misses_24h"`
+	CacheBypass24h    sql.NullFloat64 `json:"cache_bypass_24h"`
+	Coalesced24h      sql.NullFloat64 `json:"coalesced_24h"`
+	EligibleHits24h   sql.NullFloat64 `json:"eligible_hits_24h"`
+	EligibleMisses24h sql.NullFloat64 `json:"eligible_misses_24h"`
+	AvgDurationMs24h  sql.NullFloat64 `json:"avg_duration_ms_24h"`
+	LatestSeenAt      interface{}     `json:"latest_seen_at"`
 }
 
 func (q *Queries) DashboardUsage(ctx context.Context, poolID string) (DashboardUsageRow, error) {
@@ -410,10 +593,16 @@ func (q *Queries) DashboardUsage(ctx context.Context, poolID string) (DashboardU
 	err := row.Scan(
 		&i.Requests24h,
 		&i.Errors24h,
+		&i.ServiceErrors24h,
+		&i.Fallbacks24h,
+		&i.Denied24h,
 		&i.CacheHits24h,
 		&i.CacheStale24h,
 		&i.CacheMisses24h,
 		&i.CacheBypass24h,
+		&i.Coalesced24h,
+		&i.EligibleHits24h,
+		&i.EligibleMisses24h,
 		&i.AvgDurationMs24h,
 		&i.LatestSeenAt,
 	)
@@ -746,22 +935,25 @@ func (q *Queries) GetWebSession(ctx context.Context, arg GetWebSessionParams) (G
 
 const insertAudit = `-- name: InsertAudit :exec
 INSERT INTO audit_events
-  (request_id, caller_id, pool_id, route_key, route_kind, identity_id, status, error_code, duration_ms, cache_status, cacheable)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+  (request_id, caller_id, pool_id, route_key, route_kind, identity_id, status, error_code,
+   fallback_reason, duration_ms, cache_status, cacheable, coalesced)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
 `
 
 type InsertAuditParams struct {
-	RequestID   string         `json:"request_id"`
-	CallerID    string         `json:"caller_id"`
-	PoolID      string         `json:"pool_id"`
-	RouteKey    string         `json:"route_key"`
-	RouteKind   string         `json:"route_kind"`
-	IdentityID  sql.NullString `json:"identity_id"`
-	Status      int64          `json:"status"`
-	ErrorCode   sql.NullString `json:"error_code"`
-	DurationMs  int64          `json:"duration_ms"`
-	CacheStatus string         `json:"cache_status"`
-	Cacheable   int64          `json:"cacheable"`
+	RequestID      string         `json:"request_id"`
+	CallerID       string         `json:"caller_id"`
+	PoolID         string         `json:"pool_id"`
+	RouteKey       string         `json:"route_key"`
+	RouteKind      string         `json:"route_kind"`
+	IdentityID     sql.NullString `json:"identity_id"`
+	Status         int64          `json:"status"`
+	ErrorCode      sql.NullString `json:"error_code"`
+	FallbackReason sql.NullString `json:"fallback_reason"`
+	DurationMs     int64          `json:"duration_ms"`
+	CacheStatus    string         `json:"cache_status"`
+	Cacheable      int64          `json:"cacheable"`
+	Coalesced      int64          `json:"coalesced"`
 }
 
 func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error {
@@ -774,9 +966,11 @@ func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error 
 		arg.IdentityID,
 		arg.Status,
 		arg.ErrorCode,
+		arg.FallbackReason,
 		arg.DurationMs,
 		arg.CacheStatus,
 		arg.Cacheable,
+		arg.Coalesced,
 	)
 	return err
 }
@@ -1131,13 +1325,23 @@ const statsAggregateCaller = `-- name: StatsAggregateCaller :one
 SELECT
   COUNT(*) AS requests,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors,
+  SUM(CASE WHEN error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
   SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
-  SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests
+  SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests,
+  SUM(CASE
+    WHEN status < 400 AND cache_status IN ('hit', 'stale', 'miss') THEN 1
+    ELSE 0
+  END) AS eligible_cache_requests,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced
 FROM audit_events
 WHERE pool_id = ?1
   AND created_at >= datetime('now', ?2)
@@ -1151,15 +1355,19 @@ type StatsAggregateCallerParams struct {
 }
 
 type StatsAggregateCallerRow struct {
-	Requests          int64           `json:"requests"`
-	Errors            sql.NullFloat64 `json:"errors"`
-	AvgDurationMs     sql.NullFloat64 `json:"avg_duration_ms"`
-	CacheHits         sql.NullFloat64 `json:"cache_hits"`
-	CacheStale        sql.NullFloat64 `json:"cache_stale"`
-	CacheMisses       sql.NullFloat64 `json:"cache_misses"`
-	CacheBypass       sql.NullFloat64 `json:"cache_bypass"`
-	CacheUnknown      sql.NullFloat64 `json:"cache_unknown"`
-	CacheableRequests sql.NullFloat64 `json:"cacheable_requests"`
+	Requests              int64           `json:"requests"`
+	Errors                sql.NullFloat64 `json:"errors"`
+	ServiceErrors         sql.NullFloat64 `json:"service_errors"`
+	Fallbacks             sql.NullFloat64 `json:"fallbacks"`
+	AvgDurationMs         sql.NullFloat64 `json:"avg_duration_ms"`
+	CacheHits             sql.NullFloat64 `json:"cache_hits"`
+	CacheStale            sql.NullFloat64 `json:"cache_stale"`
+	CacheMisses           sql.NullFloat64 `json:"cache_misses"`
+	CacheBypass           sql.NullFloat64 `json:"cache_bypass"`
+	CacheUnknown          sql.NullFloat64 `json:"cache_unknown"`
+	CacheableRequests     sql.NullFloat64 `json:"cacheable_requests"`
+	EligibleCacheRequests sql.NullFloat64 `json:"eligible_cache_requests"`
+	Coalesced             sql.NullFloat64 `json:"coalesced"`
 }
 
 func (q *Queries) StatsAggregateCaller(ctx context.Context, arg StatsAggregateCallerParams) (StatsAggregateCallerRow, error) {
@@ -1168,6 +1376,8 @@ func (q *Queries) StatsAggregateCaller(ctx context.Context, arg StatsAggregateCa
 	err := row.Scan(
 		&i.Requests,
 		&i.Errors,
+		&i.ServiceErrors,
+		&i.Fallbacks,
 		&i.AvgDurationMs,
 		&i.CacheHits,
 		&i.CacheStale,
@@ -1175,6 +1385,8 @@ func (q *Queries) StatsAggregateCaller(ctx context.Context, arg StatsAggregateCa
 		&i.CacheBypass,
 		&i.CacheUnknown,
 		&i.CacheableRequests,
+		&i.EligibleCacheRequests,
+		&i.Coalesced,
 	)
 	return i, err
 }
@@ -1183,13 +1395,23 @@ const statsAggregatePool = `-- name: StatsAggregatePool :one
 SELECT
   COUNT(*) AS requests,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors,
+  SUM(CASE WHEN error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
   SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
   SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
-  SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests
+  SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests,
+  SUM(CASE
+    WHEN status < 400 AND cache_status IN ('hit', 'stale', 'miss') THEN 1
+    ELSE 0
+  END) AS eligible_cache_requests,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced
 FROM audit_events
 WHERE pool_id = ?1
   AND created_at >= datetime('now', ?2)
@@ -1201,15 +1423,19 @@ type StatsAggregatePoolParams struct {
 }
 
 type StatsAggregatePoolRow struct {
-	Requests          int64           `json:"requests"`
-	Errors            sql.NullFloat64 `json:"errors"`
-	AvgDurationMs     sql.NullFloat64 `json:"avg_duration_ms"`
-	CacheHits         sql.NullFloat64 `json:"cache_hits"`
-	CacheStale        sql.NullFloat64 `json:"cache_stale"`
-	CacheMisses       sql.NullFloat64 `json:"cache_misses"`
-	CacheBypass       sql.NullFloat64 `json:"cache_bypass"`
-	CacheUnknown      sql.NullFloat64 `json:"cache_unknown"`
-	CacheableRequests sql.NullFloat64 `json:"cacheable_requests"`
+	Requests              int64           `json:"requests"`
+	Errors                sql.NullFloat64 `json:"errors"`
+	ServiceErrors         sql.NullFloat64 `json:"service_errors"`
+	Fallbacks             sql.NullFloat64 `json:"fallbacks"`
+	AvgDurationMs         sql.NullFloat64 `json:"avg_duration_ms"`
+	CacheHits             sql.NullFloat64 `json:"cache_hits"`
+	CacheStale            sql.NullFloat64 `json:"cache_stale"`
+	CacheMisses           sql.NullFloat64 `json:"cache_misses"`
+	CacheBypass           sql.NullFloat64 `json:"cache_bypass"`
+	CacheUnknown          sql.NullFloat64 `json:"cache_unknown"`
+	CacheableRequests     sql.NullFloat64 `json:"cacheable_requests"`
+	EligibleCacheRequests sql.NullFloat64 `json:"eligible_cache_requests"`
+	Coalesced             sql.NullFloat64 `json:"coalesced"`
 }
 
 func (q *Queries) StatsAggregatePool(ctx context.Context, arg StatsAggregatePoolParams) (StatsAggregatePoolRow, error) {
@@ -1218,6 +1444,8 @@ func (q *Queries) StatsAggregatePool(ctx context.Context, arg StatsAggregatePool
 	err := row.Scan(
 		&i.Requests,
 		&i.Errors,
+		&i.ServiceErrors,
+		&i.Fallbacks,
 		&i.AvgDurationMs,
 		&i.CacheHits,
 		&i.CacheStale,
@@ -1225,6 +1453,8 @@ func (q *Queries) StatsAggregatePool(ctx context.Context, arg StatsAggregatePool
 		&i.CacheBypass,
 		&i.CacheUnknown,
 		&i.CacheableRequests,
+		&i.EligibleCacheRequests,
+		&i.Coalesced,
 	)
 	return i, err
 }
@@ -1263,6 +1493,11 @@ SELECT
   route_kind,
   COUNT(*) AS requests,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors,
+  SUM(CASE WHEN error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
   SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
@@ -1270,6 +1505,11 @@ SELECT
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
   SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests,
+  SUM(CASE
+    WHEN status < 400 AND cache_status IN ('hit', 'stale', 'miss') THEN 1
+    ELSE 0
+  END) AS eligible_cache_requests,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced,
   MAX(created_at) AS latest_seen_at
 FROM audit_events
 WHERE pool_id = ?1
@@ -1287,17 +1527,21 @@ type StatsRoutesCallerParams struct {
 }
 
 type StatsRoutesCallerRow struct {
-	RouteKind         string          `json:"route_kind"`
-	Requests          int64           `json:"requests"`
-	Errors            sql.NullFloat64 `json:"errors"`
-	AvgDurationMs     sql.NullFloat64 `json:"avg_duration_ms"`
-	CacheHits         sql.NullFloat64 `json:"cache_hits"`
-	CacheStale        sql.NullFloat64 `json:"cache_stale"`
-	CacheMisses       sql.NullFloat64 `json:"cache_misses"`
-	CacheBypass       sql.NullFloat64 `json:"cache_bypass"`
-	CacheUnknown      sql.NullFloat64 `json:"cache_unknown"`
-	CacheableRequests sql.NullFloat64 `json:"cacheable_requests"`
-	LatestSeenAt      interface{}     `json:"latest_seen_at"`
+	RouteKind             string          `json:"route_kind"`
+	Requests              int64           `json:"requests"`
+	Errors                sql.NullFloat64 `json:"errors"`
+	ServiceErrors         sql.NullFloat64 `json:"service_errors"`
+	Fallbacks             sql.NullFloat64 `json:"fallbacks"`
+	AvgDurationMs         sql.NullFloat64 `json:"avg_duration_ms"`
+	CacheHits             sql.NullFloat64 `json:"cache_hits"`
+	CacheStale            sql.NullFloat64 `json:"cache_stale"`
+	CacheMisses           sql.NullFloat64 `json:"cache_misses"`
+	CacheBypass           sql.NullFloat64 `json:"cache_bypass"`
+	CacheUnknown          sql.NullFloat64 `json:"cache_unknown"`
+	CacheableRequests     sql.NullFloat64 `json:"cacheable_requests"`
+	EligibleCacheRequests sql.NullFloat64 `json:"eligible_cache_requests"`
+	Coalesced             sql.NullFloat64 `json:"coalesced"`
+	LatestSeenAt          interface{}     `json:"latest_seen_at"`
 }
 
 func (q *Queries) StatsRoutesCaller(ctx context.Context, arg StatsRoutesCallerParams) ([]StatsRoutesCallerRow, error) {
@@ -1313,6 +1557,8 @@ func (q *Queries) StatsRoutesCaller(ctx context.Context, arg StatsRoutesCallerPa
 			&i.RouteKind,
 			&i.Requests,
 			&i.Errors,
+			&i.ServiceErrors,
+			&i.Fallbacks,
 			&i.AvgDurationMs,
 			&i.CacheHits,
 			&i.CacheStale,
@@ -1320,6 +1566,8 @@ func (q *Queries) StatsRoutesCaller(ctx context.Context, arg StatsRoutesCallerPa
 			&i.CacheBypass,
 			&i.CacheUnknown,
 			&i.CacheableRequests,
+			&i.EligibleCacheRequests,
+			&i.Coalesced,
 			&i.LatestSeenAt,
 		); err != nil {
 			return nil, err
@@ -1340,6 +1588,11 @@ SELECT
   route_kind,
   COUNT(*) AS requests,
   SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+  SUM(CASE
+    WHEN status >= 400 AND COALESCE(error_code, '') <> 'fallback_local' THEN 1
+    ELSE 0
+  END) AS service_errors,
+  SUM(CASE WHEN error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
   SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
@@ -1347,6 +1600,11 @@ SELECT
   SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
   SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
   SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests,
+  SUM(CASE
+    WHEN status < 400 AND cache_status IN ('hit', 'stale', 'miss') THEN 1
+    ELSE 0
+  END) AS eligible_cache_requests,
+  SUM(CASE WHEN coalesced = 1 THEN 1 ELSE 0 END) AS coalesced,
   MAX(created_at) AS latest_seen_at
 FROM audit_events
 WHERE pool_id = ?1
@@ -1362,17 +1620,21 @@ type StatsRoutesPoolParams struct {
 }
 
 type StatsRoutesPoolRow struct {
-	RouteKind         string          `json:"route_kind"`
-	Requests          int64           `json:"requests"`
-	Errors            sql.NullFloat64 `json:"errors"`
-	AvgDurationMs     sql.NullFloat64 `json:"avg_duration_ms"`
-	CacheHits         sql.NullFloat64 `json:"cache_hits"`
-	CacheStale        sql.NullFloat64 `json:"cache_stale"`
-	CacheMisses       sql.NullFloat64 `json:"cache_misses"`
-	CacheBypass       sql.NullFloat64 `json:"cache_bypass"`
-	CacheUnknown      sql.NullFloat64 `json:"cache_unknown"`
-	CacheableRequests sql.NullFloat64 `json:"cacheable_requests"`
-	LatestSeenAt      interface{}     `json:"latest_seen_at"`
+	RouteKind             string          `json:"route_kind"`
+	Requests              int64           `json:"requests"`
+	Errors                sql.NullFloat64 `json:"errors"`
+	ServiceErrors         sql.NullFloat64 `json:"service_errors"`
+	Fallbacks             sql.NullFloat64 `json:"fallbacks"`
+	AvgDurationMs         sql.NullFloat64 `json:"avg_duration_ms"`
+	CacheHits             sql.NullFloat64 `json:"cache_hits"`
+	CacheStale            sql.NullFloat64 `json:"cache_stale"`
+	CacheMisses           sql.NullFloat64 `json:"cache_misses"`
+	CacheBypass           sql.NullFloat64 `json:"cache_bypass"`
+	CacheUnknown          sql.NullFloat64 `json:"cache_unknown"`
+	CacheableRequests     sql.NullFloat64 `json:"cacheable_requests"`
+	EligibleCacheRequests sql.NullFloat64 `json:"eligible_cache_requests"`
+	Coalesced             sql.NullFloat64 `json:"coalesced"`
+	LatestSeenAt          interface{}     `json:"latest_seen_at"`
 }
 
 func (q *Queries) StatsRoutesPool(ctx context.Context, arg StatsRoutesPoolParams) ([]StatsRoutesPoolRow, error) {
@@ -1388,6 +1650,8 @@ func (q *Queries) StatsRoutesPool(ctx context.Context, arg StatsRoutesPoolParams
 			&i.RouteKind,
 			&i.Requests,
 			&i.Errors,
+			&i.ServiceErrors,
+			&i.Fallbacks,
 			&i.AvgDurationMs,
 			&i.CacheHits,
 			&i.CacheStale,
@@ -1395,6 +1659,8 @@ func (q *Queries) StatsRoutesPool(ctx context.Context, arg StatsRoutesPoolParams
 			&i.CacheBypass,
 			&i.CacheUnknown,
 			&i.CacheableRequests,
+			&i.EligibleCacheRequests,
+			&i.Coalesced,
 			&i.LatestSeenAt,
 		); err != nil {
 			return nil, err

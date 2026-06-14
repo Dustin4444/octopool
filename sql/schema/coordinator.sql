@@ -20,3 +20,9 @@ CREATE TABLE IF NOT EXISTS cooldowns (
   expires_at INTEGER NOT NULL,
   PRIMARY KEY (identity_id, route_key)
 );
+
+CREATE TABLE IF NOT EXISTS cache_fills (
+  cache_key TEXT PRIMARY KEY,
+  owner_token TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);

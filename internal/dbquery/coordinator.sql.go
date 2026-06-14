@@ -110,6 +110,19 @@ func (q *Queries) CoordinatorRates(ctx context.Context, resetAt int64) ([]RateSt
 	return items, nil
 }
 
+const createCacheFillsTable = `-- name: CreateCacheFillsTable :exec
+CREATE TABLE IF NOT EXISTS cache_fills (
+  cache_key TEXT PRIMARY KEY,
+  owner_token TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+)
+`
+
+func (q *Queries) CreateCacheFillsTable(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, createCacheFillsTable)
+	return err
+}
+
 const createCooldownsTable = `-- name: CreateCooldownsTable :exec
 CREATE TABLE IF NOT EXISTS cooldowns (
   identity_id TEXT NOT NULL,
@@ -152,6 +165,40 @@ CREATE TABLE IF NOT EXISTS rate_states (
 func (q *Queries) CreateRateStatesTable(ctx context.Context) error {
 	_, err := q.db.ExecContext(ctx, createRateStatesTable)
 	return err
+}
+
+const deleteCacheFill = `-- name: DeleteCacheFill :exec
+DELETE FROM cache_fills
+WHERE cache_key = ?1
+  AND owner_token = ?2
+`
+
+type DeleteCacheFillParams struct {
+	CacheKey   string `json:"cache_key"`
+	OwnerToken string `json:"owner_token"`
+}
+
+func (q *Queries) DeleteCacheFill(ctx context.Context, arg DeleteCacheFillParams) error {
+	_, err := q.db.ExecContext(ctx, deleteCacheFill, arg.CacheKey, arg.OwnerToken)
+	return err
+}
+
+const getCacheFill = `-- name: GetCacheFill :one
+SELECT owner_token, expires_at
+FROM cache_fills
+WHERE cache_key = ?
+`
+
+type GetCacheFillRow struct {
+	OwnerToken string `json:"owner_token"`
+	ExpiresAt  int64  `json:"expires_at"`
+}
+
+func (q *Queries) GetCacheFill(ctx context.Context, cacheKey string) (GetCacheFillRow, error) {
+	row := q.db.QueryRowContext(ctx, getCacheFill, cacheKey)
+	var i GetCacheFillRow
+	err := row.Scan(&i.OwnerToken, &i.ExpiresAt)
+	return i, err
 }
 
 const getCooldownExpiresAt = `-- name: GetCooldownExpiresAt :one
@@ -213,6 +260,25 @@ func (q *Queries) GetRateState(ctx context.Context, arg GetRateStateParams) (Get
 	var i GetRateStateRow
 	err := row.Scan(&i.Remaining, &i.ResetAt)
 	return i, err
+}
+
+const upsertCacheFill = `-- name: UpsertCacheFill :exec
+INSERT INTO cache_fills (cache_key, owner_token, expires_at)
+VALUES (?1, ?2, ?3)
+ON CONFLICT(cache_key) DO UPDATE SET
+  owner_token = excluded.owner_token,
+  expires_at = excluded.expires_at
+`
+
+type UpsertCacheFillParams struct {
+	CacheKey   string `json:"cache_key"`
+	OwnerToken string `json:"owner_token"`
+	ExpiresAt  int64  `json:"expires_at"`
+}
+
+func (q *Queries) UpsertCacheFill(ctx context.Context, arg UpsertCacheFillParams) error {
+	_, err := q.db.ExecContext(ctx, upsertCacheFill, arg.CacheKey, arg.OwnerToken, arg.ExpiresAt)
+	return err
 }
 
 const upsertCooldown = `-- name: UpsertCooldown :exec

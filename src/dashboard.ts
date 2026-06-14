@@ -134,7 +134,15 @@ const DASHBOARD_HTML = `<!doctype html>
       </div>
       <div class="panel">
         <div class="panel-head"><h2>Top Routes</h2><span class="section-label">24 hours</span></div>
-        <div class="table-wrap"><table><thead><tr><th>Route</th><th>Requests</th><th>Hit rate</th><th>Bypass</th><th>Errors</th></tr></thead><tbody id="route-usage"></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Route</th><th>Requests</th><th>Eligible hit</th><th>Coalesced</th><th>Fallback</th><th>Svc errors</th></tr></thead><tbody id="route-usage"></tbody></table></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Request Patterns</h2><span class="section-label">7 days / normalized keys</span></div>
+        <div class="table-wrap"><table><thead><tr><th>Route key</th><th>Requests</th><th>Hits</th><th>Misses</th><th>Coalesced</th><th>Fallback</th><th>Latest</th></tr></thead><tbody id="route-keys"></tbody></table></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h2>Fallback & Failure Causes</h2><span class="section-label">7 days</span></div>
+        <div class="table-wrap"><table><thead><tr><th>Outcome</th><th>Route</th><th>Requests</th><th>Latest</th></tr></thead><tbody id="error-codes"></tbody></table></div>
       </div>
       <div class="panel">
         <div class="panel-head"><h2>Who Uses It</h2><span class="section-label">7 days</span></div>
@@ -207,17 +215,19 @@ function render(data) {
   whoCopy.append(el("strong", data.operator.github_login), generated);
   $("who").replaceChildren(avatar, whoCopy);
   $("tiles").replaceChildren(
-    tile("Requests / 24h", fmt(data.usage.requests_24h), fmt(data.usage.errors_24h) + " errors", data.usage.errors_24h ? "hot" : ""),
-    tile("Cache hit / 24h", pct(data.usage.cache_hit_rate_24h), fmt(data.usage.cache_misses_24h) + " misses"),
+    tile("Requests / 24h", fmt(data.usage.requests_24h), fmt(data.usage.service_errors_24h) + " svc · " + fmt(data.usage.fallbacks_24h) + " fallback · " + fmt(data.usage.denied_24h) + " denied", data.usage.service_errors_24h ? "hot" : ""),
+    tile("Eligible cache hit", pct(data.usage.eligible_cache_hit_rate_24h), pct(data.usage.cache_hit_rate_24h) + " raw · " + fmt(data.usage.coalesced_24h) + " coalesced"),
     tile("Average latency", Math.round(data.usage.avg_duration_ms_24h || 0) + " ms", "relay response time", data.usage.avg_duration_ms_24h > 1000 ? "warn" : ""),
     tile("Fresh cache", fmt(data.cache.fresh_entries), fmt(data.cache.total_entries) + " entries · " + bytes(data.cache.body_bytes)),
     tile("Identity health", fmt(data.identities.active) + "/" + fmt(data.identities.total), data.coordinator.cooldowns.length + " cooldowns", data.coordinator.cooldowns.length ? "warn" : ""),
   );
   renderRates(data);
-  rows("cache-routes", data.cache.routes, (item) => [item.route_kind, item.fresh_entries, item.entries, rel(item.latest_created_at)]);
-  rows("route-usage", data.route_usage, (item) => [item.route_kind, item.requests, pct(item.cache_hit_rate), item.cache_bypass, item.errors]);
+  rows("cache-routes", data.cache.routes, (item) => [item.route_kind, item.fresh_entries, item.entries, rel(item.latest_created_at)], 4);
+  rows("route-usage", data.route_usage, (item) => [item.route_kind, item.requests, pct(item.eligible_cache_hit_rate), item.coalesced, item.fallbacks, item.service_errors], 6);
+  rows("route-keys", data.route_keys_7d, (item) => [item.route_key, item.requests, item.cache_hits, item.cache_misses, item.coalesced, item.fallbacks, rel(item.latest_seen_at)], 7);
+  rows("error-codes", data.error_codes_7d, (item) => [item.outcome, item.route_kind, item.requests, rel(item.latest_seen_at)], 4);
   rows("callers", data.users, (item) => [item.github_login, item.requests, item.errors, Math.round(item.avg_duration_ms || 0), rel(item.last_seen)]);
-  rows("recent", data.recent, (item) => [rel(item.created_at), item.github_login, item.route_kind, statusPill(item.status), item.identity_id || "none"]);
+  rows("recent", data.recent, (item) => [rel(item.created_at), item.github_login, item.route_kind, statusPill(item.status, item.fallback_reason || item.error_code), item.identity_id || "none"]);
 }
 
 function renderRates(data) {
@@ -239,13 +249,13 @@ function renderRates(data) {
   }
 }
 
-function rows(id, items, map) {
+function rows(id, items, map, columns = 5) {
   const body = $(id);
   body.replaceChildren();
   if (!items.length) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 5;
+    td.colSpan = columns;
     td.append(el("div", "No data yet.", "empty"));
     tr.append(td);
     body.append(tr);
@@ -275,9 +285,11 @@ function meter(pct) {
   m.append(f);
   return m;
 }
-function statusPill(status) {
+function statusPill(status, title) {
   const kind = status >= 500 ? "hot" : status >= 400 ? "warn" : "ok";
-  return el("span", String(status), "pill " + kind);
+  const node = el("span", String(status), "pill " + kind);
+  if (title) node.title = title;
+  return node;
 }
 function resetDashboard() {
   const avatar = el("div", "--", "avatar");
@@ -288,7 +300,7 @@ function resetDashboard() {
   $("tiles").replaceChildren();
   $("rates").replaceChildren();
   $("rate-count").textContent = "";
-  for (const id of ["cache-routes", "route-usage", "callers", "recent"]) $(id).replaceChildren();
+  for (const id of ["cache-routes", "route-usage", "route-keys", "error-codes", "callers", "recent"]) $(id).replaceChildren();
   $("error").style.display = "none";
 }
 function el(tag, text, cls) {

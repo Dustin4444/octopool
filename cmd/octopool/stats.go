@@ -34,6 +34,8 @@ type statsOperator struct {
 type statsAggregate struct {
 	Requests          int      `json:"requests"`
 	Errors            int      `json:"errors"`
+	ServiceErrors     int      `json:"service_errors"`
+	Fallbacks         int      `json:"fallbacks"`
 	AvgDurationMS     *float64 `json:"avg_duration_ms"`
 	CacheHits         int      `json:"cache_hits"`
 	CacheStale        int      `json:"cache_stale"`
@@ -41,9 +43,12 @@ type statsAggregate struct {
 	CacheBypass       int      `json:"cache_bypass"`
 	CacheUnknown      int      `json:"cache_unknown"`
 	CacheableRequests int      `json:"cacheable_requests"`
+	EligibleRequests  int      `json:"eligible_cache_requests"`
 	CacheHitRate      *float64 `json:"cache_hit_rate"`
 	CacheableHitRate  *float64 `json:"cacheable_hit_rate"`
+	EligibleHitRate   *float64 `json:"eligible_cache_hit_rate"`
 	BypassRate        *float64 `json:"bypass_rate"`
+	Coalesced         int      `json:"coalesced"`
 	SavedGitHubCalls  int      `json:"saved_github_requests"`
 	BackendRequests   int      `json:"backend_requests"`
 }
@@ -118,7 +123,12 @@ func renderStats(w io.Writer, stats statsResponse) error {
 		"pool: " + stats.Pool,
 		"window: " + firstNonEmpty(stats.Window.Label, "24h"),
 		fmt.Sprintf("operator: %s", firstNonEmpty(stats.Operator.GitHubLogin, "unknown")),
-		fmt.Sprintf("requests: %s (%s errors)", intFmt(stats.PoolUsage.Requests), intFmt(stats.PoolUsage.Errors)),
+		fmt.Sprintf(
+			"requests: %s (%s service errors, %s local fallbacks)",
+			intFmt(stats.PoolUsage.Requests),
+			intFmt(stats.PoolUsage.ServiceErrors),
+			intFmt(stats.PoolUsage.Fallbacks),
+		),
 		fmt.Sprintf(
 			"cache: %s hit (%s hits, %s stale, %s misses, %s bypass, %s unknown)",
 			percent(stats.PoolUsage.CacheHitRate),
@@ -129,10 +139,12 @@ func renderStats(w io.Writer, stats statsResponse) error {
 			intFmt(stats.PoolUsage.CacheUnknown),
 		),
 		fmt.Sprintf(
-			"cacheable: %s/%s requests",
-			intFmt(stats.PoolUsage.CacheableRequests),
+			"eligible: %s/%s requests, %s hit",
+			intFmt(stats.PoolUsage.EligibleRequests),
 			intFmt(stats.PoolUsage.Requests),
+			percent(stats.PoolUsage.EligibleHitRate),
 		),
+		fmt.Sprintf("coalesced: %s duplicate misses", intFmt(stats.PoolUsage.Coalesced)),
 		fmt.Sprintf(
 			"github: %s saved, %s backend",
 			intFmt(stats.PoolUsage.SavedGitHubCalls),
@@ -166,14 +178,15 @@ func renderStats(w io.Writer, stats statsResponse) error {
 	for _, route := range stats.Routes {
 		if _, err := fmt.Fprintf(
 			w,
-			"  %s: %s req, %s hit, %s stale, %s miss, %s bypass, %s errors\n",
+			"  %s: %s req, %s eligible hit, %s stale, %s miss, %s bypass, %s errors, %s fallback\n",
 			route.RouteKind,
 			intFmt(route.Requests),
-			percent(route.CacheHitRate),
+			percent(route.EligibleHitRate),
 			intFmt(route.CacheStale),
 			intFmt(route.CacheMisses),
 			intFmt(route.CacheBypass),
-			intFmt(route.Errors),
+			intFmt(route.ServiceErrors),
+			intFmt(route.Fallbacks),
 		); err != nil {
 			return err
 		}
