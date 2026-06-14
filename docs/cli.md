@@ -44,6 +44,8 @@ octopool login https://octopool.your-org.dev
 octopool login --server https://octopool.your-org.dev
 ```
 
+- If `gh auth token` fails, the CLI prints the exact real-`gh` web reauthentication and
+  Octopool retry commands instead of returning only the subprocess exit status.
 - The login URL must be HTTPS. `http://` is allowed only for loopback hosts, or when
   `OCTOPOOL_ALLOW_INSECURE_LOGIN=1` is set for local development.
 - The CLI fetches `GET /.well-known/octopool`, verifies `service: "octopool"`, uses the

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"io"
 	"net/http"
@@ -79,6 +80,20 @@ func TestFormatLoginFailureDoesNotTreatResetHeaderAsRateLimit(t *testing.T) {
 	}
 	if strings.Contains(got, "Retry after reset") {
 		t.Fatalf("did not expect rate-limit guidance:\n%s", got)
+	}
+}
+
+func TestLocalGitHubAuthErrorGivesReauthenticationCommands(t *testing.T) {
+	err := localGitHubAuthError("/opt/homebrew/opt/gh/bin/gh", errors.New("exit status 1"))
+	got := err.Error()
+	for _, want := range []string{
+		"gh auth token failed: exit status 1",
+		"/opt/homebrew/opt/gh/bin/gh auth login --hostname github.com --web",
+		"octopool login --gh-path /opt/homebrew/opt/gh/bin/gh",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in error:\n%s", want, got)
+		}
 	}
 }
 

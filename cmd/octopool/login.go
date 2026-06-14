@@ -274,13 +274,17 @@ func localGitHubToken(ctx context.Context, ghPath string) (string, error) {
 	cmd := exec.CommandContext(child, path, "auth", "token")
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("gh auth token failed: %w", err)
+		return "", localGitHubAuthError(path, err)
 	}
 	token := strings.TrimSpace(string(out))
 	if token == "" {
 		return "", errors.New("gh auth token returned empty output")
 	}
 	return token, nil
+}
+
+func localGitHubAuthError(path string, err error) error {
+	return fmt.Errorf("gh auth token failed: %w\nRefresh GitHub CLI auth: %s auth login --hostname github.com --web\nThen retry: octopool login --gh-path %s", err, path, path)
 }
 
 func resolveGHPath(configured string) (string, error) {
