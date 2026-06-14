@@ -84,9 +84,9 @@ web hit still re-checks that public proof covers the entry before returning it.
 
 Per route kind and response state (`cacheTTLSeconds`):
 
-- workflow runs, jobs, checks, check suites, and commit statuses → 15s while active;
+- workflow runs, jobs, checks, check suites, and commit statuses → 30s while active;
   terminal payloads get 1h fresh plus up to 24h bounded stale fallback
-- run/workflow lists → 15s while active, 2m when every returned run is completed; lists
+- run/workflow lists → 30s while active, 2m when every returned run is completed; lists
   remain mutable because new runs can appear
 - PR files with a validated state discriminator → 5m; PR commits, reviews,
   comments, issue comments/events/timeline, and undiscriminated PR files → 1m..5m
@@ -114,14 +114,18 @@ get up to an hour; immutable-ish commit views can get up to a day. Stale serves 
 the public-repo guard and active-identity check before returning.
 
 Cache publication is awaited before returning a miss response, closing the response/write
-race for immediate repeat reads. Audit writes remain deferred. An hourly scheduled task
+race for immediate repeat reads. Concurrent identical misses also claim a short pool-scoped
+fill lease in the Durable Object; followers wait for the leader's D1 publication and serve
+the resulting hit instead of duplicating the GitHub request. Audit writes remain deferred.
+An hourly scheduled task
 deletes cache entries that expired more than 25 hours ago in bounded batches, preserving
 the longest stale-serving window while keeping D1 growth bounded.
 
 Hits are still audited, with the cached identity attributed. Each audit row records cache
 status as `hit`, `stale`, `miss`, `bypass`, or `unknown`, which powers `octopool stats` and
-the dashboard hit-rate/top-route views. Stats count both fresh and stale hits as saved
-GitHub requests.
+the dashboard hit-rate/top-route views. Coalesced followers are marked separately. Stats
+count both fresh and stale hits as saved GitHub requests and expose an eligible hit rate
+that excludes failed misses and deliberate local fallback responses.
 
 ## Public-repo guard
 
@@ -158,6 +162,8 @@ private-repo block — a hard `404`/private response always denies.
   state-scoped PR subresource cache keys (migration `0006`).
 - `audit_events.cache_status` / `audit_events.cacheable` — per-request cache metrics
   (migration `0005`).
+- `audit_events.fallback_reason` / `audit_events.coalesced` — local fallback classification
+  and duplicate-fill telemetry (migration `0009`).
 
 Secret values are never written to the cache. R2 is deferred; current routes are bounded
 enough to live in D1, and large Actions logs skip the cache entirely.

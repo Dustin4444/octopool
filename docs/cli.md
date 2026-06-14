@@ -169,18 +169,21 @@ policy version.
 ### `octopool stats [--pool <id>] [--since 24h] [--json]`
 
 Fetches `GET /v1/pools/<pool>/stats` using the stored token. The default human output
-shows the pool request count, cache hit rate, caller-specific usage, D1 cache entries,
-and top route kinds. `--since` accepts `30m`, `24h`, or `7d` style windows, capped at 30
-days.
+shows the pool request count, service errors, expected local fallbacks, raw and
+successful-eligible cache hit rates, coalesced duplicate misses, caller-specific usage,
+D1 cache entries, and top route kinds. `--since` accepts `30m`, `24h`, or `7d` style
+windows, capped at 30 days.
 
 ```sh
 octopool stats
 # pool: maintainers
+# requests: 54 (1 service errors, 2 local fallbacks)
 # cache: 82.4% hit (40 hits, 2 stale, 9 misses, 3 bypass, 0 unknown)
-# cacheable: 51/54 requests
+# eligible: 49/54 requests, 85.7% hit
+# coalesced: 4 duplicate misses
 # github: 42 saved, 12 backend
 # top routes:
-#   pr_view: 31 req, 86.1% hit, 1 stale, 5 miss, 0 bypass, 0 errors
+#   pr_view: 31 req, 86.1% eligible hit, 1 stale, 5 miss, 0 bypass, 0 errors, 1 fallback
 ```
 
 Use `--json` for dashboards or scripts that want the raw aggregate:

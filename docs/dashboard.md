@@ -24,11 +24,13 @@ non-admin org members cannot load dashboard data.
 - caller and pool identity
 - active/total pooled identities
 - Durable Object rate-limit snapshots, active cooldowns, and live leases
-- D1 cache totals, fresh/expired entries, body byte size, hit rate, and route-kind
-  breakdown
-- top route kinds for the last 24 hours, with cache hit rate, bypasses, and errors
+- D1 cache totals, fresh/expired entries, body byte size, raw and successful-eligible hit
+  rates, and route-kind breakdown
+- top route kinds for the last 24 hours, with eligible hit rate, coalesced fills, local
+  fallbacks, and service errors
+- seven-day normalized route-key traffic and fallback/failure outcome tables
 - public-repo proof count
 - per-caller usage for the last seven days
-- recent audit traffic with route kind, status, identity, and duration
+- recent audit traffic with route kind, status, fallback reason, identity, and duration
 
 Secrets, raw caller tokens, PAT values, and GitHub App private keys are never returned.
