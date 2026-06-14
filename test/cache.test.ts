@@ -1,17 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cacheTTLSeconds,
   githubCacheKey,
   pruneExpiredGitHubCache,
+  readGitHubCache,
   readStaleGitHubCache,
   shouldUseGitHubCache,
   staleCacheSeconds,
+  writeGitHubCache,
 } from "../src/cache";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 import type { GitHubRelayResponse } from "../src/types";
 
 describe("github cache policy", () => {
   const policy = defaultPolicy("openclaw");
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   it("keys equivalent query and header order identically", async () => {
     const left = validateRelayRequest({
@@ -352,6 +358,70 @@ describe("github cache policy", () => {
       policy,
     );
     expect(staleCacheSeconds(gitRef)).toBe(300);
+  });
+
+  it("serves fresh edge entries without reading D1", async () => {
+    const cached = {
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: { number: 42 },
+      body_encoding: "json",
+      created_at: sqliteUTC(Date.now() - 1_000),
+      expires_at: sqliteUTC(Date.now() + 60_000),
+    };
+    const match = vi.fn(async () => Response.json(cached));
+    vi.stubGlobal("caches", {
+      default: {
+        match,
+        put: vi.fn(async () => undefined),
+        delete: vi.fn(async () => true),
+      },
+    });
+    const prepare = vi.fn(() => {
+      throw new Error("D1 should not be read");
+    });
+
+    await expect(
+      readGitHubCache({ DB: { prepare } } as unknown as Env, "cache-key"),
+    ).resolves.toMatchObject({
+      body: { number: 42 },
+    });
+    expect(match).toHaveBeenCalledOnce();
+  });
+
+  it("writes successful cache entries to D1 and the edge cache", async () => {
+    const put = vi.fn(async () => undefined);
+    vi.stubGlobal("caches", {
+      default: {
+        match: vi.fn(async () => undefined),
+        put,
+        delete: vi.fn(async () => true),
+      },
+    });
+    const run = vi.fn(async () => ({}));
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/42",
+    });
+    const route = classifyRoute(request, policy);
+    const env = {
+      DB: {
+        prepare: () => ({
+          bind: () => ({ run }),
+        }),
+      },
+    } as unknown as Env;
+
+    await writeGitHubCache(env, "cache-key", request, route, response({ number: 42 }));
+
+    expect(run).toHaveBeenCalledOnce();
+    expect(put).toHaveBeenCalledOnce();
+    const [, edgeResponse] = put.mock.calls[0] as unknown as [Request, Response];
+    await expect(edgeResponse.json()).resolves.toMatchObject({
+      status: 200,
+      body: { number: 42 },
+    });
   });
 
   it("serves only stale cache rows inside the route grace window", async () => {

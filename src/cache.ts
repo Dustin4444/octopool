@@ -1,10 +1,12 @@
 import { hashToken } from "./auth";
+import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
 const TERMINAL_CI_TTL_SECONDS = 3_600;
 const TERMINAL_CI_STALE_SECONDS = 86_400;
 const TERMINAL_CI_TTL_DETECTION_SECONDS = 1_800;
+const EDGE_CACHE_NAMESPACE = "github-v1";
 
 type CacheRow = {
   status: number;
@@ -51,9 +53,21 @@ export function shouldUseGitHubCache(request: RelayRequest, route: RouteInfo): b
 export async function readGitHubCache(
   env: Env,
   cacheKey: string,
+  ctx?: ExecutionContext,
 ): Promise<CachedGitHubResponse | undefined> {
+  const edge = await readEdgeJSON<CachedGitHubResponse>(EDGE_CACHE_NAMESPACE, cacheKey);
+  if (edge !== undefined) {
+    if (freshCachedResponse(edge)) {
+      return edge;
+    }
+    await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, cacheKey);
+  }
   const row = await env.DB.prepare(queries.readGitHubCache).bind(cacheKey).first<CacheRow>();
-  return cacheRowResponse(row);
+  const cached = cacheRowResponse(row);
+  if (cached !== undefined && ctx !== undefined) {
+    ctx.waitUntil(writeEdgeCachedResponse(cacheKey, cached));
+  }
+  return cached;
 }
 
 export async function readStaleGitHubCache(
@@ -230,26 +244,61 @@ export async function writeGitHubCache(
     return;
   }
   const ttlSeconds = cacheTTLSeconds(route, response);
+  const createdAt = sqliteTimestamp(new Date());
   const expiresAt = sqliteTimestamp(new Date(Date.now() + ttlSeconds * 1000));
-  await env.DB.prepare(queries.writeGitHubCache)
-    .bind(
-      cacheKey,
-      request.pool,
-      request.method,
-      request.path,
-      JSON.stringify(stableRecord(request.query ?? {})),
-      JSON.stringify(stableRecord(cacheVaryHeaders(request.headers))),
-      route.routeKey,
-      route.kind,
-      response.status,
-      JSON.stringify(response.headers),
-      JSON.stringify(response.body),
-      response.body_encoding ?? "json",
-      identity?.id ?? null,
-      identity?.kind ?? null,
-      expiresAt,
-    )
-    .run();
+  const cached: CachedGitHubResponse = {
+    ...response,
+    body_encoding: response.body_encoding ?? "json",
+    created_at: createdAt,
+    expires_at: expiresAt,
+    ...(identity === undefined ? {} : { identity: { id: identity.id, kind: identity.kind } }),
+  };
+  await Promise.all([
+    env.DB.prepare(queries.writeGitHubCache)
+      .bind(
+        cacheKey,
+        request.pool,
+        request.method,
+        request.path,
+        JSON.stringify(stableRecord(request.query ?? {})),
+        JSON.stringify(stableRecord(cacheVaryHeaders(request.headers))),
+        route.routeKey,
+        route.kind,
+        response.status,
+        JSON.stringify(response.headers),
+        JSON.stringify(response.body),
+        response.body_encoding ?? "json",
+        identity?.id ?? null,
+        identity?.kind ?? null,
+        expiresAt,
+      )
+      .run(),
+    writeEdgeCachedResponse(cacheKey, cached),
+  ]);
+}
+
+function freshCachedResponse(cached: CachedGitHubResponse): boolean {
+  if (
+    typeof cached.status !== "number" ||
+    typeof cached.headers !== "object" ||
+    cached.headers === null ||
+    typeof cached.created_at !== "string" ||
+    typeof cached.expires_at !== "string"
+  ) {
+    return false;
+  }
+  const expiresAt = parseSQLiteTimestamp(cached.expires_at);
+  return Number.isFinite(expiresAt) && expiresAt > Date.now();
+}
+
+function writeEdgeCachedResponse(cacheKey: string, cached: CachedGitHubResponse): Promise<void> {
+  const expiresAt = parseSQLiteTimestamp(cached.expires_at);
+  const ttlSeconds = Math.floor((expiresAt - Date.now()) / 1000);
+  return writeEdgeJSON(EDGE_CACHE_NAMESPACE, cacheKey, cached, ttlSeconds);
+}
+
+function parseSQLiteTimestamp(value: string): number {
+  return Date.parse(value.endsWith("Z") ? value : `${value.replace(" ", "T")}Z`);
 }
 
 export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): number {

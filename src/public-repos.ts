@@ -1,16 +1,33 @@
 import { envSecret } from "./auth";
+import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import { HttpError, parsePositiveInt } from "./http";
+import type { PoolCoordinator } from "./pool-coordinator";
 import type { RouteInfo } from "./types";
 
 type GitHubRepoResponse = {
   private?: unknown;
 };
 
+type PublicRepoProof = {
+  checked_at: string;
+  expires_at: string;
+};
+
+type PublicProofCoordinator = Pick<
+  DurableObjectStub<PoolCoordinator>,
+  "claimCacheFill" | "finishCacheFill"
+>;
+
+const EDGE_CACHE_NAMESPACE = "public-repo-v1";
+const PROOF_WAIT_MS = 4_000;
+const PROOF_POLL_MS = 100;
+
 export async function ensurePublicGitHubRepo(
   env: Env,
   route: RouteInfo,
   cacheCreatedAt?: string,
+  coordinator?: PublicProofCoordinator,
 ): Promise<void> {
   if (route.owner === undefined || route.repo === undefined) {
     return;
@@ -23,6 +40,56 @@ export async function ensurePublicGitHubRepo(
   ) {
     return;
   }
+  const proofKey = `public-repo:${owner}/${repo}`;
+  const proofStartedAt = sqliteTimestamp(new Date());
+  let leaseToken: string | undefined;
+  if (coordinator !== undefined) {
+    for (;;) {
+      const claimed = await coordinator.claimCacheFill(proofKey);
+      if (claimed !== null) {
+        leaseToken = claimed;
+        break;
+      }
+      if (await waitForConcurrentPublicProof(env, route, proofStartedAt)) {
+        return;
+      }
+    }
+  }
+  try {
+    await refreshPublicGitHubRepoProof(env, owner, repo, route, cacheCreatedAt);
+  } finally {
+    if (coordinator !== undefined && leaseToken !== undefined) {
+      try {
+        await coordinator.finishCacheFill(proofKey, leaseToken);
+      } catch (error) {
+        console.error("public repo proof fill cleanup failed", error);
+      }
+    }
+  }
+}
+
+export async function recordPublicGitHubRepo(env: Env, route: RouteInfo): Promise<void> {
+  if (route.owner === undefined || route.repo === undefined) {
+    return;
+  }
+  try {
+    await storePublicRepoProof(env, route.owner.toLowerCase(), route.repo.toLowerCase());
+  } catch (error) {
+    console.error("public repo proof persistence failed", error);
+  }
+}
+
+export function anonymousGitHubResponseProvesPublicRepo(route: RouteInfo): boolean {
+  return route.owner !== undefined && route.repo !== undefined && !route.kind.startsWith("search_");
+}
+
+async function refreshPublicGitHubRepoProof(
+  env: Env,
+  owner: string,
+  repo: string,
+  route: RouteInfo,
+  cacheCreatedAt?: string,
+): Promise<void> {
   let response = await fetchPublicRepoProof(env, owner, repo, true);
   let historicalProofEligibleResponse: Response | undefined;
   if (!response.ok && publicCheckMayRetryUnauthenticated(response)) {
@@ -159,9 +226,15 @@ async function storePublicRepoProof(env: Env, owner: string, repo: string): Prom
     (env as unknown as Record<string, string | undefined>).PUBLIC_REPO_TTL_SECONDS,
     30,
   );
-  await env.DB.prepare(queries.upsertPublicRepoProof)
-    .bind(owner, repo, `+${ttlSeconds} seconds`)
-    .run();
+  const checkedAt = new Date();
+  const proof: PublicRepoProof = {
+    checked_at: sqliteTimestamp(checkedAt),
+    expires_at: sqliteTimestamp(new Date(checkedAt.getTime() + ttlSeconds * 1000)),
+  };
+  await Promise.all([
+    env.DB.prepare(queries.upsertPublicRepoProof).bind(owner, repo, `+${ttlSeconds} seconds`).run(),
+    writeEdgeJSON(EDGE_CACHE_NAMESPACE, publicProofKey(owner, repo), proof, ttlSeconds),
+  ]);
 }
 
 function publicCheckMayRetryUnauthenticated(response: Response): boolean {
@@ -186,11 +259,77 @@ async function cachedPublicGitHubRepoCovers(
   if (route.owner === undefined || route.repo === undefined) {
     return true;
   }
+  const owner = route.owner.toLowerCase();
+  const repo = route.repo.toLowerCase();
+  const edgeKey = publicProofKey(owner, repo);
+  const edge = await readEdgeJSON<PublicRepoProof>(EDGE_CACHE_NAMESPACE, edgeKey);
+  if (edge !== undefined) {
+    if (publicProofCovers(edge, cacheCreatedAt, requireFresh)) {
+      return true;
+    }
+    await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, edgeKey);
+  }
   const query = requireFresh
     ? queries.freshCoveringPublicRepoProof
     : queries.coveringPublicRepoProof;
   const row = await env.DB.prepare(query)
-    .bind(route.owner.toLowerCase(), route.repo.toLowerCase(), cacheCreatedAt)
-    .first<{ "1": number }>();
-  return row !== null;
+    .bind(owner, repo, cacheCreatedAt)
+    .first<PublicRepoProof>();
+  if (row === null || !publicProofCovers(row, cacheCreatedAt, requireFresh)) {
+    return false;
+  }
+  const ttlSeconds = Math.floor((parseSQLiteTimestamp(row.expires_at) - Date.now()) / 1000);
+  await writeEdgeJSON(EDGE_CACHE_NAMESPACE, edgeKey, row, ttlSeconds);
+  return true;
+}
+
+async function waitForConcurrentPublicProof(
+  env: Env,
+  route: RouteInfo,
+  proofStartedAt: string,
+): Promise<boolean> {
+  const deadline = Date.now() + PROOF_WAIT_MS;
+  while (Date.now() < deadline) {
+    await sleep(PROOF_POLL_MS);
+    if (await cachedPublicGitHubRepoCovers(env, route, proofStartedAt, true)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function publicProofCovers(
+  proof: PublicRepoProof,
+  cacheCreatedAt: string,
+  requireFresh: boolean,
+): boolean {
+  const checkedAt = parseSQLiteTimestamp(proof.checked_at);
+  const expiresAt = parseSQLiteTimestamp(proof.expires_at);
+  const cacheAt = parseSQLiteTimestamp(cacheCreatedAt);
+  return (
+    Number.isFinite(checkedAt) &&
+    Number.isFinite(expiresAt) &&
+    Number.isFinite(cacheAt) &&
+    checkedAt >= cacheAt - 5_000 &&
+    (!requireFresh || expiresAt > Date.now())
+  );
+}
+
+function publicProofKey(owner: string, repo: string): string {
+  return `${owner}/${repo}`;
+}
+
+function parseSQLiteTimestamp(value: string): number {
+  return Date.parse(value.endsWith("Z") ? value : `${value.replace(" ", "T")}Z`);
+}
+
+function sqliteTimestamp(value: Date): string {
+  return value
+    .toISOString()
+    .replace("T", " ")
+    .replace(/\.\d{3}Z$/, "");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

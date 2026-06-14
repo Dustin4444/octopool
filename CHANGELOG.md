@@ -6,11 +6,13 @@
 
 - Redesign the operator dashboard as a responsive relay control room with clearer telemetry hierarchy, latency and cache-size metrics, accessible loading/error states, and scroll-safe data tables.
 - Split service errors from expected local fallbacks and policy denials, report successful cache-eligible hit rate and coalesced fills, and add seven-day normalized route-key and outcome diagnostics to the dashboard and stats API.
+- Add data-center-local edge caching ahead of D1, parallelize independent relay checks, coalesce public-repository proof refreshes, and let successful direct repository-resource reads establish the live public proof without a duplicate GitHub request.
 
 ### Fixes
 
 - Give the dashboard account row balanced spacing and full-width alignment below the pool controls on tablet-sized screens.
 - Coalesce concurrent identical cache misses through the pool coordinator and raise active Actions run, job, check, and status cache TTLs from 15 to 30 seconds.
+- Give failed CLI logins actionable real-`gh` web reauthentication and retry commands instead of an opaque subprocess exit status.
 
 ## 0.3.2 - 2026-06-13
 

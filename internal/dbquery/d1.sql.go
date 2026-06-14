@@ -47,7 +47,7 @@ func (q *Queries) AuthenticateCaller(ctx context.Context, arg AuthenticateCaller
 }
 
 const coveringPublicRepoProof = `-- name: CoveringPublicRepoProof :one
-SELECT 1
+SELECT checked_at, expires_at
 FROM github_public_repos
 WHERE lower(owner) = ?1
   AND lower(repo) = ?2
@@ -61,11 +61,16 @@ type CoveringPublicRepoProofParams struct {
 	Datetime interface{} `json:"datetime"`
 }
 
-func (q *Queries) CoveringPublicRepoProof(ctx context.Context, arg CoveringPublicRepoProofParams) (int64, error) {
+type CoveringPublicRepoProofRow struct {
+	CheckedAt string `json:"checked_at"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+func (q *Queries) CoveringPublicRepoProof(ctx context.Context, arg CoveringPublicRepoProofParams) (CoveringPublicRepoProofRow, error) {
 	row := q.db.QueryRowContext(ctx, coveringPublicRepoProof, arg.Owner, arg.Repo, arg.Datetime)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
+	var i CoveringPublicRepoProofRow
+	err := row.Scan(&i.CheckedAt, &i.ExpiresAt)
+	return i, err
 }
 
 const dashboardCache = `-- name: DashboardCache :one
@@ -742,7 +747,7 @@ func (q *Queries) FindActiveCallerByGitHubUser(ctx context.Context, arg FindActi
 }
 
 const freshCoveringPublicRepoProof = `-- name: FreshCoveringPublicRepoProof :one
-SELECT 1
+SELECT checked_at, expires_at
 FROM github_public_repos
 WHERE lower(owner) = ?1
   AND lower(repo) = ?2
@@ -757,11 +762,16 @@ type FreshCoveringPublicRepoProofParams struct {
 	Datetime interface{} `json:"datetime"`
 }
 
-func (q *Queries) FreshCoveringPublicRepoProof(ctx context.Context, arg FreshCoveringPublicRepoProofParams) (int64, error) {
+type FreshCoveringPublicRepoProofRow struct {
+	CheckedAt string `json:"checked_at"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+func (q *Queries) FreshCoveringPublicRepoProof(ctx context.Context, arg FreshCoveringPublicRepoProofParams) (FreshCoveringPublicRepoProofRow, error) {
 	row := q.db.QueryRowContext(ctx, freshCoveringPublicRepoProof, arg.Owner, arg.Repo, arg.Datetime)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
+	var i FreshCoveringPublicRepoProofRow
+	err := row.Scan(&i.CheckedAt, &i.ExpiresAt)
+	return i, err
 }
 
 const freshPRStateProof = `-- name: FreshPRStateProof :one
@@ -815,7 +825,7 @@ func (q *Queries) FreshPublicApiRate(ctx context.Context, resource string) (Fres
 }
 
 const freshPublicRepoProof = `-- name: FreshPublicRepoProof :one
-SELECT 1
+SELECT checked_at, expires_at
 FROM github_public_repos
 WHERE lower(owner) = ?1
   AND lower(repo) = ?2
@@ -828,11 +838,16 @@ type FreshPublicRepoProofParams struct {
 	Repo  string `json:"repo"`
 }
 
-func (q *Queries) FreshPublicRepoProof(ctx context.Context, arg FreshPublicRepoProofParams) (int64, error) {
+type FreshPublicRepoProofRow struct {
+	CheckedAt string `json:"checked_at"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+func (q *Queries) FreshPublicRepoProof(ctx context.Context, arg FreshPublicRepoProofParams) (FreshPublicRepoProofRow, error) {
 	row := q.db.QueryRowContext(ctx, freshPublicRepoProof, arg.Owner, arg.Repo)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
+	var i FreshPublicRepoProofRow
+	err := row.Scan(&i.CheckedAt, &i.ExpiresAt)
+	return i, err
 }
 
 const getCallerPoolGrant = `-- name: GetCallerPoolGrant :one

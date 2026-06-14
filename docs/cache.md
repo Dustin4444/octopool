@@ -1,17 +1,20 @@
 # Cache & Public-Repo Guard
 
-Octopool owns a shared, read-through D1 cache for `gh` reads, and guards every repo route
-with a public-visibility check. Both keep private data out of the shared cache and reduce
-load on pooled identities.
+Octopool owns a shared edge + D1 read-through cache for `gh` reads, and guards every repo
+route with a public-visibility check. Both keep private data out of the shared cache and
+reduce load on pooled identities.
 
-Source: `src/cache.ts`, `src/public-repos.ts`, migrations `0002`/`0003`.
+Source: `src/cache.ts`, `src/edge-cache.ts`, `src/public-repos.ts`, migrations `0002`/`0003`.
 
-## Read-through D1 cache
+## Read-through edge + D1 cache
 
-On a cacheable route the relay computes a stable cache key, checks
-`github_cache_entries`, and serves a fresh hit without touching GitHub. On a miss it
-first tries a token-free public web/raw endpoint when one can produce the same shape,
-then falls through to a pooled GitHub API identity and writes the result back.
+On a cacheable route the relay computes a stable cache key, checks Cloudflare's
+data-center-local Cache API, falls back to `github_cache_entries` in D1, and serves a
+fresh hit without touching GitHub. D1 hits warm the edge cache. On a miss it first tries
+a token-free public web/raw endpoint when one can produce the same shape. A successful
+direct repository-resource response also proves that the repository is public, avoiding a
+separate repository metadata request; routes that need a pooled identity still run the
+explicit public-repository guard first. Successful results write through to both layers.
 
 ### Cache key
 
@@ -38,9 +41,11 @@ Only `200` responses on cacheable routes are stored. The cache is **bypassed** w
 
 ### Token-free GitHub reads
 
-After the public-repo guard passes and before a pooled identity is selected, Octopool
-can use anonymous GitHub API, public page/raw, and Git smart HTTP endpoints. The
-canonical route-by-route inventory is [Token-Free GitHub Endpoints](token-free.md).
+Before spending a pooled identity, Octopool can use anonymous GitHub API, public page/raw,
+and Git smart HTTP endpoints. Successful direct repository-resource responses are themselves
+a public visibility proof; ambiguous search responses still require the explicit repository
+guard. The canonical route-by-route inventory is
+[Token-Free GitHub Endpoints](token-free.md).
 
 The main transport classes are:
 
@@ -115,8 +120,10 @@ the public-repo guard and active-identity check before returning.
 
 Cache publication is awaited before returning a miss response, closing the response/write
 race for immediate repeat reads. Concurrent identical misses also claim a short pool-scoped
-fill lease in the Durable Object; followers wait for the leader's D1 publication and serve
-the resulting hit instead of duplicating the GitHub request. Audit writes remain deferred.
+fill lease in the Durable Object; followers wait for the leader's publication and serve
+the resulting hit instead of duplicating the GitHub request. Public-repository proof
+refreshes use the same coordinator pattern, so simultaneous expired-proof checks share one
+GitHub request. Audit writes remain deferred.
 An hourly scheduled task
 deletes cache entries that expired more than 25 hours ago in bounded batches, preserving
 the longest stale-serving window while keeping D1 growth bounded.
@@ -140,9 +147,13 @@ is public.
 - `404` or `private !== false` → `403 repo_not_public`.
 - If both authenticated and anonymous API checks are rate-limited or unavailable, Octopool
   can prove visibility from GitHub's public repository page marker without an API token.
+- A successful anonymous request for a direct repository resource is also accepted as the
+  live public proof, so a cache miss does not need a second GitHub metadata request. Search
+  responses still run the explicit visibility check because an empty result does not prove
+  that a `repo:` qualifier names a public repository.
 - A successful public check is recorded in `github_public_repos` with a TTL
-  (`PUBLIC_REPO_TTL_SECONDS`, default 30s); subsequent requests reuse the fresh proof
-  instead of re-hitting GitHub.
+  (`PUBLIC_REPO_TTL_SECONDS`, default 30s) and the edge cache; subsequent cache hits reuse
+  the fresh proof instead of re-hitting GitHub.
 
 ### Historical proof during outages
 

@@ -415,7 +415,7 @@ ON CONFLICT(owner, repo) DO UPDATE SET
   expires_at = excluded.expires_at;
 
 -- name: FreshPublicRepoProof :one
-SELECT 1
+SELECT checked_at, expires_at
 FROM github_public_repos
 WHERE lower(owner) = ?1
   AND lower(repo) = ?2
@@ -423,7 +423,7 @@ WHERE lower(owner) = ?1
 LIMIT 1;
 
 -- name: CoveringPublicRepoProof :one
-SELECT 1
+SELECT checked_at, expires_at
 FROM github_public_repos
 WHERE lower(owner) = ?1
   AND lower(repo) = ?2
@@ -431,7 +431,7 @@ WHERE lower(owner) = ?1
 LIMIT 1;
 
 -- name: FreshCoveringPublicRepoProof :one
-SELECT 1
+SELECT checked_at, expires_at
 FROM github_public_repos
 WHERE lower(owner) = ?1
   AND lower(repo) = ?2
