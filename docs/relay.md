@@ -178,7 +178,8 @@ across head SHAs or closed/merged state.
 - Redirects from `api.github.com` are denied (`502 github_redirect_denied`) except the
   log-download flow above.
 - Response bodies are capped: 1 MiB default, up to `MAX_RESPONSE_BYTES` (2 MiB) for
-  large-payload routes. Over-cap responses fail with `502 github_response_too_large`.
+  large-payload routes and Actions run lists. Run lists remain cacheable; over-cap
+  responses fail with `502 github_response_too_large`.
 - Requests time out after `REQUEST_TIMEOUT_MS` (15s default).
 
 ## Audit
@@ -186,3 +187,5 @@ across head SHAs or closed/merged state.
 Every routed request — success or failure — writes an `audit_events` row with request
 id, caller, pool, route key, route kind, identity id, status, error code, and duration.
 Audit writes happen via `ctx.waitUntil` and never block the response.
+The hourly maintenance task deletes audit rows older than 30 days in bounded batches,
+matching the maximum stats query window.

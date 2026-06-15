@@ -13,6 +13,8 @@
 - Give the dashboard account row balanced spacing and full-width alignment below the pool controls on tablet-sized screens.
 - Coalesce concurrent identical cache misses through the pool coordinator and raise active Actions run, job, check, and status cache TTLs from 15 to 30 seconds.
 - Give failed CLI logins actionable real-`gh` web reauthentication and retry commands instead of an opaque subprocess exit status.
+- Let cacheable Actions run lists use the configured 2 MiB response cap instead of failing above the normal 1 MiB route cap.
+- Prune audit rows older than the supported 30-day stats window in bounded hourly batches to prevent unbounded D1 growth.
 
 ## 0.3.2 - 2026-06-13
 

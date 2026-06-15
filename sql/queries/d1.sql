@@ -93,6 +93,16 @@ WHERE cache_key IN (
   LIMIT ?1
 );
 
+-- name: DeleteOldAuditEventsBatch :exec
+DELETE FROM audit_events
+WHERE request_id IN (
+  SELECT request_id
+  FROM audit_events
+  WHERE created_at < datetime(CURRENT_TIMESTAMP, '-30 days')
+  ORDER BY created_at
+  LIMIT ?1
+);
+
 -- name: DashboardUsage :one
 SELECT
   COUNT(*) AS requests_24h,

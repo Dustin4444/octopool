@@ -84,6 +84,7 @@ function route(kind: string): RouteInfo {
     routeKey: "GET /repos/openclaw/openclaw/check-runs",
     cacheable: true,
     largePayload: false,
+    fullResponseCap: false,
     logs: false,
   };
 }

@@ -699,6 +699,22 @@ func (q *Queries) DeleteIdentityScopes(ctx context.Context, identityID string) e
 	return err
 }
 
+const deleteOldAuditEventsBatch = `-- name: DeleteOldAuditEventsBatch :exec
+DELETE FROM audit_events
+WHERE request_id IN (
+  SELECT request_id
+  FROM audit_events
+  WHERE created_at < datetime(CURRENT_TIMESTAMP, '-30 days')
+  ORDER BY created_at
+  LIMIT ?1
+)
+`
+
+func (q *Queries) DeleteOldAuditEventsBatch(ctx context.Context, limit int64) error {
+	_, err := q.db.ExecContext(ctx, deleteOldAuditEventsBatch, limit)
+	return err
+}
+
 const deleteWebSession = `-- name: DeleteWebSession :exec
 DELETE FROM web_sessions
 WHERE session_hash = ?1

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { callPublicGitHub } from "../src/github";
+import { callPublicGitHub, responseCapBytes } from "../src/github";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 
 describe("github api provider", () => {
@@ -26,6 +26,45 @@ describe("github api provider", () => {
         headers: expect.not.objectContaining({ authorization: expect.any(String) }),
       }),
     );
+  });
+
+  it("uses the configured cap for Actions run lists", () => {
+    const runList = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+    });
+    const repo = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool",
+    });
+
+    expect(responseCapBytes(env(), classifyRoute(runList, policy))).toBe(2_097_152);
+    expect(responseCapBytes(env(), classifyRoute(repo, policy))).toBe(1_048_576);
+  });
+
+  it("accepts Actions run lists above the normal route cap", async () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+    });
+    const body = {
+      total_count: 1,
+      workflow_runs: [{ id: 1, display_title: "x".repeat(1_100_000) }],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json(body)),
+    );
+
+    await expect(
+      callPublicGitHub(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({
+      status: 200,
+      body,
+    });
   });
 });
 

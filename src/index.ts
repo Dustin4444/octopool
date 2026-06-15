@@ -9,7 +9,6 @@ import {
 } from "./auth";
 import {
   githubCacheKey,
-  pruneExpiredGitHubCache,
   readGitHubCache,
   readStaleGitHubCache,
   shouldUseGitHubCache,
@@ -34,6 +33,7 @@ import { discoveryResponse } from "./discovery";
 import { isPublicRequest } from "./hosts";
 import { rootResponse } from "./landing";
 import { githubResponseLocalFallbackReason, localFallbackError } from "./local-fallback";
+import { runScheduledMaintenance } from "./maintenance";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import { ensureCliCaller } from "./callers";
 import { PoolCoordinator } from "./pool-coordinator";
@@ -76,12 +76,7 @@ export default {
     }
   },
   async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext) {
-    const batchSize = 500;
-    for (let batch = 0; batch < 20; batch++) {
-      if ((await pruneExpiredGitHubCache(env, batchSize)) < batchSize) {
-        break;
-      }
-    }
+    await runScheduledMaintenance(env);
   },
 };
 

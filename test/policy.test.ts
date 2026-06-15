@@ -170,6 +170,24 @@ describe("route policy", () => {
     }
   });
 
+  it("uses the configured response cap for cacheable Actions run lists", () => {
+    for (const path of [
+      "/repos/openclaw/openclaw/actions/runs",
+      "/repos/openclaw/openclaw/actions/workflows/ci.yml/runs",
+    ]) {
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path,
+      });
+      expect(classifyRoute(request, policy)).toMatchObject({
+        cacheable: true,
+        largePayload: false,
+        fullResponseCap: true,
+      });
+    }
+  });
+
   it("allows non-OpenClaw public repo candidates by default", () => {
     const request = validateRelayRequest({
       pool: "maintainers",

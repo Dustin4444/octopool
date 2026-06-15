@@ -19,6 +19,7 @@ type RouteRule = {
   resource: string;
   cacheable: boolean;
   largePayload?: boolean;
+  fullResponseCap?: boolean;
   search?: boolean;
   logs?: boolean;
 };
@@ -89,7 +90,9 @@ const rules: RouteRule[] = [
   route(`/repos/${owner}/${repo}/commits/${sha}/check-suites`, "commit_check_suites", "core"),
   route(`/repos/${owner}/${repo}/commits/${sha}/status`, "commit_status", "core"),
   route(`/repos/${owner}/${repo}/statuses/${sha}`, "ref_statuses", "core"),
-  route(`/repos/${owner}/${repo}/actions/runs`, "run_list", "core"),
+  route(`/repos/${owner}/${repo}/actions/runs`, "run_list", "core", {
+    fullResponseCap: true,
+  }),
   route(`/repos/${owner}/${repo}/actions/runs/${id}`, "run_view", "core"),
   route(`/repos/${owner}/${repo}/actions/runs/${id}/jobs`, "run_jobs", "core"),
   route(`/repos/${owner}/${repo}/actions/runs/${id}/artifacts`, "run_artifacts", "core"),
@@ -151,6 +154,7 @@ const rules: RouteRule[] = [
     `/repos/${owner}/${repo}/actions/workflows/(?<workflow>[^/?#]+)/runs`,
     "workflow_run_list",
     "core",
+    { fullResponseCap: true },
   ),
   route(`/repos/${owner}/${repo}/releases`, "release_list", "core"),
   route(`/repos/${owner}/${repo}/releases/latest`, "release_latest", "core"),
@@ -312,6 +316,7 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
       publicOnly: !allowedOwner,
       cacheable: rule.cacheable,
       largePayload: rule.largePayload === true,
+      fullResponseCap: rule.fullResponseCap === true,
       logs: rule.logs === true,
     };
     if (routeOwner !== undefined) {

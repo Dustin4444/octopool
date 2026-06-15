@@ -401,6 +401,7 @@ function route(): RouteInfo {
     cacheable: true,
     logs: false,
     largePayload: false,
+    fullResponseCap: false,
   };
 }
 
