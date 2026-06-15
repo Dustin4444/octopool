@@ -76,6 +76,7 @@ type GithubCacheEntry struct {
 	IdentityKind        sql.NullString `json:"identity_kind"`
 	CreatedAt           string         `json:"created_at"`
 	ExpiresAt           string         `json:"expires_at"`
+	StaleExpiresAt      sql.NullString `json:"stale_expires_at"`
 }
 
 type GithubPrStateProof struct {

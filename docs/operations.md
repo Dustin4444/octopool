@@ -180,6 +180,7 @@ D1 schema lives in `migrations/`:
   public-page/raw reads below 50% remaining.
 - `0009_audit_outcomes.sql` — local-fallback reasons and coalesced-fill telemetry.
 - `0010_audit_retention.sql` — audit timestamp index for bounded retention cleanup.
+- `0011_cache_stale_retention.sql` — per-entry stale deadlines and indexed cache cleanup.
 
 Apply with `wrangler d1 migrations apply octopool` (add `--remote` for production).
 
@@ -236,9 +237,9 @@ duration, cache hit/miss/bypass status, and coalesced-fill marker); secrets and 
 bodies are never recorded.
 
 The main Worker has an hourly cron trigger at minute 17. It deletes bounded batches of
-cache entries expired for more than 25 hours and audit rows older than 30 days; this
-retains every configured stale window and the full supported stats window without
-unbounded D1 growth.
+cache entries after each entry's route-specific stale deadline and audit rows older than
+30 days; this retains every configured stale window and the full supported stats window
+without unbounded D1 growth.
 
 `GET /v1/pools/<pool>/stats?since=24h` returns pool-wide and caller-specific cache stats.
 The CLI wraps this as `octopool stats`. The browser dashboard at `/dashboard` exposes the

@@ -399,6 +399,7 @@ describe("github cache policy", () => {
       },
     });
     const run = vi.fn(async () => ({}));
+    const bind = vi.fn((..._args: unknown[]) => ({ run }));
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
@@ -408,7 +409,7 @@ describe("github cache policy", () => {
     const env = {
       DB: {
         prepare: () => ({
-          bind: () => ({ run }),
+          bind,
         }),
       },
     } as unknown as Env;
@@ -417,6 +418,8 @@ describe("github cache policy", () => {
 
     expect(run).toHaveBeenCalledOnce();
     expect(put).toHaveBeenCalledOnce();
+    const args = bind.mock.calls[0] as unknown[];
+    expect(Date.parse(`${String(args[15])}Z`) - Date.parse(`${String(args[14])}Z`)).toBe(3_600_000);
     const [, edgeResponse] = put.mock.calls[0] as unknown as [Request, Response];
     await expect(edgeResponse.json()).resolves.toMatchObject({
       status: 200,
@@ -447,6 +450,7 @@ describe("github cache policy", () => {
               identity_kind: null,
               created_at: sqliteUTC(Date.now() - 120_000),
               expires_at: expiresAt,
+              stale_expires_at: sqliteUTC(Date.now() + 60_000),
             }),
           }),
         }),
@@ -459,6 +463,38 @@ describe("github cache policy", () => {
     });
 
     expiresAt = sqliteUTC(Date.now() - 7_200_000);
+    await expect(readStaleGitHubCache(env, "cache-key", route)).resolves.toBeUndefined();
+  });
+
+  it("rejects rows past their persisted stale deadline", async () => {
+    const route = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/pulls/42",
+      }),
+      policy,
+    );
+    const env = {
+      DB: {
+        prepare: () => ({
+          bind: () => ({
+            first: async () => ({
+              status: 200,
+              response_headers_json: "{}",
+              body_json: '{"number":42}',
+              body_encoding: "json",
+              identity_id: null,
+              identity_kind: null,
+              created_at: sqliteUTC(Date.now() - 120_000),
+              expires_at: sqliteUTC(Date.now() - 60_000),
+              stale_expires_at: sqliteUTC(Date.now() - 1_000),
+            }),
+          }),
+        }),
+      },
+    } as unknown as Env;
+
     await expect(readStaleGitHubCache(env, "cache-key", route)).resolves.toBeUndefined();
   });
 

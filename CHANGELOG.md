@@ -15,6 +15,7 @@
 - Give failed CLI logins actionable real-`gh` web reauthentication and retry commands instead of an opaque subprocess exit status.
 - Let cacheable Actions run lists use the configured 2 MiB response cap instead of failing above the normal 1 MiB route cap.
 - Prune audit rows older than the supported 30-day stats window in bounded hourly batches to prevent unbounded D1 growth.
+- Prune expired cache entries at their route-specific stale deadlines instead of retaining every payload for 25 hours.
 
 ## 0.3.2 - 2026-06-13
 

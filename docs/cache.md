@@ -167,7 +167,7 @@ private-repo block — a hard `404`/private response always denies.
 
 - `github_cache_entries` — cache key, pool, method, path, query/headers JSON, route
   key/kind, status, response headers JSON, body JSON, body encoding, source identity,
-  created/expires timestamps (migration `0002`).
+  created/fresh/stale expiration timestamps (migrations `0002` and `0011`).
 - `github_public_repos` — `owner`, `repo`, `checked_at`, `expires_at` (migration `0003`).
 - `github_pr_state_proofs` — short-lived validated PR head/state discriminators for
   state-scoped PR subresource cache keys (migration `0006`).

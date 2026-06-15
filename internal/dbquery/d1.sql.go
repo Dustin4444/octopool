@@ -678,8 +678,8 @@ DELETE FROM github_cache_entries
 WHERE cache_key IN (
   SELECT cache_key
   FROM github_cache_entries
-  WHERE expires_at <= datetime(CURRENT_TIMESTAMP, '-25 hours')
-  ORDER BY expires_at
+  WHERE stale_expires_at <= CURRENT_TIMESTAMP
+  ORDER BY stale_expires_at
   LIMIT ?1
 )
 `
@@ -1320,9 +1320,11 @@ func (q *Queries) ReadGitHubCache(ctx context.Context, cacheKey string) (ReadGit
 }
 
 const readGitHubCacheAny = `-- name: ReadGitHubCacheAny :one
-SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at
+SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind,
+       created_at, expires_at, stale_expires_at
 FROM github_cache_entries
 WHERE cache_key = ?1
+  AND stale_expires_at > CURRENT_TIMESTAMP
 `
 
 type ReadGitHubCacheAnyRow struct {
@@ -1334,6 +1336,7 @@ type ReadGitHubCacheAnyRow struct {
 	IdentityKind        sql.NullString `json:"identity_kind"`
 	CreatedAt           string         `json:"created_at"`
 	ExpiresAt           string         `json:"expires_at"`
+	StaleExpiresAt      sql.NullString `json:"stale_expires_at"`
 }
 
 func (q *Queries) ReadGitHubCacheAny(ctx context.Context, cacheKey string) (ReadGitHubCacheAnyRow, error) {
@@ -1348,6 +1351,7 @@ func (q *Queries) ReadGitHubCacheAny(ctx context.Context, cacheKey string) (Read
 		&i.IdentityKind,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.StaleExpiresAt,
 	)
 	return i, err
 }
@@ -1936,8 +1940,9 @@ func (q *Queries) WebLoginCaller(ctx context.Context, arg WebLoginCallerParams) 
 const writeGitHubCache = `-- name: WriteGitHubCache :exec
 INSERT INTO github_cache_entries
   (cache_key, pool_id, method, path, query_json, headers_json, route_key, route_kind,
-   status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, expires_at)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+   status, response_headers_json, body_json, body_encoding, identity_id, identity_kind,
+   expires_at, stale_expires_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
 ON CONFLICT(cache_key) DO UPDATE SET
   status = excluded.status,
   response_headers_json = excluded.response_headers_json,
@@ -1946,7 +1951,8 @@ ON CONFLICT(cache_key) DO UPDATE SET
   identity_id = excluded.identity_id,
   identity_kind = excluded.identity_kind,
   created_at = CURRENT_TIMESTAMP,
-  expires_at = excluded.expires_at
+  expires_at = excluded.expires_at,
+  stale_expires_at = excluded.stale_expires_at
 `
 
 type WriteGitHubCacheParams struct {
@@ -1965,6 +1971,7 @@ type WriteGitHubCacheParams struct {
 	IdentityID          sql.NullString `json:"identity_id"`
 	IdentityKind        sql.NullString `json:"identity_kind"`
 	ExpiresAt           string         `json:"expires_at"`
+	StaleExpiresAt      sql.NullString `json:"stale_expires_at"`
 }
 
 func (q *Queries) WriteGitHubCache(ctx context.Context, arg WriteGitHubCacheParams) error {
@@ -1984,6 +1991,7 @@ func (q *Queries) WriteGitHubCache(ctx context.Context, arg WriteGitHubCachePara
 		arg.IdentityID,
 		arg.IdentityKind,
 		arg.ExpiresAt,
+		arg.StaleExpiresAt,
 	)
 	return err
 }

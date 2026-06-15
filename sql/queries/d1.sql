@@ -64,15 +64,18 @@ WHERE cache_key = ?1
   AND expires_at > CURRENT_TIMESTAMP;
 
 -- name: ReadGitHubCacheAny :one
-SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at
+SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind,
+       created_at, expires_at, stale_expires_at
 FROM github_cache_entries
-WHERE cache_key = ?1;
+WHERE cache_key = ?1
+  AND stale_expires_at > CURRENT_TIMESTAMP;
 
 -- name: WriteGitHubCache :exec
 INSERT INTO github_cache_entries
   (cache_key, pool_id, method, path, query_json, headers_json, route_key, route_kind,
-   status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, expires_at)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+   status, response_headers_json, body_json, body_encoding, identity_id, identity_kind,
+   expires_at, stale_expires_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
 ON CONFLICT(cache_key) DO UPDATE SET
   status = excluded.status,
   response_headers_json = excluded.response_headers_json,
@@ -81,15 +84,16 @@ ON CONFLICT(cache_key) DO UPDATE SET
   identity_id = excluded.identity_id,
   identity_kind = excluded.identity_kind,
   created_at = CURRENT_TIMESTAMP,
-  expires_at = excluded.expires_at;
+  expires_at = excluded.expires_at,
+  stale_expires_at = excluded.stale_expires_at;
 
 -- name: DeleteExpiredGitHubCacheBatch :exec
 DELETE FROM github_cache_entries
 WHERE cache_key IN (
   SELECT cache_key
   FROM github_cache_entries
-  WHERE expires_at <= datetime(CURRENT_TIMESTAMP, '-25 hours')
-  ORDER BY expires_at
+  WHERE stale_expires_at <= CURRENT_TIMESTAMP
+  ORDER BY stale_expires_at
   LIMIT ?1
 );
 

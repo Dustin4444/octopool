@@ -17,6 +17,7 @@ type CacheRow = {
   identity_kind: "pat" | "github_app" | null;
   created_at: string;
   expires_at: string;
+  stale_expires_at?: string;
 };
 
 export type CachedGitHubResponse = GitHubRelayResponse & {
@@ -227,6 +228,12 @@ function staleCacheAllowed(row: CacheRow, route: RouteInfo): boolean {
   if (!Number.isFinite(createdAt) || !Number.isFinite(expiresAt)) {
     return false;
   }
+  if (row.stale_expires_at !== undefined) {
+    const staleExpiresAt = Date.parse(`${row.stale_expires_at}Z`);
+    if (!Number.isFinite(staleExpiresAt) || staleExpiresAt <= Date.now()) {
+      return false;
+    }
+  }
   const freshTtlSeconds = Math.max(0, (expiresAt - createdAt) / 1000);
   const maxStaleMs = staleCacheSeconds(route, freshTtlSeconds) * 1000;
   return Date.now() - expiresAt <= maxStaleMs;
@@ -244,8 +251,10 @@ export async function writeGitHubCache(
     return;
   }
   const ttlSeconds = cacheTTLSeconds(route, response);
+  const staleSeconds = staleCacheSeconds(route, ttlSeconds);
   const createdAt = sqliteTimestamp(new Date());
   const expiresAt = sqliteTimestamp(new Date(Date.now() + ttlSeconds * 1000));
+  const staleExpiresAt = sqliteTimestamp(new Date(Date.now() + (ttlSeconds + staleSeconds) * 1000));
   const cached: CachedGitHubResponse = {
     ...response,
     body_encoding: response.body_encoding ?? "json",
@@ -271,6 +280,7 @@ export async function writeGitHubCache(
         identity?.id ?? null,
         identity?.kind ?? null,
         expiresAt,
+        staleExpiresAt,
       )
       .run(),
     writeEdgeCachedResponse(cacheKey, cached),

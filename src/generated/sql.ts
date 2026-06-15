@@ -48,11 +48,11 @@ export const queries = {
   readGitHubCache:
     "SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at\nFROM github_cache_entries\nWHERE cache_key = ?1\n  AND expires_at > CURRENT_TIMESTAMP",
   readGitHubCacheAny:
-    "SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at\nFROM github_cache_entries\nWHERE cache_key = ?1",
+    "SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind,\n       created_at, expires_at, stale_expires_at\nFROM github_cache_entries\nWHERE cache_key = ?1\n  AND stale_expires_at > CURRENT_TIMESTAMP",
   writeGitHubCache:
-    "INSERT INTO github_cache_entries\n  (cache_key, pool_id, method, path, query_json, headers_json, route_key, route_kind,\n   status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, expires_at)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)\nON CONFLICT(cache_key) DO UPDATE SET\n  status = excluded.status,\n  response_headers_json = excluded.response_headers_json,\n  body_json = excluded.body_json,\n  body_encoding = excluded.body_encoding,\n  identity_id = excluded.identity_id,\n  identity_kind = excluded.identity_kind,\n  created_at = CURRENT_TIMESTAMP,\n  expires_at = excluded.expires_at",
+    "INSERT INTO github_cache_entries\n  (cache_key, pool_id, method, path, query_json, headers_json, route_key, route_kind,\n   status, response_headers_json, body_json, body_encoding, identity_id, identity_kind,\n   expires_at, stale_expires_at)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)\nON CONFLICT(cache_key) DO UPDATE SET\n  status = excluded.status,\n  response_headers_json = excluded.response_headers_json,\n  body_json = excluded.body_json,\n  body_encoding = excluded.body_encoding,\n  identity_id = excluded.identity_id,\n  identity_kind = excluded.identity_kind,\n  created_at = CURRENT_TIMESTAMP,\n  expires_at = excluded.expires_at,\n  stale_expires_at = excluded.stale_expires_at",
   deleteExpiredGitHubCacheBatch:
-    "DELETE FROM github_cache_entries\nWHERE cache_key IN (\n  SELECT cache_key\n  FROM github_cache_entries\n  WHERE expires_at <= datetime(CURRENT_TIMESTAMP, '-25 hours')\n  ORDER BY expires_at\n  LIMIT ?1\n)",
+    "DELETE FROM github_cache_entries\nWHERE cache_key IN (\n  SELECT cache_key\n  FROM github_cache_entries\n  WHERE stale_expires_at <= CURRENT_TIMESTAMP\n  ORDER BY stale_expires_at\n  LIMIT ?1\n)",
   deleteOldAuditEventsBatch:
     "DELETE FROM audit_events\nWHERE request_id IN (\n  SELECT request_id\n  FROM audit_events\n  WHERE created_at < datetime(CURRENT_TIMESTAMP, '-30 days')\n  ORDER BY created_at\n  LIMIT ?1\n)",
   dashboardUsage:
