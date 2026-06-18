@@ -235,6 +235,7 @@ src/                          modular Worker runtime
 test/e2e/                     real workerd/D1/Durable Object integration suite
 ```
 
-`pnpm check` is the full local gate: generated route/SQL drift, formatting, lint, unit and
-workerd E2E tests, TypeScript build, Go tests, and Go vet. `pnpm e2e` is the live deployment
-smoke test.
+`pnpm check` is the deterministic local gate: generated route/SQL drift, formatting, lint,
+unit and controlled-workerd E2E tests, TypeScript build, Go tests, and Go vet.
+`pnpm test:e2e:cli-worker` is the networked compiled-CLI → local-Workerd/D1/DO release gate;
+`pnpm e2e` is the live deployment smoke test.

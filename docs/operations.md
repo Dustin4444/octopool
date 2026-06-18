@@ -196,7 +196,9 @@ pnpm run deploy   # wrangler deploy backing Worker, then OpenClaw proxy Worker
 pnpm e2e          # smoke-test the live deployment
 ```
 
-`pnpm check` is the full gate (TypeScript + Go). The Go CLI also builds/tests with
+`pnpm check` is the deterministic TypeScript + Go gate. The networked release gate
+`pnpm test:e2e:cli-worker` additionally crosses the compiled CLI, local Workerd, migrated
+D1, a real Durable Object, and public GitHub. The Go CLI also builds/tests with
 `go build ./cmd/octopool` and `go test ./...`.
 
 `pnpm run deploy` runs both `wrangler deploy` calls. Self-hosters who don't operate the
