@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { PUBLIC_SHAPES } from "../src/github-public-shapes";
 import { ROUTES } from "../src/route-manifest";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -37,7 +38,6 @@ describe("token-free endpoint documentation", () => {
 
   it("documents every no-API-quota transport family", () => {
     const docs = readFileSync(path.join(root, "docs/token-free.md"), "utf8");
-    const githubWeb = readFileSync(path.join(root, "src/github-web.ts"), "utf8");
     for (const source of [
       "patch-diff.githubusercontent.com",
       "raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}",
@@ -49,8 +49,8 @@ describe("token-free endpoint documentation", () => {
     ]) {
       expect(docs).toContain(source);
     }
-    for (const match of githubWeb.matchAll(/const [A-Z_]+_SHAPE = "([^"]+)"/g)) {
-      expect(docs).toContain(match[1]!);
+    for (const shape of Object.values(PUBLIC_SHAPES)) {
+      expect(docs).toContain(shape);
     }
   });
 });

@@ -8,12 +8,11 @@ import {
   parseActionsRunListHTML,
   parseCommitPatchSHA,
 } from "./github-html";
+import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { fetchPublicPage } from "./github-web-transport";
 import type { WebRequest } from "./github-web-types";
 import type { RelayRequest, RouteInfo } from "./types";
 
-const ACTIONS_SUMMARY_SHAPE = "actions-summary-v1";
-const ACTIONS_JOBS_SHAPE = "actions-jobs-v1";
 const MAX_PUBLIC_JOB_PAGES = 25;
 
 export function actionsPageRequest(
@@ -32,14 +31,14 @@ export function actionsPageRequest(
   const shape = request.headers?.["x-octopool-public-shape"];
   if (
     (route.kind === "run_list" || route.kind === "workflow_run_list") &&
-    shape === ACTIONS_SUMMARY_SHAPE
+    shape === PUBLIC_SHAPES.actionsSummary
   ) {
     return actionsRunListRequest(env, request, route);
   }
-  if (route.kind === "run_view" && shape === ACTIONS_SUMMARY_SHAPE) {
+  if (route.kind === "run_view" && shape === PUBLIC_SHAPES.actionsSummary) {
     return actionsRunRequest(env, request, route);
   }
-  if (route.kind === "run_jobs" && shape === ACTIONS_JOBS_SHAPE) {
+  if (route.kind === "run_jobs" && shape === PUBLIC_SHAPES.actionsJobs) {
     return actionsRunJobsRequest(env, request, route);
   }
   return undefined;
