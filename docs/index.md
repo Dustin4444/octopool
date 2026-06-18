@@ -1,15 +1,15 @@
 # Octopool
 
-Octopool is a self-hosted GitHub read relay and shared cache. One Cloudflare Worker holds
-your org's PATs and GitHub App installations, picks the healthiest one per request, and
-caches the response in D1 so the next caller doesn't burn any GitHub rate budget.
+Octopool is a self-hosted GitHub read relay and shared cache. One Cloudflare Worker serves
+shared edge/D1 cache hits, prefers supported token-free GitHub transports on misses, and
+selects a pooled PAT or GitHub App identity only when required.
 
 The pitch in one paragraph: a maintainer team plus a few bots make the same handful of
 read calls (`gh pr view`, `gh pr checks`, `gh run list`, `gh issue list`, `gh api repos/...`)
 against the same repos all day. Each developer's PAT and each App installation has its own
 quota; they're not shared and they overlap heavily. Octopool pools the identities behind
-one Cloudflare Worker, serves a normalized read-only API, and adds a read-through D1
-cache so repeated reads return without touching GitHub at all. Tokens stay server-side,
+one Cloudflare Worker, serves a normalized read-only API, and adds edge + D1 read-through
+caches so repeated reads return without touching GitHub at all. Tokens stay server-side,
 membership is org-gated, and the CLI falls through to your real `gh` for anything outside
 the supported read shapes.
 
@@ -32,7 +32,7 @@ the supported read shapes.
   and real-`gh` fallback.
 - [Pooled identities & routing](identities.md) — PAT and GitHub App identities, scopes,
   and the pool coordinator's selection, leases, and cooldowns.
-- [Cache & public-repo guard](cache.md) — the D1 read-through cache and public-only
+- [Cache & public-repo guard](cache.md) — the edge + D1 read-through cache and public-only
   visibility enforcement.
 - [Auth & org membership](auth.md) — caller auth, admin auth, website sessions, and the
   GitHub-CLI login exchange.

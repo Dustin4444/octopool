@@ -5,7 +5,7 @@ the default login pool automatically; admin caller registration remains availabl
 manual backfills and token issuance. Admin actions use the admin token (see
 [Auth](auth.md#admin-auth)).
 
-Source: `src/index.ts` (`createCaller`, `upsertIdentity`), `cmd/octopool/main.go`.
+Source: `src/provisioning.ts`, `src/router.ts`, `cmd/octopool/main.go`.
 
 ## Provision a caller
 

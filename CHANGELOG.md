@@ -10,6 +10,9 @@
 
 ### Fixes
 
+- Fall back to the real GitHub CLI instead of returning partial results when relay-backed PR checks/details or filtered issue lists exhaust the bounded pagination window.
+- Reject non-integer `--limit` and `-L` values instead of silently substituting the default limit.
+- Reject malformed relay envelopes with missing or unknown body encodings instead of treating them as JSON.
 - Give the dashboard account row balanced spacing and full-width alignment below the pool controls on tablet-sized screens.
 - Coalesce concurrent identical cache misses through the pool coordinator and raise active Actions run, job, check, and status cache TTLs from 15 to 30 seconds.
 - Give failed CLI logins actionable real-`gh` web reauthentication and retry commands instead of an opaque subprocess exit status.

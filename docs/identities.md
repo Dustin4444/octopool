@@ -1,11 +1,12 @@
 # Pooled Identities & Routing
 
-A pool holds one or more GitHub identities. The relay picks one identity per request and
-performs the GitHub call with it. Routing prefers healthy identities with available rate
-budget and avoids piling many callers onto the same identity.
+A pool holds one or more GitHub identities. The relay serves cache hits and equivalent
+token-free reads first; only the remaining requests select an identity. Routing prefers
+healthy identities with available rate budget and avoids piling many callers onto the
+same identity.
 
-Source: `src/db.ts` (`loadIdentities`), `src/github.ts` (token minting),
-`src/pool-coordinator.ts` (selection), `src/index.ts` (`upsertIdentity`).
+Source: `src/db.ts` (`loadIdentities`), `src/github-auth.ts` (token minting),
+`src/pool-coordinator.ts` (selection), `src/provisioning.ts` (registration).
 
 ## Identity kinds
 
@@ -34,8 +35,10 @@ PKCS#8. For v1 the `octopool-cache` App is installed on selected repositories on
 
 Each identity has one or more `identity_scopes` rows (`owner`, optional `repo`,
 `allow_private`). When a request targets `owner/repo`, only identities scoped to that
-owner (with a matching `repo` or an owner-wide `NULL` repo) are candidates. Routes with no
-owner (e.g. `/rate_limit`) consider all active identities in the pool.
+owner (with a matching `repo` or an owner-wide `NULL` repo) are candidates. A PAT scoped
+to `*` can serve any repository after public proof; scoped PATs and GitHub Apps remain
+limited to their configured owner/repository. Routes with no owner (e.g. `/rate_limit`)
+consider all active identities in the pool.
 
 `allow_private` exists in the schema but the shared relay is public-repository-only in
 v1; the [public-repo guard](cache.md) blocks private routes regardless.
@@ -43,11 +46,12 @@ v1; the [public-repo guard](cache.md) blocks private routes regardless.
 ## Selection (PoolCoordinator)
 
 Identity selection runs in a Durable Object partitioned per pool (`pool:<pool_id>`). It
-keeps three SQLite tables in DO storage:
+keeps four SQLite tables in DO storage:
 
 - `leases` — sticky route→identity binding, 10s TTL.
 - `rate_states` — last seen `remaining`/`reset_at` per identity and resource bucket.
 - `cooldowns` — per identity, scoped to `*`, `resource:<r>`, or a route key.
+- `cache_fills` — 8s ownership leases that coalesce concurrent identical cache misses.
 
 `selectIdentity` logic:
 

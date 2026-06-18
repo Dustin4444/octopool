@@ -5,8 +5,8 @@ provisioning, the GitHub-CLI login exchange that mints caller tokens, and websit
 sessions for `/dashboard`. All of them are pinned to a single allowed GitHub org
 (`ALLOWED_GITHUB_ORG`, `openclaw`).
 
-Source: `src/auth.ts`, `src/web-session.ts`, `src/index.ts` (`loginGitHubCLI`,
-`createCaller`).
+Source: `src/auth.ts`, `src/callers.ts`, `src/web-session.ts`, `src/provisioning.ts`,
+`src/router.ts`.
 
 ## Caller auth
 

@@ -1,10 +1,11 @@
 # GitHub Read Relay
 
 The relay is the core of Octopool: a single Worker endpoint that performs read-only
-GitHub REST requests on behalf of a caller, using a pooled GitHub identity selected by
-the pool coordinator.
+GitHub requests on behalf of a caller. It serves shared cache hits first, then equivalent
+token-free reads, and selects a pooled GitHub identity only when needed.
 
-Source: `src/index.ts` (`relayGitHub`), `src/policy.ts`, `src/github.ts`.
+Source: `src/relay.ts`, `src/router.ts`, `src/policy.ts`, `src/route-manifest.ts`,
+`src/github.ts`, `src/github-web.ts`.
 
 ## `POST /v1/github/request`
 
@@ -91,7 +92,8 @@ and patch hosts.
   include additional org fields that are not present in unauthenticated public API responses.
 - `GET /users/:login/starred` and `/subscriptions` are intentionally not relayed because
   authenticated responses can include private repositories visible to the caller.
-- `cache` is `hit`, `stale`, `miss`, or `bypass` (route not cacheable).
+- `cache` is `hit`, `stale`, `miss`, or `bypass` (conditional, log, large-payload, or
+  otherwise non-cacheable request).
 - `stale_ok: true` means an expired public cache entry was served because all eligible
   identities were depleted, cooling down, missing, or rate-limited. `stale_reason` and
   `cache_expires_at` are included on those responses.
@@ -103,7 +105,8 @@ and patch hosts.
 ## Supported routes
 
 Routes are defined in `src/route-manifest.ts` and enforced by `src/policy.ts`. Only the
-following read-only shapes are enabled; anything else returns `403 route_denied`:
+following read-only shapes are enabled. A safe CLI-shaped request outside this set gets
+`424 fallback_local` with reason `route_denied`, so the shim can delegate to real `gh`:
 
 <!-- supported-route-kinds:start -->
 
@@ -233,11 +236,12 @@ gated by the pool's `allow_logs` policy.
 - `allow_public_repos` — public repositories from other owners are allowed after the
   public-repo guard proves `private: false` (default `true`). These routes use broad PAT
   identities from the pool rather than repo-scoped GitHub App installation tokens.
-- `allow_logs` — log routes require it (default `true`), else `403 logs_denied`.
+- `allow_logs` — log routes require it (default `true`), else `424 fallback_local` with
+  reason `logs_denied`.
 - `allow_search` — search routes require it (default `false`). Issue, code, and commit searches
   require exactly one `repo:owner/name` qualifier plus plain terms and optional
   `type:issue|pr` / `state:open|closed`; repository search accepts plain terms only. Invalid
-  queries return `403 search_denied`.
+  queries return `424 fallback_local` with reason `search_denied`.
 
 Every repo route additionally passes a public-visibility check before a pooled identity
 or cache entry is used — see [Cache & public-repo guard](cache.md).
@@ -260,8 +264,10 @@ across head SHAs or closed/merged state.
 
 ## Audit
 
-Every routed request — success or failure — writes an `audit_events` row with request
-id, caller, pool, route key, route kind, identity id, status, error code, and duration.
+Every validated request from an authenticated caller to an existing pool writes an
+`audit_events` row with request id, caller, pool, route key, route kind, identity id,
+status, error code, and duration. Parse, authentication, and pool-lookup failures occur
+before the audit boundary.
 Audit writes happen via `ctx.waitUntil` and never block the response.
 The hourly maintenance task deletes audit rows older than 30 days in bounded batches,
 matching the maximum stats query window.

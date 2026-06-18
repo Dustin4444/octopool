@@ -11,7 +11,7 @@ Octopool has two browser hosts on the same backing Worker and data plane:
 
 API clients can still request JSON from either host.
 
-Source: `src/landing.ts`, `src/index.ts` (`/`, `githubLoginRedirect`),
+Source: `src/landing.ts`, `src/web-routing.ts`, `src/web-session.ts`, `src/router.ts`,
 `src/openclaw-proxy.ts`.
 
 ## Content negotiation at `/`

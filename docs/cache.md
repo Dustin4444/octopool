@@ -4,7 +4,9 @@ Octopool owns a shared edge + D1 read-through cache for `gh` reads, and guards e
 route with a public-visibility check. Both keep private data out of the shared cache and
 reduce load on pooled identities.
 
-Source: `src/cache.ts`, `src/edge-cache.ts`, `src/public-repos.ts`, migrations `0002`/`0003`.
+Source: `src/cache.ts`, `src/cache-policy.ts`, `src/cache-coalesce.ts`,
+`src/edge-cache.ts`, `src/public-repos.ts`, `src/pr-state.ts`, `src/maintenance.ts`,
+migrations `0002`/`0003`/`0006`/`0011`.
 
 ## Read-through edge + D1 cache
 
@@ -112,8 +114,9 @@ A fresh or bounded-stale hit is only served if:
 - the repo's public-visibility proof still covers the entry (re-checked, with a small
   historical-proof allowance during GitHub outages / secondary-rate-limit — see below).
 
-If every eligible identity is depleted, cooling down, missing, or rate-limited, Octopool may
-serve an expired public cache entry for a short route-specific grace window. Mutable CI
+If the eligible token-free and pooled backends are unavailable, depleted, cooling down,
+or rate-limited, Octopool may serve an expired public cache entry for a short route-specific
+grace window. Mutable CI
 payloads get only minutes; terminal CI payloads get up to a day; PR/issue detail routes
 get up to an hour; immutable-ish commit views can get up to a day. Stale serves still run
 the public-repo guard and active-identity check before returning.
@@ -124,9 +127,9 @@ fill lease in the Durable Object; followers wait for the leader's publication an
 the resulting hit instead of duplicating the GitHub request. Public-repository proof
 refreshes use the same coordinator pattern, so simultaneous expired-proof checks share one
 GitHub request. Audit writes remain deferred.
-An hourly scheduled task
-deletes cache entries that expired more than 25 hours ago in bounded batches, preserving
-the longest stale-serving window while keeping D1 growth bounded.
+An hourly scheduled task deletes cache entries after each entry's route-specific
+`stale_expires_at` deadline in bounded batches, preserving every configured stale-serving
+window while keeping D1 growth bounded.
 
 Hits are still audited, with the cached identity attributed. Each audit row records cache
 status as `hit`, `stale`, `miss`, `bypass`, or `unknown`, which powers `octopool stats` and

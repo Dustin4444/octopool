@@ -108,7 +108,8 @@ octopool admin identity \
 
 The first reference to a pool by name (here, `maintainers`) creates it with the default
 policy. Verified org members can now `octopool login https://octopool.your-org.dev` and
-use the relay; the identities you registered take turns serving cache misses. See
+use the relay; the registered identities serve misses that cache and token-free transports
+cannot satisfy. See
 [Admin & provisioning](admin.md) for `--scope`, `--kind github_app`, and `--installation-id`
 shapes.
 
@@ -230,10 +231,11 @@ Override the host/resolver with `OCTOPOOL_E2E_HOST` / `OCTOPOOL_E2E_RESOLVER`.
 
 ## Observability
 
-Observability is enabled at full sampling. Every routed request writes an `audit_events`
-row (caller, pool, route key/kind, identity, status, error/fallback classification,
-duration, cache hit/miss/bypass status, and coalesced-fill marker); secrets and request
-bodies are never recorded.
+Observability is enabled at full sampling. Every validated request from an authenticated
+caller to an existing pool writes an `audit_events` row (caller, pool, route key/kind,
+identity, status, error/fallback classification, duration, cache hit/miss/bypass status,
+and coalesced-fill marker); parse, authentication, and pool-lookup failures occur before
+that boundary. Secrets and request bodies are never recorded.
 
 The main Worker has an hourly cron trigger at minute 17. It deletes bounded batches of
 cache entries after each entry's route-specific stale deadline and audit rows older than

@@ -6,7 +6,7 @@
 
 **Pool your org's GitHub identities behind a shared Cloudflare cache.**
 
-A self-hosted GitHub read relay. One Cloudflare Worker holds your team's PATs and GitHub App installations, picks the healthiest one per request, and caches the response in D1 so the next caller doesn't burn a single token of rate limit.
+A self-hosted GitHub read relay. One Cloudflare Worker serves shared cache hits, uses token-free GitHub transports where possible, and routes the remaining reads through the healthiest pooled PAT or GitHub App installation.
 
 [App](https://octopool.openclaw.ai) · [Docs](https://docs.octopool.dev) · [Relay API](https://docs.octopool.dev/relay.html) · [CLI](https://docs.octopool.dev/cli.html) · [Spec](https://docs.octopool.dev/spec.html)
 
@@ -22,9 +22,9 @@ A maintainer team plus a few bots can chew through GitHub's primary rate limit f
 
 Octopool moves that traffic off individual machines and onto Cloudflare:
 
-- **One pool, one cache.** PATs and GitHub App private keys live as Cloudflare Worker secrets, not on laptops or in CI logs. The Worker routes each cache miss to one healthy identity and writes the result into a D1 read-through cache that every other caller hits next.
+- **One pool, one cache.** PATs and GitHub App private keys live as Cloudflare Worker secrets, not on laptops or in CI logs. A cache miss first tries an equivalent token-free GitHub transport, then a healthy pooled identity; eligible results populate the shared D1 cache.
 - **Rate budgets add up.** Each identity keeps its own GitHub rate-limit bucket. Five PATs + one GitHub App ≈ five-plus-one combined headroom. A per-pool Durable Object picks the identity with the most remaining budget for the target resource and holds a short sticky lease so concurrent callers don't stampede the same one.
-- **Cache hits cost zero GitHub quota.** Fresh D1 hits return straight from Cloudflare without touching GitHub at all. When every pooled identity is depleted, rate-limited, or cooling down, Octopool can also serve a bounded stale public cache entry instead of forcing the caller back to GitHub.
+- **Cache hits cost zero GitHub quota.** Fresh edge or D1 hits return straight from Cloudflare without touching GitHub at all. When upstream token-free and pooled backends are unavailable or rate-limited, Octopool can also serve a bounded stale public cache entry instead of forcing the caller back to GitHub.
 - **Public-page fallbacks preserve token quota.** Public PR diffs, commit/compare diff and patch media, explicit-ref content files, workflow-filtered run lists, and shaped run job/step metadata use [token-free GitHub endpoints](https://docs.octopool.dev/token-free.html); supported top-level `gh run list/view` and `gh release view` reads prefer public pages once anonymous API quota falls below 50%, before Octopool spends a pooled PAT or App token.
 - **Tokens stay server-side.** Callers authenticate to octopool with a short caller token (issued in exchange for their `gh auth token`). The underlying PATs and App private keys never leave the Worker — not into responses, not into audit rows, not into the cache.
 - **Org-gated, public-repo only.** Only verified members of one GitHub org can mint a caller token, and every repo route is checked against GitHub's public-visibility endpoint before a pooled identity or cache entry is used. Private-repo callers fall back to their own `gh`.
@@ -40,20 +40,21 @@ If you're not running a maintainer team and you don't care about GitHub rate lim
    octopool gh ...   ── caller ──▶  Worker (octopool)
                        token        ├── auth + org-membership check
                                     ├── route classify + per-pool policy
-                                    ├── public-repo guard ─────────────▶ GET /repos/:o/:r
-                                    ├── D1 cache lookup ─── hit ───────▶ return cached
+                                    ├── edge + D1 cache ─── hit ───────▶ return cached
                                     │                       miss
-                                    ├── web/raw fast path ─────────────▶ github.com / raw.githubusercontent.com
+                                    ├── anonymous API / web / raw / Git ▶ public GitHub endpoints
+                                    ├── public-repo guard ─────────────▶ GET /repos/:o/:r
                                     ├── PoolCoordinator (Durable Object)
+                                    │     coalesces identical misses
                                     │     picks one identity ──────────▶ GET /repos/.../pulls/N
                                     │     records rate + cooldowns       with pooled PAT/App token
                                     ├── write D1 cache (public 200s)
                                     └── audit row (no secrets)
 ```
 
-- **Worker** (`src/index.ts`) — HTTP, auth, policy, response shaping.
-- **PoolCoordinator** Durable Object (one per pool) — per-identity rate snapshots, sticky route leases, cooldowns.
-- **D1** — pools, callers, identities, audit events, public-repo proofs, read-through cache.
+- **Worker** (`src/index.ts`, `src/router.ts`, `src/relay.ts`) — HTTP routing, auth, policy, cache orchestration, and response shaping.
+- **PoolCoordinator** Durable Object (one per pool) — per-identity rate snapshots, sticky route leases, cooldowns, and cache-fill leases.
+- **D1 + Cache API** — pools, callers, identities, audit events, public-repo/state proofs, and shared/edge read-through caches.
 - **Cloudflare Worker secrets** — pooled PATs and GitHub App PKCS#8 private keys. Never in D1, never in logs.
 
 ## Use it (CLI)

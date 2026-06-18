@@ -1,384 +1,240 @@
 # Octopool Spec
 
-## Product Contract
+## Product contract
 
-`octopool` is a Cloudflare-hosted GitHub read relay and shared cache.
-
-It lets trusted users and agents share an explicitly managed pool of GitHub identities for read-heavy maintainer automation, while keeping credentials off developer machines and enforcing routing, audit, and safety policy centrally.
+Octopool is a self-hosted, Cloudflare-hosted GitHub read relay and shared cache. Trusted
+users and agents share explicitly managed GitHub identities without receiving the pooled
+credentials. The service centralizes read policy, public-repository enforcement, caching,
+rate-budget routing, and audit data.
 
 ## Goals
 
-- route supported read-only GitHub requests through a shared relay
-- support 1..n GitHub identities per pool
-- prefer healthy identities with available rate budget
-- avoid agent stampedes against the same GitHub endpoint
-- keep GitHub tokens out of logs, local config, and SQLite stores
-- expose compact quota, health, and audit state for maintainers
-- fall through to the real GitHub CLI for unsafe commands locally, and for safe reads only
-  after the relay returns an explicit local-fallback signal
+- Route supported read-only GitHub requests through one authenticated relay.
+- Serve fresh edge/D1 cache entries and equivalent token-free GitHub transports before
+  spending pooled PAT or GitHub App quota.
+- Select healthy identities by resource budget; apply sticky leases and cooldowns.
+- Coalesce concurrent identical cache misses.
+- Keep GitHub credentials out of client config, D1, responses, caches, and audit rows.
+- Expose compact health, cache, rate, caller, and outcome data to operators.
+- Delegate unsafe commands locally before relay contact and safe-but-unserviceable reads
+  only after an explicit `fallback_local` response.
 
-## Non-Goals
+## Non-goals
 
-- general-purpose HTTP proxy
-- storing or relaying private repository responses in the shared cache
-- bypassing GitHub authorization, repository permissions, or abuse controls
-- mutating GitHub state by default
-- replacing project-specific local mirrors, search indexes, or triage stores
-- public multi-tenant SaaS
+- General-purpose HTTP proxy or multi-tenant SaaS.
+- Shared private-repository reads or caching.
+- GitHub mutations or GraphQL in the current protocol.
+- Bypassing GitHub authorization, permissions, rate limits, or abuse controls.
+- Replacing project-specific mirrors, indexes, or triage stores.
 
-## Trust Model
+## Trust and security model
 
-Pools are private, explicit, and admin-managed.
+Pools and identities are explicit and admin-managed. PATs and GitHub App private keys are
+Cloudflare Worker secrets referenced by stable names in D1. Installation tokens are minted
+server-side and cached in Worker memory.
 
-Allowed identities:
+The shared relay is public-repository-only. Repository routes require a live or narrowly
+bounded historical public proof before pooled credentials or cached data can be used. A
+hard private/404 result always denies. Broad `*` PAT scopes may serve any proven-public
+repository; scoped PATs and GitHub Apps remain limited to their configured owner/repository.
 
-- user-provided GitHub PATs with informed consent
-- GitHub App installations where public repo access is intended
-- service accounts only where GitHub policy and org policy allow them
-
-Disallowed behavior:
-
-- token scraping
-- hidden credential reuse
-- rotating identities to evade repo/user bans or abuse detection
-- cross-user private repo access without explicit authorization
-
-Shared cache v1 is public-repository-only. Octopool checks repository visibility through GitHub's public repository endpoint before selecting a pooled identity or reading/writing D1 cache entries for repo routes.
+Only approved GitHub API, web, raw-content, Git smart HTTP, and signed Actions-log hosts
+are reachable. Requests have strict path/query/header validation, timeouts, redirect rules,
+response-size caps, and safe response-header projection. Authorization and cookies never
+leave the Worker response boundary.
 
 ## Architecture
 
-- `worker`: public HTTPS API, auth, request validation, response shaping
-- `PoolCoordinator` Durable Object: per-pool routing, leases, health, rate snapshots
-- D1: users, pools, credential metadata, audit summaries, policy config
-- Cloudflare Secrets / Secrets Store: GitHub tokens and app private keys
-- Analytics Engine or logs: aggregate metrics, no secrets, redacted request bodies
-- `octopool` CLI: login, `gh api` shim, fallback to the real GitHub CLI
+- `src/index.ts`: Worker lifecycle, security headers, scheduled maintenance, Durable Object export.
+- `src/router.ts`: ordered HTTP endpoint dispatch.
+- `src/relay.ts`: typed relay preparation, cache, backend, success, error, and audit stages.
+- Feature modules: auth, provisioning, route policy, cache, public proof, token-free GitHub
+  adapters, dashboard read models, stats, and browser sessions.
+- `PoolCoordinator`: one SQLite-backed Durable Object per pool; identity leases, rate state,
+  cooldowns, and cache-fill leases.
+- D1: pools, callers, identity metadata/scopes, sessions, proofs, cache entries, anonymous
+  rate snapshots, and audit events.
+- Cloudflare Cache API: data-center-local cache ahead of D1.
+- `octopool` Go CLI: login/admin/stats commands, safe `gh` translation, strict envelope
+  decoding, and real-`gh` delegation.
 
-Durable Object partition key:
+Durable Object partition key: `pool:<pool_id>`.
 
-```text
-pool:<pool_id>
-```
+## Relay flow
 
-Optional future sharding:
+1. Parse and validate the normalized relay request.
+2. Authenticate the hashed caller token and pool grant; load the pool policy.
+3. Classify the route, enforce policy, validate optional PR-state hints, and derive a
+   normalized route/cache key.
+4. For cacheable routes, read the edge cache then D1. Validate cached identity eligibility
+   and public-repository proof before serving.
+5. Claim an 8-second cache-fill lease. Followers wait briefly and reuse the leader's result.
+6. Try an exact token-free adapter: anonymous API, public page/raw content, or Git smart HTTP.
+7. Establish public-repository proof from the direct response or the explicit guard.
+8. If the route requires credentials, select a scoped identity through the pool coordinator,
+   call GitHub, record rate state/cooldowns, and retry another candidate when appropriate.
+9. Sanitize and publish eligible `200` responses to D1 and the edge cache.
+10. Return the relay envelope; asynchronously record the authenticated/validated outcome.
+11. If a safe read cannot be served, return `424 fallback_local` with a reason. The CLI
+    reruns the original command with real `gh` unless local fallback is disabled.
+12. Always release an owned cache-fill lease.
 
-```text
-pool:<pool_id>:route:<owner>
-pool:<pool_id>:route:<owner>/<repo>
-```
+Conditional, log, large-payload, `rate_limit`, and otherwise non-cacheable requests bypass
+cache. Route-specific bounded stale entries may be served for quota/depletion/cooldown
+failures after the same identity and public-proof checks.
 
-## Request Flow
-
-1. A caller uses `octopool gh api`, a `gh` symlink, or `POST /v1/github/request`.
-2. The CLI sends safe read-shaped requests to Octopool before trying the local GitHub
-   token. Mutations and secret-bearing requests stay local.
-3. Worker authenticates caller and validates command policy.
-4. Worker verifies repo routes are public before cache or pooled identity use.
-5. Worker checks D1 for a fresh cache entry.
-6. Worker forwards routing request to the pool Durable Object on cache miss.
-7. Durable Object selects a GitHub identity and creates a short lease.
-8. Worker performs the GitHub API request with the selected credential.
-9. GitHub App identities mint short-lived installation tokens server-side.
-10. Worker records rate-limit headers, status, route class, and redacted audit state.
-11. Worker writes eligible public responses to D1 and returns the GitHub-shaped body.
-12. If the read is safe but Octopool cannot serve it — unsupported route, owner denied,
-    private/unverified repo, no usable identity, or depleted identity pool — Worker
-    returns `fallback_local`; the CLI then runs the original command with real `gh`.
-
-## API
-
-Base:
-
-```text
-https://octopool.<domain>/
-```
+## Relay API
 
 ### `POST /v1/github/request`
 
-Primary relay endpoint.
-
-Request:
+Bearer-authenticated primary endpoint.
 
 ```json
 {
   "pool": "maintainers",
   "method": "GET",
   "path": "/repos/openclaw/openclaw/pulls/123",
-  "query": {
-    "per_page": "100"
-  },
-  "headers": {
-    "accept": "application/vnd.github+json"
-  },
+  "query": { "per_page": "100" },
+  "headers": { "accept": "application/vnd.github+json" },
   "route_hint": {
     "pr_head_sha": "0123456789abcdef0123456789abcdef01234567"
   }
 }
 ```
 
-Legacy advisory `route_hint.owner`, `route_hint.repo`, `route_hint.kind`, `cache_key`, and
-`idempotency_key` fields are accepted and discarded for wire compatibility. Only validated
-`pr_head_sha` and `pr_state` hints enter the internal request model.
+Only `GET` and no request body are supported. Query values are strings or string arrays;
+secret-shaped keys are rejected. Forwarded request headers are limited to content
+negotiation/API version and conditional cache headers.
 
-Response:
+Validated `route_hint.pr_head_sha` and closed/merged `route_hint.pr_state` may partition PR
+subresource cache entries. Legacy `route_hint.owner/repo/kind`, `cache_key`, and
+`idempotency_key` inputs remain accepted and discarded solely for wire compatibility.
 
 ```json
 {
   "status": 200,
-  "headers": {
-    "content-type": "application/json",
-    "x-ratelimit-limit": "5000",
-    "x-ratelimit-remaining": "4998",
-    "x-ratelimit-reset": "1780000000"
-  },
+  "headers": { "content-type": "application/json" },
   "body": {},
-  "identity": {
-    "id": "ghu_...",
-    "kind": "pat",
-    "login": "redacted-or-public-login"
-  },
+  "body_encoding": "json",
+  "identity": { "id": "pat_primary", "kind": "pat" },
   "relay": {
     "pool": "maintainers",
     "request_id": "...",
     "cacheable": true,
-    "stale_ok": false
+    "cache": "miss",
+    "stale_ok": false,
+    "route_kind": "pr_view",
+    "lease_reason": "highest_remaining"
   }
 }
 ```
 
-Notes:
+`body_encoding` is exactly `json`, `text`, or `base64`. `identity` is omitted for
+token-free results and contains only `id`/`kind` when present. `relay.backend` identifies
+`web` or `github_public` token-free results. Unsupported/policy-denied safe routes are
+normalized to `424 fallback_local` with the original denial in `details.reason`.
 
-- v1 supports GitHub REST first.
-- GraphQL is a separate endpoint because cost accounting differs.
-- Mutations are rejected unless explicitly enabled per pool and route.
-- Request bodies are rejected for read-only routes.
+The generated route inventory in [GitHub Read Relay](relay.md) and transport matrix in
+[Token-Free GitHub Endpoints](token-free.md) are canonical. GraphQL and mutations remain
+deferred.
 
-### `POST /v1/github/graphql`
+### Other APIs
 
-Future endpoint for GraphQL.
+- `POST /v1/login/github-cli`: validate a local GitHub token/org membership and mint a
+  one-time plaintext caller token; only its SHA-256 hash is stored.
+- `GET /v1/pools/:pool/health`: `pool`, `identities_total`, `identities_healthy`,
+  `policy_version`.
+- `GET /v1/pools/:pool/stats`: pool/caller request, outcome, cache, coalescing, and route
+  aggregates for a bounded time window.
+- `POST /v1/admin/callers`: verify/provision a caller and pool grant.
+- `POST /v1/admin/pools/:pool/identities`: create/update identity metadata and replace scopes.
+- `/login/github`, callback, logout, `/dashboard`, `/v1/dashboard`: signed OAuth state,
+  hashed web sessions, admin role, and pool-grant-gated operator views.
 
-Required before enabling:
+## Identity routing
 
-- query fingerprinting
-- cost extraction
-- per-identity cost budget
-- persisted query allowlist for high-volume agent paths
+Selection inputs are route key, GitHub resource bucket, scoped active candidates, their
+weights, persisted rate state, and active cooldowns. A valid 10-second route lease wins
+first. Otherwise the highest `remaining + weight` candidate wins; unknown rate state starts
+from the default 5000 budget. Exhausted or cooling candidates are skipped.
 
-### `GET /v1/pools/:pool/health`
+Results update `rate_states` and create global, resource, or route cooldowns for auth,
+secondary-limit, retry-after, and quota failures. Selection reasons are `sticky`,
+`highest_remaining`, or `fallback`.
 
-Returns redacted pool health.
-
-Fields:
-
-- identities_total
-- identities_healthy
-- remaining_by_resource
-- reset_windows
-- recent_errors
-- policy_version
-
-### `POST /v1/admin/pools/:pool/identities`
-
-Admin-only identity registration.
-
-v1 should store secret material through Wrangler/Cloudflare secret tooling, then store only metadata and secret references in D1.
-
-GitHub App identity body:
-
-```json
-{
-  "id": "ghapp_openclaw_openclaw",
-  "kind": "github_app",
-  "login": "octopool-cache",
-  "secret_ref": "OCTOPOOL_GITHUB_APP_PRIVATE_KEY",
-  "installation_id": 135990630,
-  "scopes": [{ "owner": "openclaw", "repo": "openclaw" }]
-}
-```
-
-The App ID is configured as `OCTOPOOL_GITHUB_APP_ID`; the private key secret must be stored as PKCS#8 `BEGIN PRIVATE KEY` PEM so Cloudflare Workers WebCrypto can sign GitHub App JWTs.
-
-## Routing Policy
-
-Inputs:
-
-- route kind
-- owner/repo
-- GitHub resource bucket from previous responses
-- identity repo permissions
-- remaining budget
-- reset time
-- recent error score
-- caller identity
-- pool policy
-
-Default strategy:
-
-- prefer identity with highest usable remaining budget for the target resource
-- avoid identities with recent 401, 403, abuse, or secondary-rate-limit responses
-- keep short per-route leases to avoid many agents piling onto the same identity
-- respect repo allowlists and deny private repo routes without an explicit grant
-- serve fresh shared cache entries before touching a pooled identity
-
-Lease shape:
-
-```text
-route_key: GET /repos/:owner/:repo/pulls/:number
-identity_id: ghu_...
-ttl: 5s..30s
-reason: highest_remaining|sticky|cooldown_skip|fallback
-```
-
-## Data Model
+## Storage model
 
 D1 tables:
 
-- `pools`: pool id, name, policy json, created_at, updated_at
-- `callers`: relay clients, public key hash or token hash, status
-- `caller_pools`: caller to pool grants
-- `identities`: id, pool id, kind, login, secret ref, status, weight
-- `identity_scopes`: owner, repo, permission hints, allow_private
-- `rate_snapshots`: identity id, resource, limit, remaining, reset_at, source
-- `route_errors`: route key, identity id, status, reason, expires_at
-- `audit_events`: request id, caller id, pool id, route key, identity id, status, timestamps
+- `pools`, `callers`, `caller_pools`
+- `identities`, `identity_scopes`
+- `oauth_states`, `web_sessions`
+- `github_cache_entries`, `github_public_repos`, `github_pr_state_proofs`
+- `github_public_api_rates`
+- `audit_events`
 
-Secret values:
+PoolCoordinator SQLite tables:
 
-- not in D1
-- not in KV
-- not in request logs
-- only referenced by stable secret name or encrypted handle
+- `leases`: 10-second route-to-identity bindings.
+- `rate_states`: last GitHub remaining/reset state by identity/resource.
+- `cooldowns`: global/resource/route exclusions.
+- `cache_fills`: 8-second ownership leases for duplicate misses.
 
-## Auth
+Runtime SQL lives in `sql/queries/*.sql`, is validated against `migrations/` and
+`sql/schema/coordinator.sql`, and generates `src/generated/sql.ts`. Secret values are not
+stored in either database.
 
-Caller auth:
+## Authentication and authorization
 
-- `Authorization: Bearer <octopool_client_token>` for v1
-- tokens stored as hashes in D1
-- optional mTLS or signed request headers later
+- Caller API: bearer token hash, active caller, matching org, fresh membership, pool grant.
+- Admin API: separate constant-time-compared `OCTOPOOL_ADMIN_TOKEN`.
+- Browser: signed OAuth state plus opaque, hashed, expiring `octopool_session`; dashboard
+  additionally requires `dashboard_role = 'admin'`.
+- GitHub: PAT secret or App PKCS#8 private-key secret; short-lived App tokens minted in Worker.
 
-Admin auth:
+Audit starts after request validation, caller authentication, and pool lookup. Each later
+success/failure records caller, pool, normalized route, identity when used, status, error/
+fallback reason, duration, cache state, cacheability, and coalescing. Parse/auth/missing-pool
+failures occur before audit context exists. Bodies, credentials, and raw tokens are excluded.
 
-- separate admin token or Cloudflare Access
-- no admin endpoints exposed to ordinary relay clients
+## CLI contract
 
-GitHub auth:
+- `octopool gh ...` and a binary named `gh` translate supported safe reads.
+- Mutations, bodies, unsafe headers/queries, unsupported flags, and unknown commands delegate
+  locally without contacting Octopool.
+- Safe requests contact Octopool first and delegate only on explicit `fallback_local` or
+  stale/invalid Octopool auth. `OCTOPOOL_NO_FALLBACK` disables delegation.
+- Relay envelopes require a known body encoding; upstream status and CLI exit semantics are
+  preserved.
+- Bounded pagination delegates instead of returning partial PR details/checks/issue lists.
+- Invalid numeric limits fail explicitly.
 
-- PATs: stored as Cloudflare secrets
-- GitHub Apps: private key as secret; installation tokens minted and cached by identity
+Configuration: `OCTOPOOL_URL`, `OCTOPOOL_TOKEN`, `OCTOPOOL_POOL`, `OCTOPOOL_GH_PATH`,
+`OCTOPOOL_NO_FALLBACK`.
 
-## Security Rules
+## Operations and observability
 
-- redact `authorization`, `cookie`, `set-cookie`, token-like query params, and request bodies by default
-- deny unknown hosts; only `api.github.com` in v1
-- deny redirects to non-GitHub hosts
-- cap response size
-- cap request timeout
-- reject mutation verbs unless route is explicitly allowed
-- audit every routed request with route key and identity id
-- expose public login only if policy allows it; otherwise use identity id
+The stats API and dashboard expose request/error/fallback counts, cache hit/miss/stale/
+bypass metrics, successful-eligible hit rate, coalesced fills, top routes, normalized route
+patterns, outcome causes, per-caller use, identity health, rate snapshots, cooldowns, leases,
+cache size, and public-proof counts.
 
-## CLI And Integration
+Hourly maintenance deletes cache entries after persisted route-specific stale deadlines and
+audit events older than the 30-day stats window in bounded batches.
 
-Default CLI flow:
-
-```text
-octopool login
-octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
-```
-
-Environment:
-
-```text
-OCTOPOOL_URL
-OCTOPOOL_TOKEN
-OCTOPOOL_POOL
-OCTOPOOL_GH_PATH
-OCTOPOOL_NO_FALLBACK
-```
-
-Modes:
-
-- `octopool gh ...`: explicit shim invocation.
-- `gh` symlink: transparent shim on `PATH`.
-- direct API: callers can post normalized requests to `/v1/github/request`.
-
-Fallback:
-
-- mutating commands, request bodies, unsafe headers, and secret-bearing queries: run the real
-  GitHub CLI before any relay call
-- safe read-shaped commands: try Octopool first, including owners and route shapes the
-  local CLI does not know about yet
-- relay returns `fallback_local`: run the original command with the real GitHub CLI
-- relay unavailable or misconfigured: fail loudly unless the local shim has no Octopool login
-  yet, in which case it runs the real GitHub CLI
-
-## Supported v1 Routes
-
-Read-only REST:
-
-- issue view/list/search
-- PR view/list/checks/status/files
-- run list/view
-- workflow list/view
-- release list/view
-- repo view/list
-- labels
-- GET-only `gh api`
-
-Deferred:
-
-- logs with large payloads
-- GraphQL
-- search endpoints with special quota behavior
-- mutations
-
-## Observability
-
-Metrics:
-
-- requests by caller, pool, route kind, status
-- GitHub rate remaining by identity/resource
-- relay cache hit/miss once response cache exists
-- denied routes by policy reason
-- secondary-rate-limit events
-- fallback count reported by CLI clients
-
-Debug commands later:
+Repository layout:
 
 ```text
-octopool pools
-octopool health maintainers
-octopool identities maintainers
-octopool audit --since 1h
+cmd/octopool/                 Go CLI and generated route contracts
+docs/                         product, API, deployment, and generated route docs
+migrations/                   D1 schema history
+scripts/                      route, SQL, and docs generators
+sql/queries/                  canonical runtime SQL
+sql/schema/coordinator.sql    Durable Object SQLite schema
+src/                          modular Worker runtime
+test/e2e/                     real workerd/D1/Durable Object integration suite
 ```
 
-## Deployment
-
-Cloudflare resources:
-
-- Worker: `octopool`
-- Durable Object: `PoolCoordinator`
-- D1 database: `octopool`
-- Secrets: `OCTOPOOL_ADMIN_TOKEN`, GitHub identity secrets
-
-Repo layout:
-
-```text
-docs/spec.md
-src/index.ts
-src/pool-coordinator.ts
-src/github.ts
-src/policy.ts
-src/schema.sql
-test/
-wrangler.jsonc
-```
-
-## Open Questions
-
-- PAT-only v1 or GitHub App first?
-- Should Octopool cache responses, or only coordinate token selection?
-- Do we need Cloudflare Access from day one for admin endpoints?
-- Which additional `gh api` read shapes should be relay-enabled next?
-- Should private repos require per-repo grants even inside a trusted pool?
+`pnpm check` is the full local gate: generated route/SQL drift, formatting, lint, unit and
+workerd E2E tests, TypeScript build, Go tests, and Go vet. `pnpm e2e` is the live deployment
+smoke test.

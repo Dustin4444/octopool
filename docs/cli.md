@@ -153,12 +153,16 @@ hold:
 - a top-level subcommand or flag is not one of the supported read-only shapes.
 
 Safe read-shaped requests are sent to Octopool first. Octopool owns the route and pool
-policy decision; on a cache miss it first uses token-free GitHub web/raw endpoints for
-supported public shapes, then the configured app/PAT identity pool, writes eligible
+policy decision; on a cache miss it first uses token-free GitHub API/web/raw/Git endpoints
+for supported public shapes, then the configured app/PAT identity pool, writes eligible
 public responses to the shared cache, and returns the GitHub-shaped body. If the
 server says the read should run locally — unsupported route, public pooling disabled by
 policy, private/unverified repository, no usable identity, or identity pool depleted — the CLI
 runs the original command with the real `gh` and your local GitHub token.
+
+Pagination is fail-closed: if bounded relay pagination cannot prove a complete PR detail,
+check set, or filtered issue list, the CLI delegates to real `gh` instead of returning a
+partial result. Non-integer `--limit`/`-L` values are rejected explicitly.
 
 Any other `gh` subcommand (`gh pr create`, `gh auth`, unusual formatting flags, …) is
 passed straight through to the real GitHub CLI, with its exit code preserved.
