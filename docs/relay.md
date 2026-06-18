@@ -106,44 +106,123 @@ and patch hosts.
 
 ## Supported routes
 
-Routes are classified in `src/policy.ts`. Only the following read-only shapes are
-enabled; anything else returns `403 route_denied`:
+Routes are defined in `src/route-manifest.ts` and enforced by `src/policy.ts`. Only the
+following read-only shapes are enabled; anything else returns `403 route_denied`:
 
-- `pr_view`, `pr_files`, `pr_commits`, `pr_review_comments`, `pr_review_comment_list`
-- `pr_review_comment_view`, `pr_review_comment_reactions`, `pr_reviews`, `pr_review_view`
-- `pr_review_comments_for_review`, `pr_requested_reviewers`
-- `pr_list`
-- `commit_list`, `commit_view`, `commit_comments`, `commit_pulls`, `commit_branches_where_head`
-- `commit_check_runs`, `commit_check_suites`, `commit_status`, `commit_statuses`, `ref_statuses`
-- `repo_comment`, `compare`, `contents`, `repo_readme`
-- `run_list`, `run_view`, `run_jobs`, `run_artifacts`
-- `job_view`, `job_logs`, `check_run_annotations`
-- `issue_list`, `issue_view`, `issue_comments`, `issue_comment_list`, `issue_comment_view`
-- `issue_comment_reactions`, `issue_events`, `issue_event_list`, `issue_event_view`
-- `issue_labels`, `issue_reactions`, `issue_timeline`
-- `assignee_list`, `assignee_view`
-- `label_list`, `label_view`, `milestone_list`, `milestone_view`
-- `branch_list`, `branch_view`, `tag_list`, `repo_languages`, `repo_contributors`, `repo_license`
-- `repo_topics`, `community_profile`, `fork_list`, `stargazer_list`, `subscriber_list`
-- `deployment_list`, `repo_event_list`, `network_event_list`, `repo_stats_contributors`
-- `repo_stats_commit_activity`, `repo_stats_code_frequency`, `repo_stats_participation`
-- `repo_stats_punch_card`
-- `git_blob`, `git_commit`, `git_tree`, `git_ref`, `git_matching_refs`
+<!-- supported-route-kinds:start -->
+
 - `user_view`
-- `user_repo_list`, `user_org_list`, `user_gist_list`, `user_follower_list`
-- `user_following_list`, `user_event_list`, `user_received_event_list`, `user_key_list`
+- `user_repo_list`
+- `user_org_list`
+- `user_gist_list`
+- `user_follower_list`
+- `user_following_list`
+- `user_event_list`
+- `user_received_event_list`
+- `user_key_list`
 - `user_gpg_key_list`
-- `org_repo_list`, `org_event_list`, `org_public_member_list`, `org_public_member_view`
+- `org_repo_list`
+- `org_event_list`
+- `org_public_member_list`
+- `org_public_member_view`
 - `gist_view`
-- `emoji_list`, `github_meta`, `license_list`, `license_view`
-- `gitignore_template_list`, `gitignore_template_view`
+- `emoji_list`
+- `github_meta`
+- `license_list`
+- `license_view`
+- `gitignore_template_list`
+- `gitignore_template_view`
 - `repo_view`
-- `release_list`, `release_latest`, `release_view`, `release_assets`, `release_asset`
-- `workflow_list`, `workflow_view`, `workflow_run_list`
-- `search_issues`, `search_code`, `search_commits` when `allow_search` is enabled
-  and `q` contains exactly one `repo:owner/name` qualifier plus plain terms only
-- `search_repositories` when `allow_search` is enabled and `q` contains plain terms only
+- `commit_list`
+- `commit_view`
+- `commit_comments`
+- `commit_pulls`
+- `commit_branches_where_head`
+- `commit_statuses`
+- `repo_comment`
+- `compare`
+- `contents`
+- `repo_readme`
+- `pr_view`
+- `pr_list`
+- `pr_files`
+- `pr_commits`
+- `pr_review_comments`
+- `pr_review_comment_list`
+- `pr_review_comment_view`
+- `pr_review_comment_reactions`
+- `pr_reviews`
+- `pr_review_view`
+- `pr_review_comments_for_review`
+- `pr_requested_reviewers`
+- `commit_check_runs`
+- `commit_check_suites`
+- `commit_status`
+- `ref_statuses`
+- `run_list`
+- `run_view`
+- `run_jobs`
+- `run_artifacts`
+- `job_view`
+- `job_logs`
+- `check_run_annotations`
+- `issue_view`
+- `issue_list`
+- `issue_comments`
+- `issue_comment_list`
+- `issue_comment_view`
+- `issue_comment_reactions`
+- `issue_events`
+- `issue_event_list`
+- `issue_event_view`
+- `issue_labels`
+- `issue_reactions`
+- `issue_timeline`
+- `assignee_list`
+- `assignee_view`
+- `label_list`
+- `label_view`
+- `milestone_list`
+- `milestone_view`
+- `branch_list`
+- `branch_view`
+- `tag_list`
+- `repo_languages`
+- `repo_contributors`
+- `repo_license`
+- `repo_topics`
+- `community_profile`
+- `fork_list`
+- `stargazer_list`
+- `subscriber_list`
+- `deployment_list`
+- `repo_event_list`
+- `network_event_list`
+- `repo_stats_contributors`
+- `repo_stats_commit_activity`
+- `repo_stats_code_frequency`
+- `repo_stats_participation`
+- `repo_stats_punch_card`
+- `git_blob`
+- `git_commit`
+- `git_tree`
+- `git_ref`
+- `git_matching_refs`
+- `workflow_list`
+- `workflow_view`
+- `workflow_run_list`
+- `release_list`
+- `release_latest`
+- `release_view`
+- `release_assets`
+- `release_asset`
+- `search_issues`
+- `search_code`
+- `search_commits`
+- `search_repositories`
 - `rate_limit`
+
+<!-- supported-route-kinds:end -->
 
 `job_logs` is a large-payload, log-class route: it follows GitHub's signed redirect to
 `*.actions.githubusercontent.com` / `*.blob.core.windows.net`, is not cached, and is
@@ -159,9 +238,10 @@ gated by the pool's `allow_logs` policy.
   public-repo guard proves `private: false` (default `true`). These routes use broad PAT
   identities from the pool rather than repo-scoped GitHub App installation tokens.
 - `allow_logs` — log routes require it (default `true`), else `403 logs_denied`.
-- `allow_search` — search routes require it (default `false`) and must be scoped by
-  exactly one `repo:owner/name` qualifier plus plain terms and optional
-  `type:issue|pr` / `state:open|closed`, else `403 search_denied`.
+- `allow_search` — search routes require it (default `false`). Issue, code, and commit searches
+  require exactly one `repo:owner/name` qualifier plus plain terms and optional
+  `type:issue|pr` / `state:open|closed`; repository search accepts plain terms only. Invalid
+  queries return `403 search_denied`.
 
 Every repo route additionally passes a public-visibility check before a pooled identity
 or cache entry is used — see [Cache & public-repo guard](cache.md).

@@ -7,6 +7,17 @@ import { ROUTES } from "../src/route-manifest";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("token-free endpoint documentation", () => {
+  it("matches every supported route kind", () => {
+    const docs = readFileSync(path.join(root, "docs/relay.md"), "utf8");
+    const documented = new Set(
+      Array.from(
+        section(docs, "supported-route-kinds").matchAll(/^- `([^`]+)`$/gm),
+        (match) => match[1]!,
+      ),
+    );
+    expect([...documented].sort()).toEqual([...new Set(ROUTES.map((route) => route.kind))].sort());
+  });
+
   it("matches every implemented anonymous API route", () => {
     const docs = readFileSync(path.join(root, "docs/token-free.md"), "utf8");
 

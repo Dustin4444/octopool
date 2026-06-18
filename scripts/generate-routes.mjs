@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { ROUTES } from "../src/route-manifest.ts";
 
 const outputPath = new URL("../cmd/octopool/routes_generated.go", import.meta.url);
@@ -29,3 +29,45 @@ const lines = [
 ];
 
 await writeFile(outputPath, lines.join("\n"));
+
+await replaceSection(
+  new URL("../docs/relay.md", import.meta.url),
+  "supported-route-kinds",
+  [...new Set(ROUTES.map((route) => route.kind))].map((kind) => `- \`${kind}\``).join("\n"),
+);
+
+await replaceSection(
+  new URL("../docs/token-free.md", import.meta.url),
+  "token-free-api-routes",
+  [
+    "```text",
+    ...ROUTES.filter(
+      (route) => route.capabilities.publicApi || route.capabilities.fallback !== "pool",
+    ).map((route) => `GET ${docsTemplate(route.template)}`),
+    "```",
+  ].join("\n"),
+);
+
+async function replaceSection(file, name, content) {
+  const start = `<!-- ${name}:start -->`;
+  const end = `<!-- ${name}:end -->`;
+  const input = await readFile(file, "utf8");
+  const startIndex = input.indexOf(start);
+  const endIndex = input.indexOf(end);
+  if (startIndex === -1 || endIndex <= startIndex) {
+    throw new Error(`Missing generated section ${name} in ${file.pathname}`);
+  }
+  const output = `${input.slice(0, startIndex + start.length)}\n\n${content}\n\n${input.slice(endIndex)}`;
+  await writeFile(file, output);
+}
+
+function docsTemplate(template) {
+  const names = {
+    compare: "comparison",
+    contentPath: "path",
+    gistId: "gist",
+    gitRef: "ref",
+    readmeDir: "dir",
+  };
+  return template.replace(/\{([^}]+)\}/g, (_token, name) => `{${names[name] ?? name}}`);
+}

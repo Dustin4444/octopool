@@ -120,7 +120,7 @@ Every path below maps directly to `GET https://api.github.com{path}` without an
 `Authorization` header. Query parameters accepted by the corresponding relay route are
 preserved. Repository responses are cached only after the public-repo guard succeeds.
 
-### Users, organizations, and global metadata
+### Generated route catalog
 
 <!-- token-free-api-routes:start -->
 
@@ -146,11 +146,6 @@ GET /licenses
 GET /licenses/{slug}
 GET /gitignore/templates
 GET /gitignore/templates/{template}
-```
-
-### Repositories, commits, and contents
-
-```text
 GET /repos/{owner}/{repo}
 GET /repos/{owner}/{repo}/commits
 GET /repos/{owner}/{repo}/commits/{sha}
@@ -158,20 +153,13 @@ GET /repos/{owner}/{repo}/commits/{sha}/comments
 GET /repos/{owner}/{repo}/commits/{sha}/pulls
 GET /repos/{owner}/{repo}/commits/{sha}/branches-where-head
 GET /repos/{owner}/{repo}/commits/{sha}/statuses
-GET /repos/{owner}/{repo}/commits/{sha}/status
-GET /repos/{owner}/{repo}/statuses/{sha}
 GET /repos/{owner}/{repo}/comments/{id}
 GET /repos/{owner}/{repo}/compare/{comparison}
 GET /repos/{owner}/{repo}/contents/{path}
 GET /repos/{owner}/{repo}/readme
 GET /repos/{owner}/{repo}/readme/{dir}
-```
-
-### Pull requests, reviews, and checks
-
-```text
-GET /repos/{owner}/{repo}/pulls
 GET /repos/{owner}/{repo}/pulls/{number}
+GET /repos/{owner}/{repo}/pulls
 GET /repos/{owner}/{repo}/pulls/{number}/files
 GET /repos/{owner}/{repo}/pulls/{number}/commits
 GET /repos/{owner}/{repo}/pulls/{number}/comments
@@ -184,14 +172,16 @@ GET /repos/{owner}/{repo}/pulls/{number}/reviews/{id}/comments
 GET /repos/{owner}/{repo}/pulls/{number}/requested_reviewers
 GET /repos/{owner}/{repo}/commits/{sha}/check-runs
 GET /repos/{owner}/{repo}/commits/{sha}/check-suites
+GET /repos/{owner}/{repo}/commits/{sha}/status
+GET /repos/{owner}/{repo}/statuses/{sha}
+GET /repos/{owner}/{repo}/actions/runs
+GET /repos/{owner}/{repo}/actions/runs/{id}
+GET /repos/{owner}/{repo}/actions/runs/{id}/jobs
+GET /repos/{owner}/{repo}/actions/runs/{id}/artifacts
+GET /repos/{owner}/{repo}/actions/jobs/{id}
 GET /repos/{owner}/{repo}/check-runs/{id}/annotations
-```
-
-### Issues, labels, and milestones
-
-```text
-GET /repos/{owner}/{repo}/issues
 GET /repos/{owner}/{repo}/issues/{number}
+GET /repos/{owner}/{repo}/issues
 GET /repos/{owner}/{repo}/issues/{number}/comments
 GET /repos/{owner}/{repo}/issues/comments
 GET /repos/{owner}/{repo}/issues/comments/{id}
@@ -208,27 +198,6 @@ GET /repos/{owner}/{repo}/labels
 GET /repos/{owner}/{repo}/labels/{label}
 GET /repos/{owner}/{repo}/milestones
 GET /repos/{owner}/{repo}/milestones/{id}
-```
-
-### Actions and workflows
-
-```text
-GET /repos/{owner}/{repo}/actions/runs
-GET /repos/{owner}/{repo}/actions/runs/{id}
-GET /repos/{owner}/{repo}/actions/runs/{id}/jobs
-GET /repos/{owner}/{repo}/actions/runs/{id}/artifacts
-GET /repos/{owner}/{repo}/actions/jobs/{id}
-GET /repos/{owner}/{repo}/actions/workflows
-GET /repos/{owner}/{repo}/actions/workflows/{workflow}
-GET /repos/{owner}/{repo}/actions/workflows/{workflow}/runs
-```
-
-Actions job logs are deliberately absent: log downloads require authenticated GitHub
-and follow signed redirects.
-
-### Repository metadata and activity
-
-```text
 GET /repos/{owner}/{repo}/branches
 GET /repos/{owner}/{repo}/branches/{branch}
 GET /repos/{owner}/{repo}/tags
@@ -248,39 +217,31 @@ GET /repos/{owner}/{repo}/stats/commit_activity
 GET /repos/{owner}/{repo}/stats/code_frequency
 GET /repos/{owner}/{repo}/stats/participation
 GET /repos/{owner}/{repo}/stats/punch_card
-```
-
-### Git data and releases
-
-```text
 GET /repos/{owner}/{repo}/git/blobs/{sha}
 GET /repos/{owner}/{repo}/git/commits/{sha}
 GET /repos/{owner}/{repo}/git/trees/{sha}
 GET /repos/{owner}/{repo}/git/ref/{ref}
 GET /repos/{owner}/{repo}/git/matching-refs/{ref}
+GET /repos/{owner}/{repo}/actions/workflows
+GET /repos/{owner}/{repo}/actions/workflows/{workflow}
+GET /repos/{owner}/{repo}/actions/workflows/{workflow}/runs
 GET /repos/{owner}/{repo}/releases
 GET /repos/{owner}/{repo}/releases/latest
 GET /repos/{owner}/{repo}/releases/tags/{tag}
 GET /repos/{owner}/{repo}/releases/{id}
 GET /repos/{owner}/{repo}/releases/{id}/assets
 GET /repos/{owner}/{repo}/releases/assets/{id}
-```
-
-Release list/latest/tag/id reads remove drafts from anonymous responses. Asset routes use
-the exact anonymous API response.
-
-### Search
-
-```text
 GET /search/issues
 GET /search/commits
 GET /search/repositories
 ```
 
-Search still requires pool policy `allow_search: true` and the relay's scoped query
-validation. `GET /search/code` is intentionally not token-free.
-
 <!-- token-free-api-routes:end -->
+
+Actions job logs are deliberately absent: log downloads require authenticated GitHub and follow
+signed redirects. Release list/latest/tag/id reads remove drafts from anonymous responses; asset
+routes use the exact anonymous API response. Search requires pool policy `allow_search: true` and
+the relay's scoped query validation; `GET /search/code` is intentionally not token-free.
 
 ## Explicit exclusions
 
