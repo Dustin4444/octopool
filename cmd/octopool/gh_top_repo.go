@@ -100,12 +100,8 @@ func normalizeRepo(raw string) string {
 		return ""
 	}
 	raw = strings.TrimSuffix(raw, ".git")
-	if strings.HasPrefix(raw, "git@github.com:") {
-		raw = strings.TrimPrefix(raw, "git@github.com:")
-	}
-	if strings.HasPrefix(raw, "https://github.com/") {
-		raw = strings.TrimPrefix(raw, "https://github.com/")
-	}
+	raw = strings.TrimPrefix(raw, "git@github.com:")
+	raw = strings.TrimPrefix(raw, "https://github.com/")
 	parts := strings.Split(strings.Trim(raw, "/"), "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return ""

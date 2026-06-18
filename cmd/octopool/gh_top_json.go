@@ -90,11 +90,11 @@ func needsHydratedPR(fields []string) bool {
 }
 
 func envelopeBodyBytes(envelope relayEnvelope) ([]byte, error) {
-	var out bytes.Buffer
-	if err := writeGHBody(context.Background(), &out, envelope, ""); err != nil {
-		return nil, err
+	body, err := decodeRelayBody(envelope)
+	if err == nil && envelope.Status >= 400 {
+		err = fmt.Errorf("github returned status %d", envelope.Status)
 	}
-	return bytes.TrimSpace(out.Bytes()), nil
+	return bytes.TrimSpace(body), err
 }
 
 func filterJSONFields(raw []byte, fields []string, fieldMap map[string][]string) ([]byte, error) {

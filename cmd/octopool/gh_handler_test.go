@@ -17,10 +17,6 @@ func runGHRun(ctx context.Context, args []string, stdout io.Writer) (bool, error
 	return legacyGHResult(handleGHRun(ctx, args, stdout))
 }
 
-func runGHRepo(ctx context.Context, args []string, stdout io.Writer) (bool, error) {
-	return legacyGHResult(handleGHRepo(ctx, args, stdout))
-}
-
 func runGHRelease(ctx context.Context, args []string, stdout io.Writer) (bool, error) {
 	return legacyGHResult(handleGHRelease(ctx, args, stdout))
 }
