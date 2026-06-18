@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
+	"strconv"
 	"strings"
 )
 
@@ -58,4 +60,58 @@ func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResul
 	default:
 		return ghDelegated()
 	}
+}
+
+func relayIssueList(ctx context.Context, stdout io.Writer, request ghAPIRequest, opts ghTopOptions) error {
+	client, err := newGHRelayClient()
+	if err != nil {
+		return err
+	}
+	limit := desiredLimit(opts)
+	filtered := make([]map[string]any, 0, limit)
+	complete := false
+	for page := 1; page <= maxRelayPages && len(filtered) < limit; page++ {
+		paged := request
+		paged.query = cloneQuery(request.query)
+		paged.query["per_page"] = strconv.Itoa(relayPageSize)
+		paged.query["page"] = strconv.Itoa(page)
+		envelope, err := client.do(ctx, paged)
+		if err != nil {
+			return err
+		}
+		body, err := envelopeBodyBytes(envelope)
+		if err != nil {
+			return err
+		}
+		var items []map[string]any
+		if err := json.Unmarshal(body, &items); err != nil {
+			return err
+		}
+		for _, item := range items {
+			if _, ok := item["pull_request"]; !ok {
+				filtered = append(filtered, item)
+				if len(filtered) >= limit {
+					break
+				}
+			}
+		}
+		if len(items) < relayPageSize {
+			complete = true
+			break
+		}
+	}
+	if len(filtered) < limit && !complete {
+		return localFallbackError{Reason: "pagination_exhausted"}
+	}
+	raw, err := json.Marshal(filtered)
+	if err != nil {
+		return err
+	}
+	if len(opts.json) > 0 {
+		raw, err = filterJSONFields(raw, opts.json, fieldMapIssue)
+		if err != nil {
+			return err
+		}
+	}
+	return writeBytes(ctx, stdout, raw, opts.jq)
 }

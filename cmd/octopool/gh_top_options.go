@@ -153,12 +153,3 @@ func splitFields(raw string) []string {
 func isDigits(raw string) bool {
 	return digitsPattern.MatchString(raw)
 }
-
-func nestedString(input map[string]any, path ...string) (string, bool) {
-	value, ok := valueAtPath(input, path...)
-	if !ok {
-		return "", false
-	}
-	text, ok := value.(string)
-	return text, ok
-}

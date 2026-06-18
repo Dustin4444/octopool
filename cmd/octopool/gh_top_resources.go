@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
+	"strconv"
 )
 
 func handleGHRepo(ctx context.Context, args []string, stdout io.Writer) ghResult {
@@ -174,4 +177,56 @@ func handleGHGist(ctx context.Context, args []string, stdout io.Writer) ghResult
 	default:
 		return ghDelegated()
 	}
+}
+
+func relayWorkflowList(ctx context.Context, stdout io.Writer, repo string, opts ghTopOptions) error {
+	client, err := newGHRelayClient()
+	if err != nil {
+		return err
+	}
+	limit := desiredLimitDefault(opts, 50)
+	items := make([]any, 0, limit)
+	// Native gh fetches one page at --limit, then drops disabled workflows without backfilling.
+	envelope, err := client.do(ctx, ghAPIRequest{
+		method:  "GET",
+		path:    repoPath(repo, "actions", "workflows"),
+		query:   map[string]any{"per_page": strconv.Itoa(limit), "page": "1"},
+		headers: map[string]string{"x-octopool-public-shape": "workflow-list-v1"},
+	})
+	if err != nil {
+		return err
+	}
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return err
+	}
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		return err
+	}
+	workflows, ok := response["workflows"].([]any)
+	if !ok {
+		return errors.New("workflow list response did not include workflows")
+	}
+	for _, item := range workflows {
+		if workflowActive(item) {
+			items = append(items, item)
+		}
+	}
+	raw, err := json.Marshal(items)
+	if err != nil {
+		return err
+	}
+	if len(opts.json) > 0 {
+		raw, err = filterJSONFields(raw, opts.json, fieldMapWorkflow)
+		if err != nil {
+			return err
+		}
+	}
+	return writeBytes(ctx, stdout, raw, opts.jq)
+}
+
+func workflowActive(item any) bool {
+	workflow, ok := item.(map[string]any)
+	return ok && workflow["state"] == "active"
 }

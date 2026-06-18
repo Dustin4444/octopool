@@ -168,3 +168,30 @@ func valueAtPath(input map[string]any, path ...string) (any, bool) {
 	}
 	return value, true
 }
+
+func firstString(item map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := item[key].(string); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+func nestedStringValue(item map[string]any, path ...string) string {
+	value, ok := valueAtPath(item, path...)
+	if !ok {
+		return ""
+	}
+	text, _ := value.(string)
+	return text
+}
+
+func nestedString(input map[string]any, path ...string) (string, bool) {
+	value, ok := valueAtPath(input, path...)
+	if !ok {
+		return "", false
+	}
+	text, ok := value.(string)
+	return text, ok
+}

@@ -1,7 +1,5 @@
 package main
 
-import "regexp"
-
 var fieldMapPR = map[string][]string{
 	"url":          {"html_url"},
 	"author":       {"user"},
@@ -157,8 +155,6 @@ var supportedLabelFields = supportedFields(
 var supportedGistFields = supportedFields(
 	"id", "description", "files", "isPublic", "public", "url", "createdAt", "updatedAt", "owner",
 )
-
-var allowedSearchTerm = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 func supportedFields(fields ...string) map[string]bool {
 	out := make(map[string]bool, len(fields))
