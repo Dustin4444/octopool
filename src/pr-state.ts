@@ -1,6 +1,6 @@
+import { isStateAwarePRRoute } from "./cache-policy";
 import { queries } from "./generated/sql";
 import { parsePositiveInt } from "./http";
-import { cachePolicyForRouteKind } from "./route-manifest";
 import type { RelayRequest, RouteInfo } from "./types";
 
 type PullResponse = {
@@ -27,7 +27,7 @@ export async function verifyPRStateHintLive(
   return verifyPRStateHintInternal(env, request, withoutStateHint(route), false);
 }
 
-export function withoutStateHint(route: RouteInfo): RouteInfo {
+function withoutStateHint(route: RouteInfo): RouteInfo {
   const { state_hint: _stateHint, state_hint_source: _stateHintSource, ...rest } = route;
   return rest;
 }
@@ -39,7 +39,7 @@ async function verifyPRStateHintInternal(
   allowCachedProof: boolean,
 ): Promise<RouteInfo> {
   const stateHint = stateHintFromRequest(request);
-  if (stateHint === undefined || !stateAwarePRRoute(route)) {
+  if (stateHint === undefined || !isStateAwarePRRoute(route.kind)) {
     return route;
   }
   const number = pullNumber(request.path);
@@ -113,10 +113,6 @@ function hintMatchesPR(hint: string, body: PullResponse): boolean {
 
 function pullNumber(path: string): string | undefined {
   return /^\/repos\/[^/]+\/[^/]+\/pulls\/([0-9]+)\//.exec(path)?.[1];
-}
-
-function stateAwarePRRoute(route: RouteInfo): boolean {
-  return cachePolicyForRouteKind(route.kind).fresh.kind === "pr_state";
 }
 
 function stateHintFromRequest(request: RelayRequest): string | undefined {

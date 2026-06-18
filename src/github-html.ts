@@ -5,7 +5,6 @@ export {
   parseActionsRunListHTML,
   parseCommitPatchSHA,
 } from "./github-html-actions";
-export type { ActionsJobSummary } from "./github-html-actions";
 export {
   parseIssueHTML,
   parseIssueListHTML,

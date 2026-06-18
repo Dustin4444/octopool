@@ -1,9 +1,9 @@
 import { hashToken } from "./auth";
+import { cachePolicyForRouteKind, isStateAwarePRRoute } from "./cache-policy";
 import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import { defaultGitHubJSONAccept } from "./github-response";
 import { isRecord } from "./object";
-import { cachePolicyForRouteKind } from "./route-manifest";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
@@ -371,7 +371,7 @@ function stateAwarePRSubresource(route: RouteInfo, response?: GitHubRelayRespons
 }
 
 function cacheStateDiscriminator(route: RouteInfo): string | undefined {
-  if (!stateAwarePRRoute(route)) {
+  if (!isStateAwarePRRoute(route.kind)) {
     return undefined;
   }
   return routeStateHint(route);
@@ -379,10 +379,6 @@ function cacheStateDiscriminator(route: RouteInfo): string | undefined {
 
 function routeStateHint(route: RouteInfo): string | undefined {
   return route.state_hint;
-}
-
-function stateAwarePRRoute(route: RouteInfo): boolean {
-  return cachePolicyForRouteKind(route.kind).fresh.kind === "pr_state";
 }
 
 export async function pruneExpiredGitHubCache(env: Env, limit = 500): Promise<number> {

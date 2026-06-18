@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { cachePolicyForRouteKind, ROUTES } from "../src/route-manifest";
+import { cachePolicyForRouteKind } from "../src/cache-policy";
+import { ROUTES } from "../src/route-manifest";
 
 describe("route manifest", () => {
   it("has unique route identities and patterns", () => {

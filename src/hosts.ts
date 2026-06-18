@@ -1,4 +1,4 @@
-export const APP_HOST = "octopool.openclaw.ai";
+const APP_HOST = "octopool.openclaw.ai";
 export const APP_ORIGIN = `https://${APP_HOST}`;
 export const PUBLIC_HOST = "octopool.dev";
 export const PROXY_HOST_HEADER = "x-octopool-forwarded-host";
@@ -20,7 +20,7 @@ export function effectiveOrigin(request: Request, env?: unknown): string {
   return new URL(request.url).origin;
 }
 
-export function isPublicHost(hostname: string): boolean {
+function isPublicHost(hostname: string): boolean {
   return hostname.toLowerCase() === PUBLIC_HOST;
 }
 

@@ -8,7 +8,7 @@ type GitHubLoginUser = {
   name?: string;
 };
 
-export type LoginCaller = {
+type LoginCaller = {
   id: string;
   name: string;
   github_login: string;

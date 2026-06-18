@@ -322,7 +322,7 @@ const APP_LINKS = '<a href="/dashboard">Dashboard</a><a href="https://docs.octop
 const PUBLIC_LINKS =
   '<a href="https://docs.octopool.dev/">Docs</a><a href="https://github.com/openclaw/octopool">GitHub</a>';
 
-export function landingResponse(request: Request, env?: unknown): Response {
+function landingResponse(request: Request, env?: unknown): Response {
   const appSite = !isPublicRequest(request, env);
   return new Response(landingHTML(appSite), {
     headers: {

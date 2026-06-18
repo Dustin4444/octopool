@@ -105,7 +105,7 @@ export async function logoutWebSession(request: Request, env: Env): Promise<Resp
   return redirectWithCookies("/", [expiredCookie(SESSION_COOKIE, "/")]);
 }
 
-export async function authenticateWebSession(
+async function authenticateWebSession(
   request: Request,
   env: Env,
   pool: string,
