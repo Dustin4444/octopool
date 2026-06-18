@@ -1,14 +1,9 @@
 import { parsePositiveInt } from "./http";
 import { responseCapBytes } from "./github";
 import { gitRefResponse, parseGitUploadPackAdvertisement } from "./github-git";
-import { decodeURIComponentSafe, encodedPathSegments, safeRelativePath } from "./github-path";
+import { encodedPathSegments, safeRelativePath } from "./github-path";
 import { defaultGitHubJSONAccept, githubResponseHeaders } from "./github-response";
 import {
-  parseActionsJobGroupsJSON,
-  parseActionsJobHTML,
-  parseActionsRunHTML,
-  parseActionsRunListHTML,
-  parseCommitPatchSHA,
   parseIssueHTML,
   parseIssueListHTML,
   parseLabelListHTML,
@@ -25,13 +20,12 @@ import {
   storedPublicAPIRateBelowHalf,
   storePublicAPIRate,
 } from "./github-public-api";
+import { actionsPageRequest } from "./github-public-actions";
 import { mediaFormat, mediaWebRequest, rawContentRequest } from "./github-public-content";
 import type { WebRequest } from "./github-web-types";
 import { fetchPublicPage, fetchWebResponse, readWebBody } from "./github-web-transport";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
-const ACTIONS_SUMMARY_SHAPE = "actions-summary-v1";
-const ACTIONS_JOBS_SHAPE = "actions-jobs-v1";
 const ISSUE_SUMMARY_SHAPE = "issue-summary-v1";
 const ISSUE_LIST_SHAPE = "issue-list-v1";
 const PR_LIST_SHAPE = "pr-list-v1";
@@ -40,7 +34,6 @@ const LABEL_LIST_SHAPE = "label-list-v1";
 const WORKFLOW_LIST_SHAPE = "workflow-list-v1";
 const WORKFLOW_VIEW_SHAPE = "workflow-view-v1";
 const RELEASE_SUMMARY_SHAPE = "release-summary-v1";
-const MAX_PUBLIC_JOB_PAGES = 25;
 const MAX_PUBLIC_WORKFLOW_PAGES = 10;
 
 export async function callGitHubWeb(
@@ -476,299 +469,6 @@ function searchQualifier(key: string, value: string): string | undefined {
 
 function compareStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function actionsPageRequest(
-  env: Env,
-  request: RelayRequest,
-  route: RouteInfo,
-): WebRequest | undefined {
-  if (
-    request.method !== "GET" ||
-    route.owner === undefined ||
-    route.repo === undefined ||
-    !defaultGitHubJSONAccept(request.headers?.accept)
-  ) {
-    return undefined;
-  }
-  const shape = request.headers?.["x-octopool-public-shape"];
-  if (
-    (route.kind === "run_list" || route.kind === "workflow_run_list") &&
-    shape === ACTIONS_SUMMARY_SHAPE
-  ) {
-    const query = actionsListQuery(request.query);
-    if (query === undefined) {
-      return undefined;
-    }
-    const workflow =
-      route.kind === "workflow_run_list"
-        ? /\/actions\/workflows\/([^/]+)\/runs$/.exec(request.path)?.[1]
-        : undefined;
-    if (route.kind === "workflow_run_list" && workflow === undefined) {
-      return undefined;
-    }
-    const url = new URL(
-      `https://github.com/${encodedPathSegments([
-        route.owner,
-        route.repo,
-        "actions",
-        ...(workflow === undefined ? [] : ["workflows", decodeURIComponentSafe(workflow)]),
-      ])}`,
-    );
-    if (query.search !== "") {
-      url.searchParams.set("query", query.search);
-    }
-    return {
-      url: url.toString(),
-      headers: { accept: "text/html", "user-agent": "octopool" },
-      capBytes: responseCapBytes(env, route),
-      usesApiQuota: false,
-      payload: async (body, headers, status) => {
-        const parsed = parseActionsRunListHTML(
-          new TextDecoder().decode(body),
-          route.owner!,
-          route.repo!,
-        );
-        if (parsed === undefined) {
-          return undefined;
-        }
-        parsed.workflow_runs = parsed.workflow_runs.slice(0, query.perPage);
-        const runs = await Promise.all(
-          parsed.workflow_runs.map((run) =>
-            isFullGitSHA(run.head_sha) ? run : enrichActionsRun(env, route, run),
-          ),
-        );
-        if (runs.some((run) => run === undefined)) {
-          return undefined;
-        }
-        parsed.workflow_runs = runs as Record<string, unknown>[];
-        return {
-          status,
-          headers: webHeaders(headers, "application/json"),
-          body: parsed,
-          body_encoding: "json",
-          backend: "web",
-        };
-      },
-    };
-  }
-  if (
-    route.kind === "run_view" &&
-    shape === ACTIONS_SUMMARY_SHAPE &&
-    Object.keys(request.query ?? {}).length === 0
-  ) {
-    const id = /\/actions\/runs\/([0-9]+)$/.exec(request.path)?.[1];
-    if (id === undefined) {
-      return undefined;
-    }
-    return {
-      url: `https://github.com/${encodedPathSegments([route.owner, route.repo, "actions", "runs", id])}`,
-      headers: { accept: "text/html", "user-agent": "octopool" },
-      capBytes: responseCapBytes(env, route),
-      usesApiQuota: false,
-      payload: async (body, headers, status) => {
-        const parsed = parseActionsRunHTML(
-          new TextDecoder().decode(body),
-          route.owner!,
-          route.repo!,
-          Number(id),
-        );
-        const complete =
-          parsed === undefined ? undefined : await completeActionsRunSHA(env, route, parsed);
-        return complete === undefined
-          ? undefined
-          : {
-              status,
-              headers: webHeaders(headers, "application/json"),
-              body: complete,
-              body_encoding: "json",
-              backend: "web",
-            };
-      },
-    };
-  }
-  if (route.kind === "run_jobs" && shape === ACTIONS_JOBS_SHAPE) {
-    const id = /\/actions\/runs\/([0-9]+)\/jobs$/.exec(request.path)?.[1];
-    const query = actionsJobsQuery(request.query);
-    if (id === undefined || query === undefined) {
-      return undefined;
-    }
-    const runID = Number(id);
-    return {
-      url: `https://github.com/${encodedPathSegments([
-        route.owner,
-        route.repo,
-        "actions",
-        "runs",
-        id,
-        "job_groups_batch",
-      ])}?attempt=1`,
-      headers: {
-        accept: "application/json",
-        referer: `https://github.com/${encodedPathSegments([
-          route.owner,
-          route.repo,
-          "actions",
-          "runs",
-          id,
-        ])}`,
-        "user-agent": "octopool",
-        "x-requested-with": "XMLHttpRequest",
-      },
-      capBytes: responseCapBytes(env, route),
-      usesApiQuota: false,
-      payload: async (body, headers, status) => {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(new TextDecoder().decode(body)) as unknown;
-        } catch {
-          return undefined;
-        }
-        const summaries = parseActionsJobGroupsJSON(parsed, route.owner!, route.repo!, runID);
-        if (summaries === undefined || summaries.length > MAX_PUBLIC_JOB_PAGES) {
-          return undefined;
-        }
-        const jobs = await Promise.all(
-          summaries.slice(0, query.perPage).map(async (summary) => {
-            const page = await fetchPublicPage(
-              `https://github.com${summary.href}`,
-              responseCapBytes(env, route),
-              env,
-            );
-            return page === undefined
-              ? undefined
-              : parseActionsJobHTML(page, summary, route.owner!, route.repo!);
-          }),
-        );
-        if (jobs.some((job) => job === undefined)) {
-          return undefined;
-        }
-        return {
-          status,
-          headers: webHeaders(headers, "application/json"),
-          body: { total_count: summaries.length, jobs },
-          body_encoding: "json",
-          backend: "web",
-        };
-      },
-    };
-  }
-  return undefined;
-}
-
-function actionsListQuery(
-  query: Record<string, string | string[]> | undefined,
-): { perPage: number; search: string } | undefined {
-  const allowed = new Set(["per_page", "page", "branch", "status"]);
-  if (
-    Object.entries(query ?? {}).some(
-      ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
-    )
-  ) {
-    return undefined;
-  }
-  if (stringQuery(query, "page") !== undefined && stringQuery(query, "page") !== "1") {
-    return undefined;
-  }
-  const perPage = Number(stringQuery(query, "per_page") ?? "25");
-  if (!Number.isInteger(perPage) || perPage < 1 || perPage > 25) {
-    return undefined;
-  }
-  const qualifiers: string[] = [];
-  for (const key of ["branch", "status"] as const) {
-    const value = stringQuery(query, key);
-    if (value === undefined) {
-      continue;
-    }
-    if (value.length > 200 || value.includes("\0") || /[\s"\\]/.test(value)) {
-      return undefined;
-    }
-    qualifiers.push(`${key}:${value}`);
-  }
-  return { perPage, search: qualifiers.join(" ") };
-}
-
-function actionsJobsQuery(
-  query: Record<string, string | string[]> | undefined,
-): { perPage: number } | undefined {
-  const allowed = new Set(["per_page", "page", "filter"]);
-  if (
-    Object.entries(query ?? {}).some(
-      ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
-    ) ||
-    (stringQuery(query, "page") !== undefined && stringQuery(query, "page") !== "1") ||
-    (stringQuery(query, "filter") !== undefined && stringQuery(query, "filter") !== "latest")
-  ) {
-    return undefined;
-  }
-  const perPage = Number(stringQuery(query, "per_page") ?? "30");
-  return Number.isInteger(perPage) && perPage >= 1 && perPage <= 100 ? { perPage } : undefined;
-}
-
-async function enrichActionsRun(
-  env: Env,
-  route: RouteInfo,
-  run: Record<string, unknown>,
-): Promise<Record<string, unknown> | undefined> {
-  if (
-    route.owner === undefined ||
-    route.repo === undefined ||
-    typeof run.id !== "number" ||
-    !Number.isInteger(run.id)
-  ) {
-    return undefined;
-  }
-  const page = await fetchPublicPage(
-    `https://github.com/${encodedPathSegments([
-      route.owner,
-      route.repo,
-      "actions",
-      "runs",
-      String(run.id),
-    ])}`,
-    responseCapBytes(env, route),
-    env,
-  );
-  const parsed =
-    page === undefined ? undefined : parseActionsRunHTML(page, route.owner, route.repo, run.id);
-  return parsed === undefined
-    ? undefined
-    : completeActionsRunSHA(env, route, { ...run, ...parsed });
-}
-
-async function completeActionsRunSHA(
-  env: Env,
-  route: RouteInfo,
-  run: Record<string, unknown>,
-): Promise<Record<string, unknown> | undefined> {
-  if (isFullGitSHA(run.head_sha)) {
-    return run;
-  }
-  if (
-    route.owner === undefined ||
-    route.repo === undefined ||
-    typeof run.head_sha !== "string" ||
-    !/^[0-9A-Fa-f]{7,39}$/.test(run.head_sha)
-  ) {
-    return undefined;
-  }
-  const patch = await fetchPublicPage(
-    `https://github.com/${encodedPathSegments([
-      route.owner,
-      route.repo,
-      "commit",
-      `${run.head_sha}.patch`,
-    ])}`,
-    responseCapBytes(env, route),
-    env,
-    "text/plain",
-  );
-  const sha = patch === undefined ? undefined : parseCommitPatchSHA(patch);
-  return sha === undefined ? undefined : { ...run, head_sha: sha };
-}
-
-function isFullGitSHA(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9A-Fa-f]{40,64}$/.test(value);
 }
 
 function releasePageRequest(
