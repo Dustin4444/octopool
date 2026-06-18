@@ -1,6 +1,8 @@
+import { bytesToBase64 } from "./encoding";
 import { HttpError, parsePositiveInt } from "./http";
 import { responseCapBytes } from "./github";
 import { gitRefResponse, parseGitUploadPackAdvertisement } from "./github-git";
+import { decodeURIComponentSafe, encodedPathSegments } from "./github-path";
 import {
   parseActionsJobGroupsJSON,
   parseActionsJobHTML,
@@ -18,6 +20,7 @@ import {
 } from "./github-html";
 import { queries } from "./generated/sql";
 import { capabilitiesForRouteKind } from "./route-manifest";
+import { readBodyCapped } from "./response-body";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 const MEDIA_DIFF = new Set([
@@ -92,7 +95,7 @@ export async function callGitHubWeb(
       continue;
     }
     try {
-      const body = await readBodyCapped(response, web.capBytes);
+      const body = await readWebBody(response, web.capBytes);
       const payload = await web.payload(
         new Uint8Array(body),
         response.headers,
@@ -239,7 +242,9 @@ function summaryPageRequest(
     if (number === undefined) {
       return undefined;
     }
-    url = new URL(`https://github.com/${pathSegments([route.owner, route.repo, "pull", number])}`);
+    url = new URL(
+      `https://github.com/${encodedPathSegments([route.owner, route.repo, "pull", number])}`,
+    );
     parse = (html) => parsePullRequestHTML(html, route.owner!, route.repo!, Number(number));
   } else if (route.kind === "issue_view" && shape === ISSUE_SUMMARY_SHAPE) {
     if (Object.keys(request.query ?? {}).length !== 0) {
@@ -250,7 +255,7 @@ function summaryPageRequest(
       return undefined;
     }
     url = new URL(
-      `https://github.com/${pathSegments([route.owner, route.repo, "issues", number])}`,
+      `https://github.com/${encodedPathSegments([route.owner, route.repo, "issues", number])}`,
     );
     parse = (html) => parseIssueHTML(html, route.owner!, route.repo!, Number(number));
   } else if (
@@ -262,7 +267,7 @@ function summaryPageRequest(
     if (query === undefined) {
       return undefined;
     }
-    url = new URL(`https://github.com/${pathSegments([route.owner, route.repo, "issues"])}`);
+    url = new URL(`https://github.com/${encodedPathSegments([route.owner, route.repo, "issues"])}`);
     url.searchParams.set("q", query.search);
     parse = (html) => {
       const items = parseIssueListHTML(html, route.owner!, route.repo!, kind);
@@ -273,7 +278,7 @@ function summaryPageRequest(
     if (query === undefined) {
       return undefined;
     }
-    url = new URL(`https://github.com/${pathSegments([route.owner, route.repo, "labels"])}`);
+    url = new URL(`https://github.com/${encodedPathSegments([route.owner, route.repo, "labels"])}`);
     parse = (html) => {
       const items = parseLabelListHTML(html, route.owner!, route.repo!);
       return items === undefined ? undefined : items.slice(0, query.perPage);
@@ -298,7 +303,9 @@ function summaryPageRequest(
     if (route.kind === "workflow_view" && workflowRef === undefined) {
       return undefined;
     }
-    url = new URL(`https://github.com/${pathSegments([route.owner, route.repo, "actions"])}`);
+    url = new URL(
+      `https://github.com/${encodedPathSegments([route.owner, route.repo, "actions"])}`,
+    );
     return {
       url: url.toString(),
       headers: { accept: "text/html", "user-agent": "octopool" },
@@ -370,7 +377,7 @@ async function completeWorkflowList(
   const workflows = [...first];
   for (let page = 2; page <= pageCount; page++) {
     const next = await fetchPublicPage(
-      `https://github.com/${pathSegments([
+      `https://github.com/${encodedPathSegments([
         route.owner!,
         route.repo!,
         "actions",
@@ -422,7 +429,7 @@ function gitRefRequest(env: Env, request: RelayRequest, route: RouteInfo): WebRe
     return undefined;
   }
   return {
-    url: `https://github.com/${pathSegments([route.owner, `${route.repo}.git`])}/info/refs?service=git-upload-pack`,
+    url: `https://github.com/${encodedPathSegments([route.owner, `${route.repo}.git`])}/info/refs?service=git-upload-pack`,
     headers: {
       accept: "application/x-git-upload-pack-advertisement",
       "user-agent": "octopool",
@@ -435,7 +442,7 @@ function gitRefRequest(env: Env, request: RelayRequest, route: RouteInfo): WebRe
         return undefined;
       }
       const repositoryPage = await fetchPublicPage(
-        `https://github.com/${pathSegments([route.owner!, route.repo!, "issues"])}?q=is%3Aissue`,
+        `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "issues"])}?q=is%3Aissue`,
         responseCapBytes(env, route),
         env,
       );
@@ -579,7 +586,7 @@ function actionsPageRequest(
       return undefined;
     }
     const url = new URL(
-      `https://github.com/${pathSegments([
+      `https://github.com/${encodedPathSegments([
         route.owner,
         route.repo,
         "actions",
@@ -633,7 +640,7 @@ function actionsPageRequest(
       return undefined;
     }
     return {
-      url: `https://github.com/${pathSegments([route.owner, route.repo, "actions", "runs", id])}`,
+      url: `https://github.com/${encodedPathSegments([route.owner, route.repo, "actions", "runs", id])}`,
       headers: { accept: "text/html", "user-agent": "octopool" },
       capBytes: responseCapBytes(env, route),
       usesApiQuota: false,
@@ -666,7 +673,7 @@ function actionsPageRequest(
     }
     const runID = Number(id);
     return {
-      url: `https://github.com/${pathSegments([
+      url: `https://github.com/${encodedPathSegments([
         route.owner,
         route.repo,
         "actions",
@@ -676,7 +683,7 @@ function actionsPageRequest(
       ])}?attempt=1`,
       headers: {
         accept: "application/json",
-        referer: `https://github.com/${pathSegments([
+        referer: `https://github.com/${encodedPathSegments([
           route.owner,
           route.repo,
           "actions",
@@ -806,7 +813,7 @@ async function fetchPublicPage(
     return undefined;
   }
   try {
-    return new TextDecoder().decode(await readBodyCapped(response, capBytes));
+    return new TextDecoder().decode(await readWebBody(response, capBytes));
   } catch {
     return undefined;
   }
@@ -826,7 +833,7 @@ async function enrichActionsRun(
     return undefined;
   }
   const page = await fetchPublicPage(
-    `https://github.com/${pathSegments([
+    `https://github.com/${encodedPathSegments([
       route.owner,
       route.repo,
       "actions",
@@ -860,7 +867,7 @@ async function completeActionsRunSHA(
     return undefined;
   }
   const patch = await fetchPublicPage(
-    `https://github.com/${pathSegments([
+    `https://github.com/${encodedPathSegments([
       route.owner,
       route.repo,
       "commit",
@@ -926,7 +933,7 @@ function rawContentRequest(
   if (contentPath === undefined || !safeRelativePath(contentPath)) {
     return undefined;
   }
-  const rawURL = `https://raw.githubusercontent.com/${pathSegments([route.owner, route.repo, ref, contentPath])}`;
+  const rawURL = `https://raw.githubusercontent.com/${encodedPathSegments([route.owner, route.repo, ref, contentPath])}`;
   return {
     url: rawURL,
     headers: { accept: "text/plain, */*", "user-agent": "octopool" },
@@ -936,7 +943,7 @@ function rawContentRequest(
       const sha = gitBlobSHA(body);
       const apiPath = `/repos/${route.owner}/${route.repo}/contents/${contentPath}`;
       const apiURL = `https://api.github.com${apiPath}?ref=${encodeURIComponent(ref)}`;
-      const htmlURL = `https://github.com/${pathSegments([route.owner!, route.repo!, "blob", ref, contentPath])}`;
+      const htmlURL = `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "blob", ref, contentPath])}`;
       return {
         status,
         headers: webHeaders(headers, "application/json"),
@@ -1017,7 +1024,7 @@ function releasePageRequest(
   }
   let url: string;
   if (route.kind === "release_latest") {
-    url = `https://github.com/${pathSegments([route.owner, route.repo, "releases", "latest"])}`;
+    url = `https://github.com/${encodedPathSegments([route.owner, route.repo, "releases", "latest"])}`;
   } else if (route.kind === "release_view") {
     const encodedTag = /\/releases\/tags\/([^/?#]+)$/.exec(request.path)?.[1];
     if (encodedTag === undefined) {
@@ -1027,7 +1034,7 @@ function releasePageRequest(
     if (tag === undefined) {
       return undefined;
     }
-    url = `https://github.com/${pathSegments([route.owner, route.repo, "releases", "tag"])}/${encodeURIComponent(tag)}`;
+    url = `https://github.com/${encodedPathSegments([route.owner, route.repo, "releases", "tag"])}/${encodeURIComponent(tag)}`;
   } else {
     return undefined;
   }
@@ -1210,14 +1217,14 @@ function mediaWebURL(
       if (number === undefined) {
         return undefined;
       }
-      return `https://github.com/${pathSegments([route.owner!, route.repo!, "pull", number])}.${media}`;
+      return `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "pull", number])}.${media}`;
     }
     case "commit_view": {
       const sha = /\/commits\/([0-9A-Fa-f]{7,64})$/.exec(request.path)?.[1];
       if (sha === undefined) {
         return undefined;
       }
-      return `https://github.com/${pathSegments([route.owner!, route.repo!, "commit", sha])}.${media}`;
+      return `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "commit", sha])}.${media}`;
     }
     case "compare": {
       const ref = /\/compare\/([^/?#]+)$/.exec(request.path)?.[1];
@@ -1228,7 +1235,7 @@ function mediaWebURL(
       if (decodedRef === undefined) {
         return undefined;
       }
-      return `https://github.com/${pathSegments([route.owner!, route.repo!, "compare"])}/${encodeURIComponent(decodedRef)}.${media}`;
+      return `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "compare"])}/${encodeURIComponent(decodedRef)}.${media}`;
     }
     default:
       return undefined;
@@ -1332,68 +1339,17 @@ function webHeaders(headers: Headers, contentType: string): Record<string, strin
   return out;
 }
 
-async function readBodyCapped(response: Response, capBytes: number): Promise<Uint8Array> {
-  if (response.body === null) {
-    return new Uint8Array();
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      total += value.byteLength;
-      if (total > capBytes) {
-        await reader.cancel();
-        throw new HttpError(
-          502,
-          "github_web_response_too_large",
-          "GitHub web response is too large",
-        );
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return out;
-}
-
-function pathSegments(segments: string[]): string {
-  return segments
-    .flatMap((segment) => segment.split("/"))
-    .map(encodeURIComponent)
-    .join("/");
-}
-
-function decodeURIComponentSafe(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
+function readWebBody(response: Response, capBytes: number): Promise<Uint8Array> {
+  return readBodyCapped(
+    response,
+    capBytes,
+    () => new HttpError(502, "github_web_response_too_large", "GitHub web response is too large"),
+  );
 }
 
 function gitBlobSHA(body: Uint8Array): string {
   // WebCrypto SHA-1 is unavailable in some Workers runtimes, so keep this tiny implementation local.
   return sha1(new Uint8Array([...new TextEncoder().encode(`blob ${body.byteLength}\0`), ...body]));
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
 }
 
 function sha1(message: Uint8Array): string {

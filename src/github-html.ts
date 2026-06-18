@@ -1,3 +1,6 @@
+import { base64ToBytesSafe } from "./encoding";
+import { decodeURIComponentSafe } from "./github-path";
+
 type RunState = {
   status: string;
   conclusion: string | null;
@@ -675,13 +678,7 @@ function sortByNodeID(items: Record<string, unknown>[]): Record<string, unknown>
 
 function decodedNodeID(value: string): Uint8Array | undefined {
   const encoded = value.includes("_") ? value.slice(value.indexOf("_") + 1) : value;
-  const base64 = encoded.replaceAll("-", "+").replaceAll("_", "/");
-  try {
-    const binary = atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="));
-    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  } catch {
-    return undefined;
-  }
+  return base64ToBytesSafe(encoded);
 }
 
 function compareBytes(left: Uint8Array, right: Uint8Array): number {
@@ -876,14 +873,6 @@ function decodeHTML(value: string): string {
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
     .replaceAll("&amp;", "&");
-}
-
-function decodeURIComponentSafe(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
 }
 
 function escapeRegex(value: string): string {

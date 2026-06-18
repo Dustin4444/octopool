@@ -1,3 +1,6 @@
+import { base64ToBytesSafe, bytesToBase64, bytesToBase64URL } from "./encoding";
+import { encodedPathSegments } from "./github-path";
+
 export type AdvertisedGitRefs = Map<string, string>;
 
 export function parseGitUploadPackAdvertisement(body: Uint8Array): AdvertisedGitRefs | undefined {
@@ -85,7 +88,7 @@ export function gitRefResponse(
     response.push({
       ref,
       node_id: nodeID,
-      url: `https://api.github.com/${pathSegments([
+      url: `https://api.github.com/${encodedPathSegments([
         "repos",
         owner,
         repo,
@@ -96,7 +99,7 @@ export function gitRefResponse(
       object: {
         sha,
         type,
-        url: `https://api.github.com/${pathSegments([
+        url: `https://api.github.com/${encodedPathSegments([
           "repos",
           owner,
           repo,
@@ -111,7 +114,7 @@ export function gitRefResponse(
 }
 
 function gitRefNodeID(repositoryNodeID: string, ref: string): string | undefined {
-  const oldBytes = base64Bytes(repositoryNodeID);
+  const oldBytes = base64ToBytesSafe(repositoryNodeID);
   const oldValue = oldBytes === undefined ? undefined : new TextDecoder().decode(oldBytes);
   const oldMatch = /^010:Repository([0-9]+)$/.exec(oldValue ?? "");
   if (oldMatch !== null) {
@@ -120,7 +123,7 @@ function gitRefNodeID(repositoryNodeID: string, ref: string): string | undefined
   if (!repositoryNodeID.startsWith("R_")) {
     return undefined;
   }
-  const repositoryBytes = base64Bytes(repositoryNodeID.slice(2));
+  const repositoryBytes = base64ToBytesSafe(repositoryNodeID.slice(2));
   if (repositoryBytes === undefined || repositoryBytes[0] !== 0x92) {
     return undefined;
   }
@@ -132,7 +135,7 @@ function gitRefNodeID(repositoryNodeID: string, ref: string): string | undefined
   bytes.set(repositoryBytes);
   bytes[0] = 0x93;
   bytes.set(encodedRef, repositoryBytes.byteLength);
-  return `REF_${bytesToBase64(bytes).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "")}`;
+  return `REF_${bytesToBase64URL(bytes)}`;
 }
 
 function messagePackString(value: string): Uint8Array | undefined {
@@ -146,31 +149,6 @@ function messagePackString(value: string): Uint8Array | undefined {
     return undefined;
   }
   return new Uint8Array([...prefix, ...bytes]);
-}
-
-function base64Bytes(value: string): Uint8Array | undefined {
-  const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
-  try {
-    const binary = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="));
-    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  } catch {
-    return undefined;
-  }
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
-}
-
-function pathSegments(segments: string[]): string {
-  return segments
-    .flatMap((segment) => segment.split("/"))
-    .map(encodeURIComponent)
-    .join("/");
 }
 
 function compareStrings(left: string, right: string): number {

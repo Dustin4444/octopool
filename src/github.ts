@@ -1,4 +1,6 @@
+import { base64ToBytes, bytesToBase64, bytesToBase64URL } from "./encoding";
 import { HttpError, parsePositiveInt } from "./http";
+import { readBodyCapped } from "./response-body";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
 const installationTokenCache = new Map<string, { token: string; expiresAt: number }>();
@@ -41,7 +43,7 @@ async function callGitHubAPI(
     }
     throw new HttpError(502, "github_redirect_denied", "GitHub returned a redirect");
   }
-  const bodyBytes = await readBodyCapped(response, responseCapBytes(env, route));
+  const bodyBytes = await readGitHubBody(response, responseCapBytes(env, route));
   const contentType = response.headers.get("content-type") ?? "";
   const { body, encoding } = decodeBody(bodyBytes, contentType);
   return {
@@ -131,7 +133,7 @@ async function githubAppJWT(appId: string, privateKeyPEM: string): Promise<strin
     key,
     new TextEncoder().encode(signingInput),
   );
-  return `${signingInput}.${base64URLBytes(new Uint8Array(signature))}`;
+  return `${signingInput}.${bytesToBase64URL(new Uint8Array(signature))}`;
 }
 
 async function importPrivateKey(privateKeyPEM: string): Promise<CryptoKey> {
@@ -188,7 +190,7 @@ async function fetchGitHubLogRedirect(
   if (redirected.status >= 300 && redirected.status < 400) {
     throw new HttpError(502, "github_log_redirect_denied", "GitHub log redirect chained");
   }
-  const bodyBytes = await readBodyCapped(redirected, cap);
+  const bodyBytes = await readGitHubBody(redirected, cap);
   const contentType = redirected.headers.get("content-type") ?? "text/plain";
   const { body, encoding } = decodeBody(bodyBytes, contentType);
   return {
@@ -302,34 +304,12 @@ function githubHeaders(
   return headers;
 }
 
-async function readBodyCapped(response: Response, capBytes: number): Promise<Uint8Array> {
-  if (response.body === null) {
-    return new Uint8Array();
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    if (value !== undefined) {
-      size += value.byteLength;
-      if (size > capBytes) {
-        await reader.cancel();
-        throw new HttpError(502, "github_response_too_large", "GitHub response exceeded relay cap");
-      }
-      chunks.push(value);
-    }
-  }
-  const out = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return out;
+function readGitHubBody(response: Response, capBytes: number): Promise<Uint8Array> {
+  return readBodyCapped(
+    response,
+    capBytes,
+    () => new HttpError(502, "github_response_too_large", "GitHub response exceeded relay cap"),
+  );
 }
 
 function decodeBody(
@@ -394,27 +374,6 @@ function isMostlyText(bytes: Uint8Array): boolean {
   return true;
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
-}
-
 function base64URLJSON(value: unknown): string {
-  return base64URLBytes(new TextEncoder().encode(JSON.stringify(value)));
-}
-
-function base64URLBytes(bytes: Uint8Array): string {
-  return bytesToBase64(bytes).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-}
-
-function base64ToBytes(value: string): Uint8Array {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
+  return bytesToBase64URL(new TextEncoder().encode(JSON.stringify(value)));
 }
