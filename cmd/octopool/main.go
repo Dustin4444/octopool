@@ -499,7 +499,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 func isGHArgv(argv0 string) bool {
-	base := filepath.Base(argv0)
+	base := strings.TrimSuffix(strings.ToLower(filepath.Base(argv0)), ".exe")
 	return base == "gh" || base == "octopool-gh"
 }
 
