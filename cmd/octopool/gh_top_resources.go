@@ -12,15 +12,9 @@ func handleGHRepo(ctx context.Context, args []string, stdout io.Writer) ghResult
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, fallback, err := parseGHTopOptions(args[1:])
-	if err != nil {
-		return ghFailed(err)
-	}
-	if fallback {
-		return ghDelegated()
-	}
-	if topJQFallback(opts) {
-		return ghDelegated()
+	opts, early, ok := prepareGHTopOptions(args[1:])
+	if !ok {
+		return early
 	}
 	switch args[0] {
 	case "view":
@@ -47,15 +41,9 @@ func handleGHRelease(ctx context.Context, args []string, stdout io.Writer) ghRes
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, fallback, err := parseGHTopOptions(args[1:])
-	if err != nil {
-		return ghFailed(err)
-	}
-	if fallback {
-		return ghDelegated()
-	}
-	if topJQFallback(opts) {
-		return ghDelegated()
+	opts, early, ok := prepareGHTopOptions(args[1:])
+	if !ok {
+		return early
 	}
 	switch args[0] {
 	case "list":
@@ -78,7 +66,7 @@ func handleGHRelease(ctx context.Context, args []string, stdout io.Writer) ghRes
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
 			method:  "GET",
 			path:    path,
-			headers: map[string]string{"x-octopool-public-shape": "release-summary-v1"},
+			headers: map[string]string{"x-octopool-public-shape": publicShapeReleaseSummary},
 		}, opts, fieldMapRelease))
 	default:
 		return ghDelegated()
@@ -89,15 +77,9 @@ func handleGHWorkflow(ctx context.Context, args []string, stdout io.Writer) ghRe
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, fallback, err := parseGHTopOptions(args[1:])
-	if err != nil {
-		return ghFailed(err)
-	}
-	if fallback {
-		return ghDelegated()
-	}
-	if topJQFallback(opts) {
-		return ghDelegated()
+	opts, early, ok := prepareGHTopOptions(args[1:])
+	if !ok {
+		return early
 	}
 	repo, ok := repoFromOptionOrCurrent(opts.repo)
 	if !ok || repo == "" {
@@ -116,7 +98,7 @@ func handleGHWorkflow(ctx context.Context, args []string, stdout io.Writer) ghRe
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
 			method:  "GET",
 			path:    repoPath(repo, "actions", "workflows", opts.positionals[0]),
-			headers: map[string]string{"x-octopool-public-shape": "workflow-view-v1"},
+			headers: map[string]string{"x-octopool-public-shape": publicShapeWorkflowView},
 		}, opts, fieldMapWorkflow))
 	default:
 		return ghDelegated()
@@ -127,15 +109,9 @@ func handleGHLabel(ctx context.Context, args []string, stdout io.Writer) ghResul
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, fallback, err := parseGHTopOptions(args[1:])
-	if err != nil {
-		return ghFailed(err)
-	}
-	if fallback {
-		return ghDelegated()
-	}
-	if topJQFallback(opts) {
-		return ghDelegated()
+	opts, early, ok := prepareGHTopOptions(args[1:])
+	if !ok {
+		return early
 	}
 	if args[0] != "list" || opts.patch || opts.state != "" || opts.branch != "" || opts.workflow != "" || opts.status != "" || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedLabelFields) || limitOverOnePage(opts) {
 		return ghDelegated()
@@ -148,7 +124,7 @@ func handleGHLabel(ctx context.Context, args []string, stdout io.Writer) ghResul
 		method:  "GET",
 		path:    repoPath(repo, "labels"),
 		query:   listQuery(opts),
-		headers: map[string]string{"x-octopool-public-shape": "label-list-v1"},
+		headers: map[string]string{"x-octopool-public-shape": publicShapeLabelList},
 	}, opts, fieldMapLabel))
 }
 
@@ -156,15 +132,9 @@ func handleGHGist(ctx context.Context, args []string, stdout io.Writer) ghResult
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, fallback, err := parseGHTopOptions(args[1:])
-	if err != nil {
-		return ghFailed(err)
-	}
-	if fallback {
-		return ghDelegated()
-	}
-	if topJQFallback(opts) {
-		return ghDelegated()
+	opts, early, ok := prepareGHTopOptions(args[1:])
+	if !ok {
+		return early
 	}
 	switch args[0] {
 	case "list":
@@ -191,7 +161,7 @@ func relayWorkflowList(ctx context.Context, stdout io.Writer, repo string, opts 
 		method:  "GET",
 		path:    repoPath(repo, "actions", "workflows"),
 		query:   map[string]any{"per_page": strconv.Itoa(limit), "page": "1"},
-		headers: map[string]string{"x-octopool-public-shape": "workflow-list-v1"},
+		headers: map[string]string{"x-octopool-public-shape": publicShapeWorkflowList},
 	})
 	if err != nil {
 		return err

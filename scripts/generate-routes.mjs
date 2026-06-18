@@ -1,4 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { PUBLIC_SHAPES } from "../src/github-public-shapes.ts";
 import { ROUTES } from "../src/route-manifest.ts";
 
 const outputPath = new URL("../cmd/octopool/routes_generated.go", import.meta.url);
@@ -21,6 +22,13 @@ const lines = [
   "package main",
   "",
   'import "regexp"',
+  "",
+  "const (",
+  ...Object.entries(PUBLIC_SHAPES).map(
+    ([name, value]) =>
+      `\tpublicShape${name[0].toUpperCase()}${name.slice(1)} = ${JSON.stringify(value)}`,
+  ),
+  ")",
   "",
   "var relayQueryPathPatterns = []*regexp.Regexp{",
   ...patterns.map((pattern) => `\tregexp.MustCompile(\`${pattern}\`),`),

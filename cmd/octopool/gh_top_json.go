@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 )
 
 func writeBytes(ctx context.Context, stdout io.Writer, data []byte, jq string) error {
@@ -18,49 +17,6 @@ func writeBytes(ctx context.Context, stdout io.Writer, data []byte, jq string) e
 		_, _ = fmt.Fprintln(stdout)
 	}
 	return err
-}
-
-func topJQFallback(opts ghTopOptions) bool {
-	return opts.jq != "" && !jqAvailable()
-}
-
-func supportedPRListState(state string) bool {
-	switch state {
-	case "", "open", "all":
-		return true
-	default:
-		return false
-	}
-}
-
-func machineReadable(opts ghTopOptions) bool {
-	return len(opts.json) > 0
-}
-
-func hasTopModifiers(opts ghTopOptions) bool {
-	return opts.patch ||
-		opts.limitSet ||
-		opts.state != "" ||
-		opts.branch != "" ||
-		opts.workflow != "" ||
-		opts.status != "" ||
-		opts.author != "" ||
-		opts.assignee != "" ||
-		len(opts.labels) > 0
-}
-
-func hasTopModifiersExceptPatch(opts ghTopOptions) bool {
-	opts.patch = false
-	return hasTopModifiers(opts)
-}
-
-func hasCurrentUserFilter(opts ghTopOptions) bool {
-	return opts.author == "@me" || opts.assignee == "@me"
-}
-
-func supportedWorkflowRef(ref string) bool {
-	lower := strings.ToLower(ref)
-	return isDigits(ref) || strings.HasSuffix(lower, ".yml") || strings.HasSuffix(lower, ".yaml")
 }
 
 func supportedJSONFields(opts ghTopOptions, supported map[string]bool) bool {
@@ -77,16 +33,6 @@ func publicShapeHeaders(opts ghTopOptions, supported map[string]bool, shape stri
 		return map[string]string{"x-octopool-public-shape": shape}
 	}
 	return nil
-}
-
-func needsHydratedPR(fields []string) bool {
-	for _, field := range fields {
-		switch field {
-		case "files", "commits", "comments", "reviews":
-			return true
-		}
-	}
-	return false
 }
 
 func envelopeBodyBytes(envelope relayEnvelope) ([]byte, error) {

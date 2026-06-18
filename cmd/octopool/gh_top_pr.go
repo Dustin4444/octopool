@@ -8,19 +8,32 @@ import (
 	"strings"
 )
 
+func supportedPRListState(state string) bool {
+	switch state {
+	case "", "open", "all":
+		return true
+	default:
+		return false
+	}
+}
+
+func needsHydratedPR(fields []string) bool {
+	for _, field := range fields {
+		switch field {
+		case "files", "commits", "comments", "reviews":
+			return true
+		}
+	}
+	return false
+}
+
 func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, fallback, err := parseGHTopOptions(args[1:])
-	if err != nil {
-		return ghFailed(err)
-	}
-	if fallback {
-		return ghDelegated()
-	}
-	if topJQFallback(opts) {
-		return ghDelegated()
+	opts, early, ok := prepareGHTopOptions(args[1:])
+	if !ok {
+		return early
 	}
 	switch args[0] {
 	case "view":
@@ -34,7 +47,7 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
 			method:  "GET",
 			path:    repoPath(repo, "pulls", number),
-			headers: publicShapeHeaders(opts, supportedPublicPRViewFields, "pr-summary-v1"),
+			headers: publicShapeHeaders(opts, supportedPublicPRViewFields, publicShapePullRequestSummary),
 		}, opts, fieldMapPR))
 	case "list":
 		repo, ok := repoOnly(opts)
@@ -49,7 +62,7 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 			method:  "GET",
 			path:    repoPath(repo, "pulls"),
 			query:   query,
-			headers: publicShapeHeaders(opts, supportedPublicPRListFields, "pr-list-v1"),
+			headers: publicShapeHeaders(opts, supportedPublicPRListFields, publicShapePullRequestList),
 		}, opts, fieldMapPR))
 	case "diff":
 		repo, number, ok := repoNumber(opts)

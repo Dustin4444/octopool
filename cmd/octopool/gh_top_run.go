@@ -11,15 +11,9 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, fallback, err := parseGHTopOptions(args[1:])
-	if err != nil {
-		return ghFailed(err)
-	}
-	if fallback {
-		return ghDelegated()
-	}
-	if topJQFallback(opts) {
-		return ghDelegated()
+	opts, early, ok := prepareGHTopOptions(args[1:])
+	if !ok {
+		return early
 	}
 	switch args[0] {
 	case "list":
@@ -48,7 +42,7 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 			method:  "GET",
 			path:    path,
 			query:   query,
-			headers: map[string]string{"x-octopool-public-shape": "actions-summary-v1"},
+			headers: map[string]string{"x-octopool-public-shape": publicShapeActionsSummary},
 		}, opts, fieldMapRun))
 	case "view":
 		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedRunViewFields) {
@@ -74,7 +68,7 @@ func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string,
 		envelope, err := client.do(ctx, ghAPIRequest{
 			method:  "GET",
 			path:    repoPath(repo, "actions", "runs", id),
-			headers: map[string]string{"x-octopool-public-shape": "actions-summary-v1"},
+			headers: map[string]string{"x-octopool-public-shape": publicShapeActionsSummary},
 		})
 		if err != nil {
 			return err
@@ -93,7 +87,7 @@ func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string,
 			path:   repoPath(repo, "actions", "runs", id, "jobs"),
 			query:  map[string]any{"per_page": "100"},
 			headers: map[string]string{
-				"x-octopool-public-shape": "actions-jobs-v1",
+				"x-octopool-public-shape": publicShapeActionsJobs,
 			},
 		})
 		if err != nil {

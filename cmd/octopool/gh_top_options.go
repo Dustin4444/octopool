@@ -27,6 +27,17 @@ type ghTopOptions struct {
 
 var digitsPattern = regexp.MustCompile(`^[0-9]+$`)
 
+func prepareGHTopOptions(args []string) (ghTopOptions, ghResult, bool) {
+	opts, fallback, err := parseGHTopOptions(args)
+	if err != nil {
+		return opts, ghFailed(err), false
+	}
+	if fallback || topJQFallback(opts) {
+		return opts, ghDelegated(), false
+	}
+	return opts, ghResult{}, true
+}
+
 func parseGHTopOptions(args []string) (ghTopOptions, bool, error) {
 	opts := ghTopOptions{limit: 30}
 	limitRaw := ""
@@ -125,12 +136,34 @@ func limitOverOnePage(opts ghTopOptions) bool {
 	return opts.limitSet && opts.limit > 100
 }
 
-func cloneQuery(input map[string]any) map[string]any {
-	out := make(map[string]any, len(input)+2)
-	for key, value := range input {
-		out[key] = value
-	}
-	return out
+func topJQFallback(opts ghTopOptions) bool {
+	return opts.jq != "" && !jqAvailable()
+}
+
+func machineReadable(opts ghTopOptions) bool {
+	return len(opts.json) > 0
+}
+
+func hasTopModifiers(opts ghTopOptions) bool {
+	return opts.patch ||
+		opts.limitSet ||
+		opts.state != "" ||
+		opts.branch != "" ||
+		opts.workflow != "" ||
+		opts.status != "" ||
+		opts.author != "" ||
+		opts.assignee != "" ||
+		len(opts.labels) > 0
+}
+
+func hasTopModifiersExceptPatch(opts ghTopOptions) bool {
+	opts.patch = false
+	return hasTopModifiers(opts)
+}
+
+func supportedWorkflowRef(ref string) bool {
+	lower := strings.ToLower(ref)
+	return isDigits(ref) || strings.HasSuffix(lower, ".yml") || strings.HasSuffix(lower, ".yaml")
 }
 
 func splitFields(raw string) []string {

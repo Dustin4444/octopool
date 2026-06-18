@@ -4,6 +4,19 @@ package main
 
 import "regexp"
 
+const (
+	publicShapeActionsSummary     = "actions-summary-v1"
+	publicShapeActionsJobs        = "actions-jobs-v1"
+	publicShapeIssueSummary       = "issue-summary-v1"
+	publicShapeIssueList          = "issue-list-v1"
+	publicShapePullRequestList    = "pr-list-v1"
+	publicShapePullRequestSummary = "pr-summary-v1"
+	publicShapeLabelList          = "label-list-v1"
+	publicShapeWorkflowList       = "workflow-list-v1"
+	publicShapeWorkflowView       = "workflow-view-v1"
+	publicShapeReleaseSummary     = "release-summary-v1"
+)
+
 var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/users/(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?(?:\[bot\]|%5[Bb]bot%5[Dd])?)$`),
 	regexp.MustCompile(`^/users/(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?(?:\[bot\]|%5[Bb]bot%5[Dd])?)/repos$`),

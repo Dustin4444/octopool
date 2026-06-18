@@ -8,19 +8,25 @@ import (
 	"strings"
 )
 
+func hasCurrentUserFilter(opts ghTopOptions) bool {
+	return opts.author == "@me" || opts.assignee == "@me"
+}
+
+func cloneQuery(input map[string]any) map[string]any {
+	out := make(map[string]any, len(input)+2)
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
+}
+
 func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResult {
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, fallback, err := parseGHTopOptions(args[1:])
-	if err != nil {
-		return ghFailed(err)
-	}
-	if fallback {
-		return ghDelegated()
-	}
-	if topJQFallback(opts) {
-		return ghDelegated()
+	opts, early, ok := prepareGHTopOptions(args[1:])
+	if !ok {
+		return early
 	}
 	switch args[0] {
 	case "view":
@@ -31,7 +37,7 @@ func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResul
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
 			method:  "GET",
 			path:    repoPath(repo, "issues", number),
-			headers: publicShapeHeaders(opts, supportedPublicIssueViewFields, "issue-summary-v1"),
+			headers: publicShapeHeaders(opts, supportedPublicIssueViewFields, publicShapeIssueSummary),
 		}, opts, fieldMapIssue))
 	case "list":
 		repo, ok := repoOnly(opts)
@@ -55,7 +61,7 @@ func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResul
 			method:  "GET",
 			path:    repoPath(repo, "issues"),
 			query:   query,
-			headers: publicShapeHeaders(opts, supportedPublicIssueListFields, "issue-list-v1"),
+			headers: publicShapeHeaders(opts, supportedPublicIssueListFields, publicShapeIssueList),
 		}, opts))
 	default:
 		return ghDelegated()

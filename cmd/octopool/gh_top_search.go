@@ -20,15 +20,9 @@ func handleGHSearch(ctx context.Context, args []string, stdout io.Writer) ghResu
 	if kind != "issues" && kind != "prs" && kind != "repos" {
 		return ghDelegated()
 	}
-	opts, fallback, err := parseGHTopOptions(args[1:])
-	if err != nil {
-		return ghFailed(err)
-	}
-	if fallback {
-		return ghDelegated()
-	}
-	if topJQFallback(opts) {
-		return ghDelegated()
+	opts, early, ok := prepareGHTopOptions(args[1:])
+	if !ok {
+		return early
 	}
 	if kind == "repos" {
 		if opts.repo != "" || opts.repoCount > 0 || opts.state != "" || opts.patch || opts.branch != "" || opts.workflow != "" || opts.status != "" || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) || limitOverOnePage(opts) {
