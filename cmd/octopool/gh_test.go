@@ -1010,14 +1010,17 @@ func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
 	t.Setenv("OCTOPOOL_POOL", "maintainers")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/github/request" {
-			t.Fatalf("path = %s", r.URL.Path)
+			http.Error(w, "unexpected relay path", http.StatusBadRequest)
+			return
 		}
 		if r.Header.Get("Authorization") != "Bearer test-token" {
-			t.Fatalf("auth = %q", r.Header.Get("Authorization"))
+			http.Error(w, "unexpected relay authorization", http.StatusUnauthorized)
+			return
 		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatal(err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 		envelope := relayEnvelope{
 			Status:       200,
@@ -1025,12 +1028,14 @@ func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
 		}
 		raw, err := json.Marshal(responseBody(body))
 		if err != nil {
-			t.Fatal(err)
+			t.Errorf("marshal relay fixture: %v", err)
+			http.Error(w, "invalid fixture body", http.StatusInternalServerError)
+			return
 		}
 		envelope.Body = raw
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(envelope); err != nil {
-			t.Fatal(err)
+			t.Errorf("write relay fixture: %v", err)
 		}
 	}))
 	t.Cleanup(server.Close)

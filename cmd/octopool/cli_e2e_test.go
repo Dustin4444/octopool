@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCLIEndToEndRelayAndFallback(t *testing.T) {
@@ -22,10 +24,12 @@ func TestCLIEndToEndRelayAndFallback(t *testing.T) {
 		server := cliRelayServer(t, func(w http.ResponseWriter, r *http.Request) {
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatal(err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
 			}
 			if body["path"] != "/repos/openclaw/octopool" {
-				t.Fatalf("path = %v", body["path"])
+				http.Error(w, "unexpected relay path", http.StatusBadRequest)
+				return
 			}
 			writeCLIEnvelope(t, w, map[string]any{
 				"name": "octopool", "full_name": "openclaw/octopool", "private": false,
@@ -112,7 +116,9 @@ func buildCLIBinary(t *testing.T) string {
 
 func runCLI(t *testing.T, bin string, serverURL string, extra map[string]string, args ...string) cliResult {
 	t.Helper()
-	cmd := exec.Command(bin, args...)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
 	home := t.TempDir()
 	env := append(os.Environ(),
 		"HOME="+home,
@@ -135,7 +141,8 @@ func cliRelayServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/github/request" || r.Header.Get("Authorization") != "Bearer test-token" {
-			t.Fatalf("request = %s auth=%q", r.URL.Path, r.Header.Get("Authorization"))
+			http.Error(w, "unexpected relay request", http.StatusBadRequest)
+			return
 		}
 		handler(w, r)
 	}))
@@ -147,13 +154,15 @@ func writeCLIEnvelope(t *testing.T, w http.ResponseWriter, body any) {
 	t.Helper()
 	raw, err := json.Marshal(body)
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("marshal CLI envelope: %v", err)
+		http.Error(w, "invalid fixture body", http.StatusInternalServerError)
+		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(relayEnvelope{
 		Status: 200, Body: raw, BodyEncoding: "json",
 	}); err != nil {
-		t.Fatal(err)
+		t.Errorf("write CLI envelope: %v", err)
 	}
 }
 
