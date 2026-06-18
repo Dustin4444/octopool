@@ -230,7 +230,8 @@ pnpm test         # vitest only
 pnpm run deploy   # wrangler deploy for the backing Worker (and openclaw proxy)
 pnpm e2e          # smoke-test the live deployment
 pnpm docs:site    # build the docs site into dist/docs-site
-pnpm sql:generate # regenerate sqlc-backed query artifacts
+pnpm sql:generate # regenerate Worker query constants
+pnpm sql:compile  # validate migrations and query types with sqlc
 go build ./cmd/octopool
 ```
 

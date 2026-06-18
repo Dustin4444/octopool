@@ -206,10 +206,9 @@ ship to production.
 ## SQL catalog
 
 Runtime SQL lives in `sql/queries/*.sql` with sqlc annotations. `sqlc.yaml` points sqlc at
-the D1 migrations plus the Durable Object SQLite schema, and `pnpm sql:generate` updates:
-
-- `internal/dbquery/` — sqlc's generated Go package, used as a parser/typecheck artifact.
-- `src/generated/sql.ts` — generated D1/Durable Object query constants used by the Worker.
+the D1 migrations plus the Durable Object SQLite schema. `pnpm sql:compile` validates the
+catalog without generating an unused Go package. `pnpm sql:generate` updates
+`src/generated/sql.ts`, the D1/Durable Object query constants used by the Worker.
 
 Run `pnpm sql:generate` after changing query files. `pnpm check` runs `pnpm sql:check`
 first and fails if generated SQL artifacts are stale.

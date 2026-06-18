@@ -366,16 +366,6 @@ WHERE identity_id = ?1;
 INSERT INTO identity_scopes (identity_id, owner, repo, permission, allow_private)
 VALUES (?1, ?2, ?3, 'read', ?4);
 
--- name: WebLoginCaller :one
-SELECT callers.id, callers.dashboard_role
-FROM callers
-JOIN caller_pools ON caller_pools.caller_id = callers.id
-WHERE callers.github_user_id = ?1
-  AND callers.org_login = ?2
-  AND callers.status = 'active'
-  AND caller_pools.pool_id = ?3
-LIMIT 1;
-
 -- name: UpdateCallerWebLogin :exec
 UPDATE callers
 SET name = ?1,
@@ -427,14 +417,6 @@ VALUES (?1, ?2, CURRENT_TIMESTAMP, datetime(CURRENT_TIMESTAMP, ?3))
 ON CONFLICT(owner, repo) DO UPDATE SET
   checked_at = excluded.checked_at,
   expires_at = excluded.expires_at;
-
--- name: FreshPublicRepoProof :one
-SELECT checked_at, expires_at
-FROM github_public_repos
-WHERE lower(owner) = ?1
-  AND lower(repo) = ?2
-  AND expires_at > CURRENT_TIMESTAMP
-LIMIT 1;
 
 -- name: CoveringPublicRepoProof :one
 SELECT checked_at, expires_at

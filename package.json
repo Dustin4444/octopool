@@ -14,8 +14,9 @@
     "lint": "oxlint --deny-warnings",
     "routes:check": "pnpm routes:generate && git diff --exit-code -- cmd/octopool/routes_generated.go docs/relay.md docs/token-free.md",
     "routes:generate": "node scripts/generate-routes.mjs && gofmt -w cmd/octopool/routes_generated.go",
-    "sql:check": "pnpm sql:generate && git diff --exit-code -- internal/dbquery src/generated/sql.ts",
-    "sql:generate": "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate && node scripts/generate-sql.mjs && oxfmt src/generated/sql.ts --write",
+    "sql:check": "pnpm sql:compile && pnpm sql:generate && git diff --exit-code -- src/generated/sql.ts",
+    "sql:compile": "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 compile",
+    "sql:generate": "node scripts/generate-sql.mjs && oxfmt src/generated/sql.ts --write",
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "types": "wrangler types"

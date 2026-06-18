@@ -94,8 +94,6 @@ export const queries = {
   deleteIdentityScopes: "DELETE FROM identity_scopes\nWHERE identity_id = ?1",
   insertIdentityScope:
     "INSERT INTO identity_scopes (identity_id, owner, repo, permission, allow_private)\nVALUES (?1, ?2, ?3, 'read', ?4)",
-  webLoginCaller:
-    "SELECT callers.id, callers.dashboard_role\nFROM callers\nJOIN caller_pools ON caller_pools.caller_id = callers.id\nWHERE callers.github_user_id = ?1\n  AND callers.org_login = ?2\n  AND callers.status = 'active'\n  AND caller_pools.pool_id = ?3\nLIMIT 1",
   updateCallerWebLogin:
     "UPDATE callers\nSET name = ?1,\n    github_login = ?2,\n    github_user_id = ?3,\n    org_verified_at = ?4,\n    updated_at = CURRENT_TIMESTAMP\nWHERE id = ?5",
   insertWebSession:
@@ -109,8 +107,6 @@ export const queries = {
     "UPDATE web_sessions\nSET last_seen_at = CURRENT_TIMESTAMP\nWHERE session_hash = ?1",
   upsertPublicRepoProof:
     "INSERT INTO github_public_repos (owner, repo, checked_at, expires_at)\nVALUES (?1, ?2, CURRENT_TIMESTAMP, datetime(CURRENT_TIMESTAMP, ?3))\nON CONFLICT(owner, repo) DO UPDATE SET\n  checked_at = excluded.checked_at,\n  expires_at = excluded.expires_at",
-  freshPublicRepoProof:
-    "SELECT checked_at, expires_at\nFROM github_public_repos\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
   coveringPublicRepoProof:
     "SELECT checked_at, expires_at\nFROM github_public_repos\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND checked_at >= datetime(?3, '-5 seconds')\nLIMIT 1",
   freshCoveringPublicRepoProof:
