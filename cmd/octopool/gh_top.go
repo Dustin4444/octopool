@@ -6,28 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"strconv"
 	"strings"
 )
-
-type ghTopOptions struct {
-	repo        string
-	repoCount   int
-	json        []string
-	jq          string
-	patch       bool
-	limit       string
-	limitSet    bool
-	state       string
-	branch      string
-	workflow    string
-	status      string
-	author      string
-	assignee    string
-	labels      []string
-	positionals []string
-}
 
 const (
 	relayPageSize = 100
@@ -85,67 +66,6 @@ func ghCompleted(err error) ghResult {
 
 func ghFailed(err error) ghResult {
 	return ghResult{action: ghFail, err: err}
-}
-
-func parseGHTopOptions(args []string) (ghTopOptions, bool, error) {
-	opts := ghTopOptions{limit: "30"}
-	for index := 0; index < len(args); index++ {
-		arg := args[index]
-		valueFlag := func(name string) (string, bool, error) {
-			if arg == name {
-				index++
-				if index >= len(args) {
-					return "", false, fmt.Errorf("%s requires a value", name)
-				}
-				return args[index], true, nil
-			}
-			if strings.HasPrefix(arg, name+"=") {
-				return strings.TrimPrefix(arg, name+"="), true, nil
-			}
-			return "", false, nil
-		}
-		for _, item := range []struct {
-			name string
-			set  func(string)
-		}{
-			{"-R", func(value string) { opts.repo = value; opts.repoCount++ }},
-			{"--repo", func(value string) { opts.repo = value; opts.repoCount++ }},
-			{"--json", func(value string) { opts.json = splitFields(value) }},
-			{"--jq", func(value string) { opts.jq = value }},
-			{"-q", func(value string) { opts.jq = value }},
-			{"--limit", func(value string) { opts.limit = value; opts.limitSet = true }},
-			{"-L", func(value string) { opts.limit = value; opts.limitSet = true }},
-			{"--state", func(value string) { opts.state = value }},
-			{"--branch", func(value string) { opts.branch = value }},
-			{"--workflow", func(value string) { opts.workflow = value }},
-			{"--status", func(value string) { opts.status = value }},
-			{"--author", func(value string) { opts.author = value }},
-			{"--assignee", func(value string) { opts.assignee = value }},
-			{"--label", func(value string) { opts.labels = append(opts.labels, value) }},
-		} {
-			value, ok, err := valueFlag(item.name)
-			if err != nil {
-				return opts, false, err
-			}
-			if ok {
-				item.set(value)
-				goto nextArg
-			}
-		}
-		switch arg {
-		case "--patch":
-			opts.patch = true
-		case "--web", "--comments", "--template", "--paginate", "--slurp":
-			return opts, true, nil
-		default:
-			if strings.HasPrefix(arg, "-") && arg != "--patch" {
-				return opts, true, nil
-			}
-			opts.positionals = append(opts.positionals, arg)
-		}
-	nextArg:
-	}
-	return opts, false, nil
 }
 
 func relayTop(ctx context.Context, stdout io.Writer, request ghAPIRequest, opts ghTopOptions, fieldMap map[string][]string) error {
@@ -974,82 +894,4 @@ func checkExitCode(items []any) error {
 		return exitCodeError{Code: exitCode}
 	}
 	return nil
-}
-
-func listQuery(opts ghTopOptions) map[string]any {
-	return listQueryDefault(opts, 30)
-}
-
-func listQueryDefault(opts ghTopOptions, defaultLimit int) map[string]any {
-	return map[string]any{"per_page": strconv.Itoa(desiredLimitDefault(opts, defaultLimit))}
-}
-
-func desiredLimit(opts ghTopOptions) int {
-	return desiredLimitDefault(opts, 30)
-}
-
-func desiredLimitDefault(opts ghTopOptions, defaultLimit int) int {
-	perPage := "30"
-	if !opts.limitSet {
-		perPage = strconv.Itoa(defaultLimit)
-	}
-	if opts.limitSet {
-		limit, err := strconv.Atoi(opts.limit)
-		if err != nil {
-			value, _ := strconv.Atoi(perPage)
-			return value
-		}
-		if limit < 1 {
-			perPage = "1"
-		} else if limit > 100 {
-			perPage = "100"
-		} else {
-			perPage = strconv.Itoa(limit)
-		}
-	}
-	value, _ := strconv.Atoi(perPage)
-	return value
-}
-
-func limitOverOnePage(opts ghTopOptions) bool {
-	limit, err := strconv.Atoi(opts.limit)
-	return err == nil && limit > 100
-}
-
-func cloneQuery(input map[string]any) map[string]any {
-	out := make(map[string]any, len(input)+2)
-	for key, value := range input {
-		out[key] = value
-	}
-	return out
-}
-
-func splitFields(raw string) []string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	parts := strings.FieldsFunc(raw, func(r rune) bool {
-		return r == ',' || r == ' '
-	})
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
-}
-
-func isDigits(raw string) bool {
-	return regexp.MustCompile(`^[0-9]+$`).MatchString(raw)
-}
-
-func nestedString(input map[string]any, path ...string) (string, bool) {
-	value, ok := valueAtPath(input, path...)
-	if !ok {
-		return "", false
-	}
-	text, ok := value.(string)
-	return text, ok
 }

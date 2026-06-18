@@ -218,7 +218,7 @@ func TestParseGHTopOptions(t *testing.T) {
 	if err != nil || fallback {
 		t.Fatalf("parse fallback=%v err=%v", fallback, err)
 	}
-	if opts.repo != "openclaw/openclaw" || opts.limit != "50" || opts.state != "open" {
+	if opts.repo != "openclaw/openclaw" || opts.limit != 50 || opts.state != "open" {
 		t.Fatalf("opts = %#v", opts)
 	}
 	if len(opts.json) != 3 || opts.json[2] != "url" || opts.jq != ".number" {
@@ -229,6 +229,13 @@ func TestParseGHTopOptions(t *testing.T) {
 	}
 	if len(opts.positionals) != 1 || opts.positionals[0] != "85341" {
 		t.Fatalf("opts = %#v", opts)
+	}
+}
+
+func TestParseGHTopOptionsRejectsInvalidLimit(t *testing.T) {
+	_, fallback, err := parseGHTopOptions([]string{"--limit", "nope"})
+	if err == nil || fallback {
+		t.Fatalf("fallback=%v err=%v", fallback, err)
 	}
 }
 
