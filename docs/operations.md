@@ -191,6 +191,7 @@ Apply with `wrangler d1 migrations apply octopool` (add `--remote` for productio
 pnpm install
 pnpm check        # format:check + lint + vitest + build + go test + go vet
 pnpm test         # vitest only
+pnpm test:e2e:cli-worker # compiled CLI → local Workerd/D1/DO → public GitHub
 pnpm run deploy   # wrangler deploy backing Worker, then OpenClaw proxy Worker
 pnpm e2e          # smoke-test the live deployment
 ```

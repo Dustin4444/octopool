@@ -228,6 +228,7 @@ The Worker is TypeScript on Cloudflare Workers; the CLI is Go.
 pnpm install
 pnpm check        # format + lint + vitest + types + go test + go vet
 pnpm test         # vitest only
+pnpm test:e2e:cli-worker # compiled CLI → local Workerd/D1/DO → public GitHub
 pnpm run deploy   # wrangler deploy for the backing Worker (and openclaw proxy)
 pnpm e2e          # smoke-test the live deployment
 pnpm docs:site    # build the docs site into dist/docs-site

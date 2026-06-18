@@ -18,6 +18,7 @@
     "sql:compile": "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 compile",
     "sql:generate": "node scripts/generate-sql.mjs && oxfmt src/generated/sql.ts --write",
     "test": "vitest run",
+    "test:e2e:cli-worker": "sh test/cli-worker-e2e.sh",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "types": "wrangler types"
   },
