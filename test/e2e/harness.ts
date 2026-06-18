@@ -3,18 +3,23 @@ import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test"
 import { vi } from "vitest";
 import worker from "../../src/index";
 import { hashToken } from "../../src/auth";
+import type { RelayRequest } from "../../src/types";
 
 export const CALLER_TOKEN = "caller-token";
 export const POOL = "maintainers";
 
-export async function relay(path: string, token = CALLER_TOKEN): Promise<Response> {
+export async function relay(
+  path: string,
+  token = CALLER_TOKEN,
+  options: Pick<RelayRequest, "query" | "headers" | "route_hint"> = {},
+): Promise<Response> {
   return callWorker("/v1/github/request", {
     method: "POST",
     headers: {
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ pool: POOL, method: "GET", path }),
+    body: JSON.stringify({ pool: POOL, method: "GET", path, ...options }),
   });
 }
 
