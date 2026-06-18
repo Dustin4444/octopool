@@ -47,18 +47,18 @@ type ghResult struct {
 	err    error
 }
 
-type ghTopHandler func(context.Context, []string, io.Writer) (bool, error)
+type ghTopHandler func(context.Context, []string, io.Writer) ghResult
 
 var ghTopHandlers = map[string]ghTopHandler{
-	"pr":       runGHPR,
-	"issue":    runGHIssue,
-	"run":      runGHRun,
-	"repo":     runGHRepo,
-	"release":  runGHRelease,
-	"workflow": runGHWorkflow,
-	"label":    runGHLabel,
-	"gist":     runGHGist,
-	"search":   runGHSearch,
+	"pr":       handleGHPR,
+	"issue":    handleGHIssue,
+	"run":      handleGHRun,
+	"repo":     handleGHRepo,
+	"release":  handleGHRelease,
+	"workflow": handleGHWorkflow,
+	"label":    handleGHLabel,
+	"gist":     handleGHGist,
+	"search":   handleGHSearch,
 }
 
 func runGHTopLevel(ctx context.Context, args []string, stdout io.Writer) ghResult {
@@ -69,14 +69,22 @@ func runGHTopLevel(ctx context.Context, args []string, stdout io.Writer) ghResul
 	if !ok {
 		return ghResult{action: ghDelegate}
 	}
-	handled, err := handler(ctx, args[1:], stdout)
+	return handler(ctx, args[1:], stdout)
+}
+
+func ghDelegated() ghResult {
+	return ghResult{action: ghDelegate}
+}
+
+func ghCompleted(err error) ghResult {
 	if err != nil {
 		return ghResult{action: ghFail, err: err}
 	}
-	if handled {
-		return ghResult{action: ghComplete}
-	}
-	return ghResult{action: ghDelegate}
+	return ghResult{action: ghComplete}
+}
+
+func ghFailed(err error) ghResult {
+	return ghResult{action: ghFail, err: err}
 }
 
 func parseGHTopOptions(args []string) (ghTopOptions, bool, error) {

@@ -5,22 +5,25 @@ import (
 	"io"
 )
 
-func runGHRun(ctx context.Context, args []string, stdout io.Writer) (bool, error) {
+func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult {
 	if len(args) == 0 {
-		return false, nil
+		return ghDelegated()
 	}
 	opts, fallback, err := parseGHTopOptions(args[1:])
-	if err != nil || fallback {
-		return !fallback, err
+	if err != nil {
+		return ghFailed(err)
+	}
+	if fallback {
+		return ghDelegated()
 	}
 	if topJQFallback(opts) {
-		return false, nil
+		return ghDelegated()
 	}
 	switch args[0] {
 	case "list":
 		repo, ok := repoOnly(opts)
 		if !ok {
-			return false, nil
+			return ghDelegated()
 		}
 		query := listQueryDefault(opts, 20)
 		if opts.branch != "" {
@@ -32,29 +35,29 @@ func runGHRun(ctx context.Context, args []string, stdout io.Writer) (bool, error
 		path := repoPath(repo, "actions", "runs")
 		if opts.workflow != "" {
 			if !supportedWorkflowRef(opts.workflow) {
-				return false, nil
+				return ghDelegated()
 			}
 			path = repoPath(repo, "actions", "workflows", opts.workflow, "runs")
 		}
 		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRunListFields) || limitOverOnePage(opts) {
-			return false, nil
+			return ghDelegated()
 		}
-		return true, relayTop(ctx, stdout, ghAPIRequest{
+		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
 			method:  "GET",
 			path:    path,
 			query:   query,
 			headers: map[string]string{"x-octopool-public-shape": "actions-summary-v1"},
-		}, opts, fieldMapRun)
+		}, opts, fieldMapRun))
 	case "view":
 		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedRunViewFields) {
-			return false, nil
+			return ghDelegated()
 		}
 		repo, ok := repoFromOptionOrCurrent(opts.repo)
 		if !ok {
-			return false, nil
+			return ghDelegated()
 		}
-		return true, relayRunView(ctx, stdout, repo, opts.positionals[0], opts)
+		return ghCompleted(relayRunView(ctx, stdout, repo, opts.positionals[0], opts))
 	default:
-		return false, nil
+		return ghDelegated()
 	}
 }
