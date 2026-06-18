@@ -1021,7 +1021,6 @@ func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
 		}
 		envelope := relayEnvelope{
 			Status:       200,
-			Headers:      map[string]string{"content-type": "application/json"},
 			BodyEncoding: "json",
 		}
 		raw, err := json.Marshal(responseBody(body))

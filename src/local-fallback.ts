@@ -10,10 +10,6 @@ export function localFallbackError(error: unknown): HttpError | undefined {
   });
 }
 
-export function githubResponseNeedsLocalFallback(status: number, rate: GitHubRate): boolean {
-  return githubResponseLocalFallbackReason(status, rate) !== undefined;
-}
-
 export function githubResponseLocalFallbackReason(
   status: number,
   rate: GitHubRate,

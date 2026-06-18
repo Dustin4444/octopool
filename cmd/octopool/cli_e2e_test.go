@@ -151,7 +151,7 @@ func writeCLIEnvelope(t *testing.T, w http.ResponseWriter, body any) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(relayEnvelope{
-		Status: 200, Headers: map[string]string{"content-type": "application/json"}, Body: raw, BodyEncoding: "json",
+		Status: 200, Body: raw, BodyEncoding: "json",
 	}); err != nil {
 		t.Fatal(err)
 	}

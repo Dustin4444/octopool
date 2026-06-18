@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HttpError } from "../src/http";
-import {
-  githubResponseLocalFallbackReason,
-  githubResponseNeedsLocalFallback,
-  localFallbackError,
-} from "../src/local-fallback";
+import { githubResponseLocalFallbackReason, localFallbackError } from "../src/local-fallback";
 
 describe("local gh fallback signal", () => {
   it("converts safe relay denials into an explicit fallback response", () => {
@@ -26,9 +22,13 @@ describe("local gh fallback signal", () => {
 
   it("falls back when the pooled GitHub identity is unusable", () => {
     expect(githubResponseLocalFallbackReason(401, {})).toBe("github_identity_unauthorized");
-    expect(githubResponseNeedsLocalFallback(403, { remaining: 0 })).toBe(true);
-    expect(githubResponseNeedsLocalFallback(403, { remaining: 42 })).toBe(true);
-    expect(githubResponseNeedsLocalFallback(429, {})).toBe(true);
-    expect(githubResponseNeedsLocalFallback(500, {})).toBe(false);
+    expect(githubResponseLocalFallbackReason(403, { remaining: 0 })).toBe(
+      "github_identity_depleted",
+    );
+    expect(githubResponseLocalFallbackReason(403, { remaining: 42 })).toBe(
+      "github_identity_forbidden",
+    );
+    expect(githubResponseLocalFallbackReason(429, {})).toBe("github_rate_limited");
+    expect(githubResponseLocalFallbackReason(500, {})).toBeUndefined();
   });
 });

@@ -1,6 +1,7 @@
 node_modules/
 worker-configuration.d.ts
 .wrangler/
+.sqlc-validation/
 dist/
 bin/
 *.test

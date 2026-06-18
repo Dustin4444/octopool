@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { normalizeAggregate, parseStatsWindow } from "../src/stats";
+import { normalizeAggregate } from "../src/metrics";
+import { parseStatsWindow } from "../src/stats";
 import { HttpError } from "../src/http";
 
 describe("stats windows", () => {

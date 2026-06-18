@@ -9,8 +9,6 @@ import {
 } from "./metrics";
 import type { Caller } from "./types";
 
-export { normalizeAggregate } from "./metrics";
-
 const MAX_WINDOW_SECONDS = 30 * 24 * 60 * 60;
 
 export type StatsWindow = {

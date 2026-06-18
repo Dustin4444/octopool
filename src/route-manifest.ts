@@ -96,8 +96,6 @@ const routeParameterExamples: Record<RouteParameter, string> = {
   workflow: "ci.yml",
 };
 
-export const ROUTE_LOGIN_PATTERN = routeParameters.login;
-
 type RouteParameter = keyof typeof routeParameters;
 
 function route<const Kind extends string>(

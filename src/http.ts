@@ -72,17 +72,6 @@ export function requireString(value: unknown, field: string): string {
   return value.trim();
 }
 
-export function optionalString(value: unknown, field: string): string | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  if (typeof value !== "string") {
-    throw new HttpError(400, "invalid_request", `${field} must be a string`);
-  }
-  const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
-}
-
 export function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === "") {
     return fallback;

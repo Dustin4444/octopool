@@ -376,14 +376,6 @@ func postJSONRaw(
 	return httpClient.Do(req)
 }
 
-func do(stdout io.Writer, req *http.Request) error {
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	return writeJSONResponse(stdout, resp)
-}
-
 func writeJSONResponse(stdout io.Writer, resp *http.Response) error {
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))

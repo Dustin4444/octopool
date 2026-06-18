@@ -40,7 +40,7 @@ const lines = [
 for (const entry of entries) {
   lines.push(`  ${entry.name}: ${JSON.stringify(entry.sql)},`);
 }
-lines.push("} as const;", "", "export type QueryName = keyof typeof queries;", "");
+lines.push("} as const;", "");
 
 await mkdir(path.dirname(outFile), { recursive: true });
 await writeFile(outFile, lines.join("\n"));
