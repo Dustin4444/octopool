@@ -9,14 +9,9 @@ export type RelayRequest = {
   query?: Record<string, string | string[]>;
   headers?: Record<string, string>;
   route_hint?: {
-    owner?: string;
-    repo?: string;
-    kind?: string;
     pr_head_sha?: string;
     pr_state?: string;
   };
-  cache_key?: string;
-  idempotency_key?: string;
 };
 
 export type PoolPolicy = {

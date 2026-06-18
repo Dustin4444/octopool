@@ -4,6 +4,29 @@ import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/polic
 describe("route policy", () => {
   const policy = defaultPolicy("openclaw");
 
+  it("discards legacy advisory fields at the validation boundary", () => {
+    expect(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/pulls/1/files",
+        route_hint: {
+          owner: "ignored",
+          repo: "ignored",
+          kind: "ignored",
+          pr_head_sha: "0123456789ABCDEF0123456789ABCDEF01234567",
+        },
+        cache_key: "ignored",
+        idempotency_key: "ignored",
+      }),
+    ).toEqual({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/pulls/1/files",
+      route_hint: { pr_head_sha: "0123456789abcdef0123456789abcdef01234567" },
+    });
+  });
+
   it("allows public user reads", () => {
     for (const path of [
       "/users/openperf",

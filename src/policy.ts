@@ -76,10 +76,6 @@ export function validateRelayRequest(value: unknown): RelayRequest {
     ...(query === undefined ? {} : { query }),
     ...(headers === undefined ? {} : { headers }),
     ...(isObject(value.route_hint) ? { route_hint: normalizeRouteHint(value.route_hint) } : {}),
-    ...(typeof value.cache_key === "string" ? { cache_key: value.cache_key } : {}),
-    ...(typeof value.idempotency_key === "string"
-      ? { idempotency_key: value.idempotency_key }
-      : {}),
   };
 }
 
@@ -312,15 +308,6 @@ function normalizeRouteHint(
   value: Record<string, unknown>,
 ): NonNullable<RelayRequest["route_hint"]> {
   const hint: NonNullable<RelayRequest["route_hint"]> = {};
-  if (typeof value.owner === "string") {
-    hint.owner = value.owner;
-  }
-  if (typeof value.repo === "string") {
-    hint.repo = value.repo;
-  }
-  if (typeof value.kind === "string") {
-    hint.kind = value.kind;
-  }
   if (typeof value.pr_head_sha === "string" && /^[0-9a-fA-F]{40}$/.test(value.pr_head_sha)) {
     hint.pr_head_sha = value.pr_head_sha.toLowerCase();
   }

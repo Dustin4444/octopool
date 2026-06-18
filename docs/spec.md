@@ -111,15 +111,14 @@ Request:
     "accept": "application/vnd.github+json"
   },
   "route_hint": {
-    "owner": "openclaw",
-    "repo": "openclaw",
-    "kind": "pr_files",
     "pr_head_sha": "0123456789abcdef0123456789abcdef01234567"
-  },
-  "cache_key": "github-rest:...",
-  "idempotency_key": "..."
+  }
 }
 ```
+
+Legacy advisory `route_hint.owner`, `route_hint.repo`, `route_hint.kind`, `cache_key`, and
+`idempotency_key` fields are accepted and discarded for wire compatibility. Only validated
+`pr_head_sha` and `pr_state` hints enter the internal request model.
 
 Response:
 

@@ -21,13 +21,8 @@ Request body:
   "query": { "per_page": "100" },
   "headers": { "accept": "application/vnd.github+json" },
   "route_hint": {
-    "owner": "openclaw",
-    "repo": "openclaw",
-    "kind": "pr_files",
     "pr_head_sha": "0123456789abcdef0123456789abcdef01234567"
-  },
-  "cache_key": "...",
-  "idempotency_key": "..."
+  }
 }
 ```
 
@@ -37,10 +32,11 @@ Request body:
   secret-bearing (`token`, `secret`, `password`, `api_key`, …).
 - `headers` are filtered down to `accept`, `x-github-api-version`, `if-none-match`,
   `if-modified-since`. Everything else is dropped.
-- `route_hint.owner`, `route_hint.repo`, and `route_hint.kind` are currently advisory.
-  `route_hint.pr_head_sha` and closed/merged `route_hint.pr_state` are validated cache
+- `route_hint.pr_head_sha` and closed/merged `route_hint.pr_state` are validated cache
   discriminators for PR file lists.
-- `cache_key` and `idempotency_key` are accepted and currently advisory.
+- Legacy `route_hint.owner`, `route_hint.repo`, `route_hint.kind`, `cache_key`, and
+  `idempotency_key` input remains accepted for wire compatibility but is discarded during
+  validation. It does not enter the trusted request model or affect routing, caching, or policy.
 
 ### Path validation
 
