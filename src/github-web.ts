@@ -1,4 +1,4 @@
-import { HttpError, parsePositiveInt } from "./http";
+import { parsePositiveInt } from "./http";
 import { responseCapBytes } from "./github";
 import { gitRefResponse, parseGitUploadPackAdvertisement } from "./github-git";
 import { decodeURIComponentSafe, encodedPathSegments, safeRelativePath } from "./github-path";
@@ -27,7 +27,7 @@ import {
 } from "./github-public-api";
 import { mediaFormat, mediaWebRequest, rawContentRequest } from "./github-public-content";
 import type { WebRequest } from "./github-web-types";
-import { readBodyCapped } from "./response-body";
+import { fetchPublicPage, fetchWebResponse, readWebBody } from "./github-web-transport";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 const ACTIONS_SUMMARY_SHAPE = "actions-summary-v1";
@@ -63,28 +63,12 @@ export async function callGitHubWeb(
   }
   let deferredApiPayload: GitHubRelayResponse | undefined;
   for (const [index, web] of requests.entries()) {
-    let response: Response;
-    let responseURL = web.url;
     const timeoutMs = parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000);
-    try {
-      response = await fetch(web.url, {
-        method: "GET",
-        headers: web.headers,
-        redirect: "manual",
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch {
+    const fetched = await fetchWebResponse(web.url, web.headers, timeoutMs);
+    if (fetched === undefined) {
       continue;
     }
-    responseURL = response.url || web.url;
-    if (response.status >= 300 && response.status < 400 && response.status !== 304) {
-      const redirected = await fetchAllowedRedirect(response, web, timeoutMs, responseURL);
-      if (redirected === undefined) {
-        continue;
-      }
-      response = redirected.response;
-      responseURL = redirected.url;
-    }
+    const { response, url: responseURL } = fetched;
     if (web.usesApiQuota) {
       await storePublicAPIRate(env, route.resource, response.headers);
     }
@@ -116,52 +100,6 @@ export async function callGitHubWeb(
     }
   }
   return deferredApiPayload;
-}
-
-async function fetchAllowedRedirect(
-  response: Response,
-  web: {
-    headers: Record<string, string>;
-  },
-  timeoutMs: number,
-  responseURL: string,
-): Promise<{ response: Response; url: string } | undefined> {
-  const location = response.headers.get("location");
-  if (location === null) {
-    return undefined;
-  }
-  let url: URL;
-  try {
-    url = new URL(location, responseURL);
-  } catch {
-    return undefined;
-  }
-  if (url.protocol !== "https:" || !allowedWebRedirectHost(url.hostname)) {
-    return undefined;
-  }
-  try {
-    const redirected = await fetch(url.toString(), {
-      method: "GET",
-      headers: web.headers,
-      redirect: "manual",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (redirected.status >= 300 && redirected.status < 400) {
-      return undefined;
-    }
-    return { response: redirected, url: redirected.url || url.toString() };
-  } catch {
-    return undefined;
-  }
-}
-
-function allowedWebRedirectHost(hostname: string): boolean {
-  const lower = hostname.toLowerCase();
-  return (
-    lower === "patch-diff.githubusercontent.com" ||
-    lower === "github.com" ||
-    lower === "raw.githubusercontent.com"
-  );
 }
 
 function webRequests(env: Env, request: RelayRequest, route: RouteInfo): WebRequest[] {
@@ -767,42 +705,6 @@ function actionsJobsQuery(
   return Number.isInteger(perPage) && perPage >= 1 && perPage <= 100 ? { perPage } : undefined;
 }
 
-async function fetchPublicPage(
-  url: string,
-  capBytes: number,
-  env: Env,
-  accept = "text/html",
-): Promise<string | undefined> {
-  const timeoutMs = parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000);
-  const headers = { accept, "user-agent": "octopool" };
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "GET",
-      headers,
-      redirect: "manual",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch {
-    return undefined;
-  }
-  if (response.status >= 300 && response.status < 400) {
-    const redirected = await fetchAllowedRedirect(response, { headers }, timeoutMs, url);
-    if (redirected === undefined) {
-      return undefined;
-    }
-    response = redirected.response;
-  }
-  if (response.status < 200 || response.status >= 300) {
-    return undefined;
-  }
-  try {
-    return new TextDecoder().decode(await readWebBody(response, capBytes));
-  } catch {
-    return undefined;
-  }
-}
-
 async function enrichActionsRun(
   env: Env,
   route: RouteInfo,
@@ -943,12 +845,4 @@ function stringQuery(
 
 function webHeaders(headers: Headers, contentType: string): Record<string, string> {
   return githubResponseHeaders(headers, { contentType, includeCacheControl: true });
-}
-
-function readWebBody(response: Response, capBytes: number): Promise<Uint8Array> {
-  return readBodyCapped(
-    response,
-    capBytes,
-    () => new HttpError(502, "github_web_response_too_large", "GitHub web response is too large"),
-  );
 }
