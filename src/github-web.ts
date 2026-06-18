@@ -2,12 +2,7 @@ import { bytesToBase64 } from "./encoding";
 import { HttpError, parsePositiveInt } from "./http";
 import { responseCapBytes } from "./github";
 import { gitRefResponse, parseGitUploadPackAdvertisement } from "./github-git";
-import {
-  appendRelayQuery,
-  decodeURIComponentSafe,
-  encodedPathSegments,
-  safeRelativePath,
-} from "./github-path";
+import { decodeURIComponentSafe, encodedPathSegments, safeRelativePath } from "./github-path";
 import { defaultGitHubJSONAccept, githubResponseHeaders } from "./github-response";
 import {
   parseActionsJobGroupsJSON,
@@ -24,8 +19,14 @@ import {
   parseWorkflowListHTML,
   parseWorkflowPageCount,
 } from "./github-html";
-import { queries } from "./generated/sql";
-import { capabilitiesForRouteKind } from "./route-manifest";
+import {
+  publicAPIRateBelowHalf,
+  publicAPIRequest,
+  releaseAPIRequest,
+  storedPublicAPIRateBelowHalf,
+  storePublicAPIRate,
+} from "./github-public-api";
+import type { WebRequest } from "./github-web-types";
 import { readBodyCapped } from "./response-body";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
@@ -64,7 +65,7 @@ export async function callGitHubWeb(
   const hasPublicAlternative =
     requests.some((candidate) => candidate.usesApiQuota) &&
     requests.some((candidate) => !candidate.usesApiQuota);
-  if (hasPublicAlternative && (await storedPublicApiRateBelowHalf(env, route.resource))) {
+  if (hasPublicAlternative && (await storedPublicAPIRateBelowHalf(env, route.resource))) {
     requests = [
       ...requests.filter((candidate) => !candidate.usesApiQuota),
       ...requests.filter((candidate) => candidate.usesApiQuota),
@@ -95,7 +96,7 @@ export async function callGitHubWeb(
       responseURL = redirected.url;
     }
     if (web.usesApiQuota) {
-      await storePublicApiRate(env, route.resource, response.headers);
+      await storePublicAPIRate(env, route.resource, response.headers);
     }
     if (response.status < 200 || response.status >= 300) {
       continue;
@@ -111,7 +112,7 @@ export async function callGitHubWeb(
       if (payload !== undefined) {
         if (web.usesApiQuota) {
           if (
-            publicApiRateBelowHalf(response.headers) &&
+            publicAPIRateBelowHalf(response.headers) &&
             requests.slice(index + 1).some((candidate) => !candidate.usesApiQuota)
           ) {
             deferredApiPayload = payload;
@@ -173,19 +174,6 @@ function allowedWebRedirectHost(hostname: string): boolean {
   );
 }
 
-type WebRequest = {
-  url: string;
-  headers: Record<string, string>;
-  capBytes: number;
-  usesApiQuota: boolean;
-  payload: (
-    body: Uint8Array,
-    headers: Headers,
-    status: number,
-    responseURL: string,
-  ) => GitHubRelayResponse | undefined | Promise<GitHubRelayResponse | undefined>;
-};
-
 function webRequests(env: Env, request: RelayRequest, route: RouteInfo): WebRequest[] {
   const media = mediaFormat(request.headers?.accept);
   if (media !== undefined) {
@@ -193,11 +181,11 @@ function webRequests(env: Env, request: RelayRequest, route: RouteInfo): WebRequ
     return mediaRequest === undefined ? [] : [mediaRequest];
   }
   const out: WebRequest[] = [];
-  const release = releaseRequest(env, request, route);
+  const release = releaseAPIRequest(env, request, route);
   if (release !== undefined) {
     out.push(release);
   }
-  const publicApi = publicApiRequest(env, request, route);
+  const publicApi = publicAPIRequest(env, request, route);
   if (publicApi !== undefined) {
     out.push(publicApi);
   }
@@ -978,41 +966,6 @@ function rawContentRequest(
   };
 }
 
-function releaseRequest(env: Env, request: RelayRequest, route: RouteInfo): WebRequest | undefined {
-  if (!releaseRoute(route) || !defaultGitHubJSONAccept(request.headers?.accept)) {
-    return undefined;
-  }
-  const url = new URL(`https://api.github.com${request.path}`);
-  appendRelayQuery(url, request.query);
-  const ref = stringQuery(request.query, "ref");
-  if (ref !== undefined) {
-    return undefined;
-  }
-  return {
-    url: url.toString(),
-    headers: {
-      accept: "application/vnd.github+json",
-      "user-agent": "octopool",
-      "x-github-api-version": request.headers?.["x-github-api-version"] ?? "2022-11-28",
-    },
-    capBytes: responseCapBytes(env, route),
-    usesApiQuota: true,
-    payload: (body, headers, status) => {
-      const parsed = parsePublicReleaseBody(body, route);
-      if (parsed === undefined) {
-        return undefined;
-      }
-      return {
-        status,
-        headers: webHeaders(headers, "application/json"),
-        body: parsed,
-        body_encoding: "json",
-        backend: "web",
-      };
-    },
-  };
-}
-
 function releasePageRequest(
   env: Env,
   request: RelayRequest,
@@ -1067,137 +1020,6 @@ function releasePageRequest(
           };
     },
   };
-}
-
-function publicApiRequest(
-  env: Env,
-  request: RelayRequest,
-  route: RouteInfo,
-): WebRequest | undefined {
-  if (
-    request.method !== "GET" ||
-    !publicApiRoute(route) ||
-    !defaultGitHubJSONAccept(request.headers?.accept)
-  ) {
-    return undefined;
-  }
-  const url = new URL(`https://api.github.com${request.path}`);
-  appendRelayQuery(url, request.query);
-  return {
-    url: url.toString(),
-    headers: {
-      accept: "application/vnd.github+json",
-      "user-agent": "octopool",
-      "x-github-api-version": request.headers?.["x-github-api-version"] ?? "2022-11-28",
-    },
-    capBytes: responseCapBytes(env, route),
-    usesApiQuota: true,
-    payload: (body, headers, status) => {
-      if (body.byteLength === 0) {
-        return {
-          status,
-          headers: webHeaders(headers, "application/json"),
-          body: null,
-          body_encoding: "text",
-          backend: "web",
-        };
-      }
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(new TextDecoder().decode(body)) as unknown;
-      } catch {
-        return undefined;
-      }
-      if (route.kind === "gist_view" && !publicGist(parsed)) {
-        return undefined;
-      }
-      return {
-        status,
-        headers: webHeaders(headers, "application/json"),
-        body: parsed,
-        body_encoding: "json",
-        backend: "web",
-      };
-    },
-  };
-}
-
-function releaseRoute(route: RouteInfo): boolean {
-  return (
-    route.kind === "release_list" ||
-    route.kind === "release_latest" ||
-    route.kind === "release_view"
-  );
-}
-
-async function storedPublicApiRateBelowHalf(env: Env, resource: string): Promise<boolean> {
-  try {
-    const rate = await env.DB.prepare(queries.freshPublicApiRate)
-      .bind(resource)
-      .first<{ limit_count: number; remaining: number }>();
-    return rate !== null && rate.remaining * 2 < rate.limit_count;
-  } catch {
-    return false;
-  }
-}
-
-async function storePublicApiRate(env: Env, resource: string, headers: Headers): Promise<void> {
-  const limit = headerInt(headers, "x-ratelimit-limit");
-  const remaining = headerInt(headers, "x-ratelimit-remaining");
-  const resetAt = headerInt(headers, "x-ratelimit-reset");
-  if (limit === undefined || remaining === undefined || resetAt === undefined || limit <= 0) {
-    return;
-  }
-  try {
-    await env.DB.prepare(queries.upsertPublicApiRate)
-      .bind(resource, limit, remaining, resetAt)
-      .run();
-  } catch {
-    // Rate persistence is advisory; public reads still work without it.
-  }
-}
-
-function publicApiRateBelowHalf(headers: Headers): boolean {
-  const limit = headerInt(headers, "x-ratelimit-limit");
-  const remaining = headerInt(headers, "x-ratelimit-remaining");
-  return limit !== undefined && remaining !== undefined && limit > 0 && remaining * 2 < limit;
-}
-
-function headerInt(headers: Headers, name: string): number | undefined {
-  const value = headers.get(name);
-  if (value === null || !/^[0-9]+$/.test(value)) {
-    return undefined;
-  }
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : undefined;
-}
-
-function publicApiRoute(route: Pick<RouteInfo, "kind">): boolean {
-  return capabilitiesForRouteKind(route.kind).publicApi;
-}
-
-function publicGist(value: unknown): boolean {
-  return typeof value === "object" && value !== null && "public" in value && value.public === true;
-}
-
-function parsePublicReleaseBody(body: Uint8Array, route: RouteInfo): unknown | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(body)) as unknown;
-  } catch {
-    return undefined;
-  }
-  if (route.kind === "release_list") {
-    if (!Array.isArray(parsed)) {
-      return undefined;
-    }
-    return parsed.filter((item) => !releaseDraft(item));
-  }
-  return releaseDraft(parsed) ? undefined : parsed;
-}
-
-function releaseDraft(value: unknown): boolean {
-  return typeof value === "object" && value !== null && "draft" in value && value.draft === true;
 }
 
 function mediaWebURL(
