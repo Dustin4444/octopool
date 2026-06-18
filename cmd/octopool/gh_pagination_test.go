@@ -27,11 +27,11 @@ func TestRunGHPRChecksFallsBackWhenPaginationIsExhausted(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	handled, err := runGHPR(t.Context(), []string{
+	result := handleGHPR(t.Context(), []string{
 		"checks", "7", "-R", "openclaw/octopool", "--json", "name,state",
 	}, &out)
-	if !handled || !isLocalFallback(err) {
-		t.Fatalf("handled=%v err=%v", handled, err)
+	if result.action != ghFail || !isLocalFallback(result.err) {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
 }
 
@@ -52,11 +52,11 @@ func TestRunGHPRViewFallsBackWhenDetailPaginationIsExhausted(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	handled, err := runGHPR(t.Context(), []string{
+	result := handleGHPR(t.Context(), []string{
 		"view", "7", "-R", "openclaw/octopool", "--json", "number,files",
 	}, &out)
-	if !handled || !isLocalFallback(err) {
-		t.Fatalf("handled=%v err=%v", handled, err)
+	if result.action != ghFail || !isLocalFallback(result.err) {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
 }
 
@@ -71,10 +71,10 @@ func TestRunGHIssueListFallsBackWhenFilteringExhaustsPagination(t *testing.T) {
 	relayTestServer(t, func(map[string]any) any { return items })
 
 	var out bytes.Buffer
-	handled, err := runGHIssue(t.Context(), []string{
+	result := handleGHIssue(t.Context(), []string{
 		"list", "-R", "openclaw/octopool", "--limit", "1", "--json", "number",
 	}, &out)
-	if !handled || !isLocalFallback(err) {
-		t.Fatalf("handled=%v err=%v", handled, err)
+	if result.action != ghFail || !isLocalFallback(result.err) {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
 }
