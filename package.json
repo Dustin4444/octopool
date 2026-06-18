@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "wrangler types && tsc --noEmit",
-    "check": "pnpm sql:check && pnpm format:check && pnpm lint && pnpm test && pnpm build && go test ./... && go vet ./...",
+    "check": "pnpm sql:check && pnpm format:check && pnpm lint && pnpm test && pnpm test:e2e && pnpm build && go test ./... && go vet ./...",
     "deploy": "wrangler deploy && wrangler deploy --config wrangler.openclaw-proxy.jsonc",
     "docs:site": "node scripts/build-docs-site.mjs",
     "e2e": "sh test/e2e.sh",
@@ -15,9 +15,11 @@
     "sql:check": "pnpm sql:generate && git diff --exit-code -- internal/dbquery src/generated/sql.ts",
     "sql:generate": "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate && node scripts/generate-sql.mjs && oxfmt src/generated/sql.ts --write",
     "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "types": "wrangler types"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.16",
     "@types/node": "^25.9.2",
     "oxfmt": "^0.54.0",
     "oxlint": "^1.69.0",
