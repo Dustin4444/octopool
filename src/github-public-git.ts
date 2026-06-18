@@ -2,6 +2,7 @@ import { responseCapBytes } from "./github-limits";
 import { gitRefResponse, parseGitUploadPackAdvertisement } from "./github-git";
 import { encodedPathSegments, safeRelativePath } from "./github-path";
 import { defaultGitHubJSONAccept, githubResponseHeaders } from "./github-response";
+import { decodePathStrict } from "./github-public-utils";
 import { parseRepositoryNodeIDHTML } from "./github-html";
 import { fetchPublicPage } from "./github-web-transport";
 import type { WebRequest } from "./github-web-types";
@@ -26,7 +27,7 @@ export function gitRefRequest(
     route.kind === "git_ref"
       ? `/repos/${route.owner}/${route.repo}/git/ref/`
       : `/repos/${route.owner}/${route.repo}/git/matching-refs/`;
-  const requested = decodePath(request.path.slice(prefix.length));
+  const requested = decodePathStrict(request.path.slice(prefix.length));
   if (
     requested === undefined ||
     !safeRelativePath(requested, 200) ||
@@ -82,12 +83,4 @@ export function gitRefRequest(
           };
     },
   };
-}
-
-function decodePath(value: string): string | undefined {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return undefined;
-  }
 }

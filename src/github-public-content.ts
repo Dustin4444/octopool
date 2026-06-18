@@ -1,7 +1,8 @@
 import { bytesToBase64 } from "./encoding";
 import { responseCapBytes } from "./github-limits";
 import { encodedPathSegments, safeRelativePath } from "./github-path";
-import { defaultGitHubJSONAccept, githubResponseHeaders } from "./github-response";
+import { decodePathStrict, publicResponseHeaders, scalarQuery } from "./github-public-utils";
+import { defaultGitHubJSONAccept } from "./github-response";
 import type { WebRequest } from "./github-web-types";
 import type { RelayRequest, RouteInfo } from "./types";
 
@@ -48,7 +49,7 @@ export function mediaWebRequest(
     usesApiQuota: false,
     payload: (body, headers, status) => ({
       status,
-      headers: publicHeaders(headers, contentType),
+      headers: publicResponseHeaders(headers, contentType),
       body: new TextDecoder().decode(body),
       body_encoding: "text",
       backend: "web",
@@ -91,7 +92,7 @@ export function rawContentRequest(
       const htmlURL = `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "blob", ref, contentPath])}`;
       return {
         status,
-        headers: publicHeaders(headers, "application/json"),
+        headers: publicResponseHeaders(headers, "application/json"),
         body: {
           type: "file",
           encoding: "base64",
@@ -137,7 +138,7 @@ function mediaWebURL(
     }
     case "compare": {
       const encodedRef = /\/compare\/([^/?#]+)$/.exec(request.path)?.[1];
-      const ref = encodedRef === undefined ? undefined : decodePath(encodedRef);
+      const ref = encodedRef === undefined ? undefined : decodePathStrict(encodedRef);
       return ref === undefined
         ? undefined
         : `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "compare"])}/${encodeURIComponent(ref)}.${media}`;
@@ -153,27 +154,7 @@ function contentPathFromRequest(request: RelayRequest, route: RouteInfo): string
     return undefined;
   }
   const value = request.path.slice(prefix.length);
-  return value === "" ? undefined : decodePath(value);
-}
-
-function decodePath(value: string): string | undefined {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return undefined;
-  }
-}
-
-function scalarQuery(
-  query: Record<string, string | string[]> | undefined,
-  key: string,
-): string | undefined {
-  const value = query?.[key];
-  return typeof value === "string" && value !== "" ? value : undefined;
-}
-
-function publicHeaders(headers: Headers, contentType: string): Record<string, string> {
-  return githubResponseHeaders(headers, { contentType, includeCacheControl: true });
+  return value === "" ? undefined : decodePathStrict(value);
 }
 
 function gitBlobSHA(body: Uint8Array): string {

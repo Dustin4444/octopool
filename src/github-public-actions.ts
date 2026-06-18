@@ -1,6 +1,7 @@
 import { responseCapBytes } from "./github-limits";
 import { decodeURIComponentSafe, encodedPathSegments } from "./github-path";
-import { defaultGitHubJSONAccept, githubResponseHeaders } from "./github-response";
+import { parseJSONBytes, publicJSONResponse, scalarQuery } from "./github-public-utils";
+import { defaultGitHubJSONAccept } from "./github-response";
 import {
   parseActionsJobGroupsJSON,
   parseActionsJobHTML,
@@ -95,7 +96,7 @@ function actionsRunListRequest(
         return undefined;
       }
       parsed.workflow_runs = runs as Record<string, unknown>[];
-      return publicJSON(headers, status, parsed);
+      return publicJSONResponse(headers, status, parsed);
     },
   };
 }
@@ -126,7 +127,7 @@ function actionsRunRequest(
       );
       const complete =
         parsed === undefined ? undefined : await completeActionsRunSHA(env, route, parsed);
-      return complete === undefined ? undefined : publicJSON(headers, status, complete);
+      return complete === undefined ? undefined : publicJSONResponse(headers, status, complete);
     },
   };
 }
@@ -153,7 +154,7 @@ function actionsRunJobsRequest(
     capBytes: responseCapBytes(env, route),
     usesApiQuota: false,
     payload: async (body, headers, status) => {
-      const parsed = parseJSON(body);
+      const parsed = parseJSONBytes(body);
       const summaries = parseActionsJobGroupsJSON(parsed, route.owner!, route.repo!, runID);
       if (summaries === undefined || summaries.length > MAX_PUBLIC_JOB_PAGES) {
         return undefined;
@@ -172,7 +173,7 @@ function actionsRunJobsRequest(
       );
       return jobs.some((job) => job === undefined)
         ? undefined
-        : publicJSON(headers, status, { total_count: summaries.length, jobs });
+        : publicJSONResponse(headers, status, { total_count: summaries.length, jobs });
     },
   };
 }
@@ -277,33 +278,4 @@ async function completeActionsRunSHA(
 
 function isFullGitSHA(value: unknown): value is string {
   return typeof value === "string" && /^[0-9A-Fa-f]{40,64}$/.test(value);
-}
-
-function scalarQuery(
-  query: Record<string, string | string[]> | undefined,
-  key: string,
-): string | undefined {
-  const value = query?.[key];
-  return typeof value === "string" && value !== "" ? value : undefined;
-}
-
-function parseJSON(body: Uint8Array): unknown | undefined {
-  try {
-    return JSON.parse(new TextDecoder().decode(body)) as unknown;
-  } catch {
-    return undefined;
-  }
-}
-
-function publicJSON(headers: Headers, status: number, body: unknown) {
-  return {
-    status,
-    headers: githubResponseHeaders(headers, {
-      contentType: "application/json",
-      includeCacheControl: true,
-    }),
-    body,
-    body_encoding: "json" as const,
-    backend: "web" as const,
-  };
 }

@@ -1,6 +1,7 @@
 import { responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
-import { defaultGitHubJSONAccept, githubResponseHeaders } from "./github-response";
+import { publicJSONResponse, parseJSONBytes, scalarQuery } from "./github-public-utils";
+import { defaultGitHubJSONAccept } from "./github-response";
 import type { WebRequest } from "./github-web-types";
 import { queries } from "./generated/sql";
 import { capabilitiesForRouteKind } from "./route-manifest";
@@ -54,7 +55,7 @@ export function publicAPIRequest(
       if (body.byteLength === 0) {
         return publicJSONResponse(headers, status, null, "text");
       }
-      const parsed = parseJSON(body);
+      const parsed = parseJSONBytes(body);
       if (parsed === undefined || (route.kind === "gist_view" && !publicGist(parsed))) {
         return undefined;
       }
@@ -108,24 +109,6 @@ function publicAPIHeaders(request: RelayRequest): Record<string, string> {
   };
 }
 
-function publicJSONResponse(
-  headers: Headers,
-  status: number,
-  body: unknown,
-  bodyEncoding: "json" | "text",
-) {
-  return {
-    status,
-    headers: githubResponseHeaders(headers, {
-      contentType: "application/json",
-      includeCacheControl: true,
-    }),
-    body,
-    body_encoding: bodyEncoding,
-    backend: "web" as const,
-  };
-}
-
 function releaseRoute(route: RouteInfo): boolean {
   return (
     route.kind === "release_list" ||
@@ -139,7 +122,7 @@ function publicGist(value: unknown): boolean {
 }
 
 function parsePublicReleaseBody(body: Uint8Array, route: RouteInfo): unknown | undefined {
-  const parsed = parseJSON(body);
+  const parsed = parseJSONBytes(body);
   if (parsed === undefined) {
     return undefined;
   }
@@ -149,24 +132,8 @@ function parsePublicReleaseBody(body: Uint8Array, route: RouteInfo): unknown | u
   return releaseDraft(parsed) ? undefined : parsed;
 }
 
-function parseJSON(body: Uint8Array): unknown | undefined {
-  try {
-    return JSON.parse(new TextDecoder().decode(body)) as unknown;
-  } catch {
-    return undefined;
-  }
-}
-
 function releaseDraft(value: unknown): boolean {
   return typeof value === "object" && value !== null && "draft" in value && value.draft === true;
-}
-
-function scalarQuery(
-  query: Record<string, string | string[]> | undefined,
-  key: string,
-): string | undefined {
-  const value = query?.[key];
-  return typeof value === "string" && value !== "" ? value : undefined;
 }
 
 function headerInt(headers: Headers, name: string): number | undefined {

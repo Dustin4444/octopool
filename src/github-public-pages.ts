@@ -1,6 +1,7 @@
 import { responseCapBytes } from "./github-limits";
 import { encodedPathSegments } from "./github-path";
-import { defaultGitHubJSONAccept, githubResponseHeaders } from "./github-response";
+import { decodePathStrict, publicResponseHeaders, scalarQuery } from "./github-public-utils";
+import { defaultGitHubJSONAccept } from "./github-response";
 import {
   parseIssueHTML,
   parseIssueListHTML,
@@ -97,7 +98,7 @@ export function summaryPageRequest(
     }
     const workflowRef =
       route.kind === "workflow_view"
-        ? decodePathComponent(/\/actions\/workflows\/([^/?#]+)$/.exec(request.path)?.[1] ?? "")
+        ? decodePathStrict(/\/actions\/workflows\/([^/?#]+)$/.exec(request.path)?.[1] ?? "")
         : undefined;
     if (route.kind === "workflow_view" && workflowRef === undefined) {
       return undefined;
@@ -132,7 +133,7 @@ export function summaryPageRequest(
         }
         return {
           status,
-          headers: webHeaders(headers, "application/json"),
+          headers: publicResponseHeaders(headers, "application/json"),
           body: bodyValue,
           body_encoding: "json",
           backend: "web",
@@ -153,7 +154,7 @@ export function summaryPageRequest(
         ? undefined
         : {
             status,
-            headers: webHeaders(headers, "application/json"),
+            headers: publicResponseHeaders(headers, "application/json"),
             body: parsed,
             body_encoding: "json",
             backend: "web",
@@ -220,7 +221,7 @@ function issueListPageQuery(
   if (pageQuery === undefined) {
     return undefined;
   }
-  const state = stringQuery(query, "state") ?? "open";
+  const state = scalarQuery(query, "state") ?? "open";
   if (!["open", "closed", "all"].includes(state)) {
     return undefined;
   }
@@ -229,7 +230,7 @@ function issueListPageQuery(
     qualifiers.push(`state:${state}`);
   }
   for (const key of ["creator", "assignee"] as const) {
-    const value = stringQuery(query, key);
+    const value = scalarQuery(query, key);
     if (value === undefined) {
       continue;
     }
@@ -239,7 +240,7 @@ function issueListPageQuery(
     }
     qualifiers.push(encoded);
   }
-  const labels = stringQuery(query, "labels");
+  const labels = scalarQuery(query, "labels");
   if (labels !== undefined) {
     for (const label of labels.split(",")) {
       const encoded = searchQualifier("label", label);
@@ -260,11 +261,11 @@ function simplePageQuery(
     Object.entries(query ?? {}).some(
       ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
     ) ||
-    (stringQuery(query, "page") !== undefined && stringQuery(query, "page") !== "1")
+    (scalarQuery(query, "page") !== undefined && scalarQuery(query, "page") !== "1")
   ) {
     return undefined;
   }
-  const perPage = Number(stringQuery(query, "per_page") ?? "30");
+  const perPage = Number(scalarQuery(query, "per_page") ?? "30");
   return Number.isInteger(perPage) && perPage >= 1 && perPage <= 100 ? { perPage } : undefined;
 }
 
@@ -308,7 +309,7 @@ export function releasePageRequest(
     if (encodedTag === undefined) {
       return undefined;
     }
-    const tag = decodePathComponent(encodedTag);
+    const tag = decodePathStrict(encodedTag);
     if (tag === undefined) {
       return undefined;
     }
@@ -332,31 +333,11 @@ export function releasePageRequest(
         ? undefined
         : {
             status,
-            headers: webHeaders(headers, "application/json"),
+            headers: publicResponseHeaders(headers, "application/json"),
             body: parsed,
             body_encoding: "json",
             backend: "web",
           };
     },
   };
-}
-
-function decodePathComponent(value: string): string | undefined {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return undefined;
-  }
-}
-
-function stringQuery(
-  query: Record<string, string | string[]> | undefined,
-  key: string,
-): string | undefined {
-  const value = query?.[key];
-  return typeof value === "string" && value !== "" ? value : undefined;
-}
-
-function webHeaders(headers: Headers, contentType: string): Record<string, string> {
-  return githubResponseHeaders(headers, { contentType, includeCacheControl: true });
 }
