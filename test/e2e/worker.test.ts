@@ -118,6 +118,52 @@ describe("Worker end-to-end relay", () => {
     );
   });
 
+  it("rejects a cached response from a disabled identity and uses an active replacement", async () => {
+    await seedPool({ secondary: true });
+    const upstream = githubUpstream({
+      primary: jsonResponse({ id: 1, private: false }),
+      secondary: jsonResponse({ id: 2, private: false }),
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const primed = await relay("/repos/openclaw/octopool");
+    expect(primed.status).toBe(200);
+    expect(await primed.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 1 },
+      identity: { id: "primary", kind: "pat" },
+      relay: { cache: "miss" },
+    });
+    await env.DB.prepare("UPDATE identities SET status = 'disabled' WHERE id = 'primary'").run();
+
+    const replacement = await relay("/repos/openclaw/octopool");
+    expect(replacement.status).toBe(200);
+    expect(await replacement.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 2 },
+      identity: { id: "secondary", kind: "pat" },
+      relay: { cache: "miss", route_kind: "repo_view" },
+    });
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-primary-token",
+      ),
+    ).toHaveLength(1);
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-secondary-token",
+      ),
+    ).toHaveLength(1);
+    expect(await env.DB.prepare("SELECT identity_id FROM github_cache_entries").first()).toEqual({
+      identity_id: "secondary",
+    });
+    const audits = await env.DB.prepare(
+      "SELECT identity_id, cache_status, status FROM audit_events ORDER BY rowid",
+    ).all<{ identity_id: string; cache_status: string; status: number }>();
+    expect(audits.results).toEqual([
+      { identity_id: "primary", cache_status: "miss", status: 200 },
+      { identity_id: "secondary", cache_status: "miss", status: 200 },
+    ]);
+  });
+
   it("retries a rate-limited identity and persists its coordinator cooldown", async () => {
     await seedPool({ secondary: true });
     const upstream = githubUpstream({
