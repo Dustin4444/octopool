@@ -26,6 +26,12 @@ export async function callWorker(path: string, init?: RequestInit): Promise<Resp
   return response;
 }
 
+export async function runScheduled(): Promise<void> {
+  const ctx = createExecutionContext();
+  await worker.scheduled({} as ScheduledController, env, ctx);
+  await waitOnExecutionContext(ctx);
+}
+
 export async function seedPool(options: { secondary?: boolean } = {}): Promise<void> {
   const policy = JSON.stringify({
     allowed_owners: ["openclaw"],

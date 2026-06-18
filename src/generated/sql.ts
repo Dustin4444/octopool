@@ -74,7 +74,7 @@ export const queries = {
   dashboardPublicRepos:
     "SELECT\n  COUNT(*) AS total_entries,\n  SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,\n  MAX(checked_at) AS newest_checked_at\nFROM github_public_repos",
   poolHealth:
-    "SELECT\n  COUNT(*) AS identities_total,\n  SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS identities_healthy\nFROM identities\nWHERE pool_id = ?1",
+    "SELECT\n  COUNT(identities.id) AS identities_total,\n  SUM(CASE WHEN identities.status = 'active' THEN 1 ELSE 0 END) AS identities_healthy\nFROM pools\nLEFT JOIN identities ON identities.pool_id = pools.id\nWHERE pools.id = ?1\nGROUP BY pools.id",
   loginExistingCaller:
     "SELECT callers.id\nFROM callers\nJOIN caller_pools ON caller_pools.caller_id = callers.id\nWHERE callers.github_user_id = ?1\n  AND callers.org_login = ?2\n  AND callers.status = 'active'\n  AND caller_pools.pool_id = ?3\nLIMIT 1",
   findActiveCallerByGitHubUser:

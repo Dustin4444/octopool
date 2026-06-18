@@ -228,10 +228,12 @@ FROM github_public_repos;
 
 -- name: PoolHealth :one
 SELECT
-  COUNT(*) AS identities_total,
-  SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS identities_healthy
-FROM identities
-WHERE pool_id = ?1;
+  COUNT(identities.id) AS identities_total,
+  SUM(CASE WHEN identities.status = 'active' THEN 1 ELSE 0 END) AS identities_healthy
+FROM pools
+LEFT JOIN identities ON identities.pool_id = pools.id
+WHERE pools.id = ?1
+GROUP BY pools.id;
 
 -- name: LoginExistingCaller :one
 SELECT callers.id
