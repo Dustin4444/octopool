@@ -1,6 +1,15 @@
 import { HttpError } from "./http";
 import { queries } from "./generated/sql";
+import {
+  normalizeAggregate,
+  normalizeCacheTotals,
+  type CacheAggregate,
+  type CacheTotalsRow,
+  type UsageAggregateRow,
+} from "./metrics";
 import type { Caller } from "./types";
+
+export { normalizeAggregate } from "./metrics";
 
 const MAX_WINDOW_SECONDS = 30 * 24 * 60 * 60;
 
@@ -9,47 +18,9 @@ export type StatsWindow = {
   seconds: number;
 };
 
-export type CacheAggregate = {
-  requests: number;
-  errors: number;
-  service_errors: number;
-  fallbacks: number;
-  avg_duration_ms: number | null;
-  cache_hits: number;
-  cache_stale: number;
-  cache_misses: number;
-  cache_bypass: number;
-  cache_unknown: number;
-  cacheable_requests: number;
-  eligible_cache_requests: number;
-  cache_hit_rate: number | null;
-  cacheable_hit_rate: number | null;
-  eligible_cache_hit_rate: number | null;
-  bypass_rate: number | null;
-  coalesced: number;
-  saved_github_requests: number;
-  backend_requests: number;
-};
-
-export type AggregateRow = {
-  requests: number;
-  errors: number | null;
-  service_errors: number | null;
-  fallbacks: number | null;
-  avg_duration_ms: number | null;
-  cache_hits: number | null;
-  cache_stale: number | null;
-  cache_misses: number | null;
-  cache_bypass: number | null;
-  cache_unknown: number | null;
-  cacheable_requests: number | null;
-  eligible_cache_requests: number | null;
-  coalesced: number | null;
-};
-
-type RouteRow = AggregateRow & {
+type RouteRow = UsageAggregateRow & {
   route_kind: string;
-  latest_seen_at: string | null;
+  latest_seen_at: string;
 };
 
 export function parseStatsWindow(raw: string | null): StatsWindow {
@@ -100,14 +71,9 @@ async function aggregateUsage(
   windowSeconds: number,
   callerId?: string,
 ): Promise<CacheAggregate> {
-  const statement = env.DB.prepare(
-    callerId === undefined ? queries.statsAggregatePool : queries.statsAggregateCaller,
-  );
-  const bound =
-    callerId === undefined
-      ? statement.bind(pool, `-${windowSeconds} seconds`)
-      : statement.bind(pool, `-${windowSeconds} seconds`, callerId);
-  const row = await bound.first<AggregateRow>();
+  const row = await env.DB.prepare(queries.usageAggregate)
+    .bind(pool, `-${windowSeconds} seconds`, callerId ?? "")
+    .first<UsageAggregateRow>();
   return normalizeAggregate(row);
 }
 
@@ -117,14 +83,9 @@ async function routeUsage(
   windowSeconds: number,
   callerId?: string,
 ): Promise<(CacheAggregate & { route_kind: string; latest_seen_at: string | null })[]> {
-  const statement = env.DB.prepare(
-    callerId === undefined ? queries.statsRoutesPool : queries.statsRoutesCaller,
-  );
-  const bound =
-    callerId === undefined
-      ? statement.bind(pool, `-${windowSeconds} seconds`)
-      : statement.bind(pool, `-${windowSeconds} seconds`, callerId);
-  const rows = await bound.all<RouteRow>();
+  const rows = await env.DB.prepare(queries.usageRoutes)
+    .bind(pool, `-${windowSeconds} seconds`, callerId ?? "")
+    .all<RouteRow>();
   return rows.results.map((row) => ({
     route_kind: row.route_kind,
     latest_seen_at: row.latest_seen_at,
@@ -133,52 +94,8 @@ async function routeUsage(
 }
 
 async function cacheTotals(env: Env, pool: string) {
-  const row = await env.DB.prepare(queries.statsCacheTotals).bind(pool).first<{
-    total_entries: number;
-    fresh_entries: number | null;
-    expired_entries: number | null;
-    body_bytes: number | null;
-  }>();
-  return {
-    total_entries: row?.total_entries ?? 0,
-    fresh_entries: row?.fresh_entries ?? 0,
-    expired_entries: row?.expired_entries ?? 0,
-    body_bytes: row?.body_bytes ?? 0,
-  };
-}
-
-export function normalizeAggregate(row: AggregateRow | null): CacheAggregate {
-  const cacheHits = row?.cache_hits ?? 0;
-  const cacheStale = row?.cache_stale ?? 0;
-  const cacheMisses = row?.cache_misses ?? 0;
-  const saved = cacheHits + cacheStale;
-  const denominator = saved + cacheMisses;
-  const requests = row?.requests ?? 0;
-  const cacheBypass = row?.cache_bypass ?? 0;
-  const cacheUnknown = row?.cache_unknown ?? 0;
-  const cacheableRequests = row?.cacheable_requests ?? 0;
-  const eligibleCacheRequests = row?.eligible_cache_requests ?? 0;
-  return {
-    requests,
-    errors: row?.errors ?? 0,
-    service_errors: row?.service_errors ?? 0,
-    fallbacks: row?.fallbacks ?? 0,
-    avg_duration_ms: row?.avg_duration_ms ?? null,
-    cache_hits: cacheHits,
-    cache_stale: cacheStale,
-    cache_misses: cacheMisses,
-    cache_bypass: cacheBypass,
-    cache_unknown: cacheUnknown,
-    cacheable_requests: cacheableRequests,
-    eligible_cache_requests: eligibleCacheRequests,
-    cache_hit_rate: denominator === 0 ? null : saved / denominator,
-    cacheable_hit_rate: cacheableRequests === 0 ? null : saved / cacheableRequests,
-    eligible_cache_hit_rate: eligibleCacheRequests === 0 ? null : saved / eligibleCacheRequests,
-    bypass_rate: requests === 0 ? null : cacheBypass / requests,
-    coalesced: row?.coalesced ?? 0,
-    saved_github_requests: saved,
-    backend_requests: cacheMisses + cacheBypass,
-  };
+  const row = await env.DB.prepare(queries.cacheTotals).bind(pool).first<CacheTotalsRow>();
+  return normalizeCacheTotals(row);
 }
 
 function unitSeconds(unit: string): number {

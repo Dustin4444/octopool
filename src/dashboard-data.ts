@@ -1,5 +1,11 @@
 import { queries } from "./generated/sql";
 import { HttpError, jsonResponse } from "./http";
+import {
+  normalizeCacheActivity,
+  normalizeCacheTotals,
+  type CacheTotalsRow,
+  type UsageAggregateRow,
+} from "./metrics";
 import { requireDashboardAdmin } from "./web-session";
 
 export async function dashboardData(request: Request, env: Env): Promise<Response> {
@@ -62,44 +68,24 @@ export async function dashboardData(request: Request, env: Env): Promise<Respons
 }
 
 async function dashboardUsage(env: Env, pool: string) {
-  const row = await env.DB.prepare(queries.dashboardUsage).bind(pool).first<{
-    requests_24h: number;
-    errors_24h: number | null;
-    service_errors_24h: number | null;
-    fallbacks_24h: number | null;
-    denied_24h: number | null;
-    cache_hits_24h: number | null;
-    cache_stale_24h: number | null;
-    cache_misses_24h: number | null;
-    cache_bypass_24h: number | null;
-    coalesced_24h: number | null;
-    eligible_hits_24h: number | null;
-    eligible_misses_24h: number | null;
-    avg_duration_ms_24h: number | null;
-    latest_seen_at: string | null;
-  }>();
-  const cacheHits = row?.cache_hits_24h ?? 0;
-  const cacheStale = row?.cache_stale_24h ?? 0;
-  const cacheMisses = row?.cache_misses_24h ?? 0;
-  const cacheDenominator = cacheHits + cacheStale + cacheMisses;
-  const eligibleHits = row?.eligible_hits_24h ?? 0;
-  const eligibleMisses = row?.eligible_misses_24h ?? 0;
-  const eligibleDenominator = eligibleHits + eligibleMisses;
+  const row = await env.DB.prepare(queries.usageAggregate)
+    .bind(pool, "-24 hours", "")
+    .first<UsageAggregateRow>();
+  const cache = normalizeCacheActivity(row);
   return {
-    requests_24h: row?.requests_24h ?? 0,
-    errors_24h: row?.errors_24h ?? 0,
-    service_errors_24h: row?.service_errors_24h ?? 0,
-    fallbacks_24h: row?.fallbacks_24h ?? 0,
-    denied_24h: row?.denied_24h ?? 0,
-    cache_hits_24h: cacheHits,
-    cache_stale_24h: cacheStale,
-    cache_misses_24h: cacheMisses,
-    cache_bypass_24h: row?.cache_bypass_24h ?? 0,
-    coalesced_24h: row?.coalesced_24h ?? 0,
-    cache_hit_rate_24h: cacheDenominator === 0 ? null : (cacheHits + cacheStale) / cacheDenominator,
-    eligible_cache_hit_rate_24h:
-      eligibleDenominator === 0 ? null : eligibleHits / eligibleDenominator,
-    avg_duration_ms_24h: row?.avg_duration_ms_24h ?? null,
+    requests_24h: row?.requests ?? 0,
+    errors_24h: row?.errors ?? 0,
+    service_errors_24h: row?.service_errors ?? 0,
+    fallbacks_24h: row?.operational_fallbacks ?? 0,
+    denied_24h: row?.denied ?? 0,
+    cache_hits_24h: cache.cache_hits,
+    cache_stale_24h: cache.cache_stale,
+    cache_misses_24h: cache.cache_misses,
+    cache_bypass_24h: cache.cache_bypass,
+    coalesced_24h: cache.coalesced,
+    cache_hit_rate_24h: cache.cache_hit_rate,
+    eligible_cache_hit_rate_24h: cache.eligible_cache_hit_rate,
+    avg_duration_ms_24h: row?.avg_duration_ms ?? null,
     latest_seen_at: row?.latest_seen_at ?? null,
   };
 }
@@ -118,19 +104,9 @@ async function dashboardIdentities(env: Env, pool: string) {
 }
 
 async function dashboardCache(env: Env, pool: string) {
-  const row = await env.DB.prepare(queries.dashboardCache).bind(pool).first<{
-    total_entries: number;
-    fresh_entries: number | null;
-    expired_entries: number | null;
-    body_bytes: number | null;
-    oldest_created_at: string | null;
-    newest_created_at: string | null;
-  }>();
+  const row = await env.DB.prepare(queries.cacheTotals).bind(pool).first<CacheTotalsRow>();
   return {
-    total_entries: row?.total_entries ?? 0,
-    fresh_entries: row?.fresh_entries ?? 0,
-    expired_entries: row?.expired_entries ?? 0,
-    body_bytes: row?.body_bytes ?? 0,
+    ...normalizeCacheTotals(row),
     oldest_created_at: row?.oldest_created_at ?? null,
     newest_created_at: row?.newest_created_at ?? null,
     routes: await dashboardCacheRoutes(env, pool),
@@ -179,41 +155,28 @@ async function dashboardRecent(env: Env, pool: string) {
 }
 
 async function dashboardRouteUsage(env: Env, pool: string) {
-  const rows = await env.DB.prepare(queries.dashboardRouteUsage).bind(pool).all<{
-    route_kind: string;
-    requests: number;
-    errors: number | null;
-    service_errors: number | null;
-    fallbacks: number | null;
-    cache_hits: number | null;
-    cache_stale: number | null;
-    cache_misses: number | null;
-    cache_bypass: number | null;
-    coalesced: number | null;
-    eligible_hits: number | null;
-    eligible_misses: number | null;
-  }>();
+  const rows = await env.DB.prepare(queries.usageRoutes)
+    .bind(pool, "-24 hours", "")
+    .all<UsageAggregateRow & { route_kind: string }>();
   return rows.results.map((row) => {
-    const cacheHits = row.cache_hits ?? 0;
-    const cacheStale = row.cache_stale ?? 0;
-    const cacheMisses = row.cache_misses ?? 0;
-    const cacheDenominator = cacheHits + cacheStale + cacheMisses;
-    const eligibleHits = row.eligible_hits ?? 0;
-    const eligibleMisses = row.eligible_misses ?? 0;
-    const eligibleDenominator = eligibleHits + eligibleMisses;
+    const cache = normalizeCacheActivity(row);
+    const eligibleHits = row.eligible_cache_hits ?? 0;
+    const eligibleRequests = row.eligible_cache_requests ?? 0;
     return {
-      ...row,
+      route_kind: row.route_kind,
+      requests: row.requests,
       errors: row.errors ?? 0,
       service_errors: row.service_errors ?? 0,
       fallbacks: row.fallbacks ?? 0,
-      cache_hits: cacheHits,
-      cache_stale: cacheStale,
-      cache_misses: cacheMisses,
-      cache_bypass: row.cache_bypass ?? 0,
-      coalesced: row.coalesced ?? 0,
-      cache_hit_rate: cacheDenominator === 0 ? null : (cacheHits + cacheStale) / cacheDenominator,
-      eligible_cache_hit_rate:
-        eligibleDenominator === 0 ? null : eligibleHits / eligibleDenominator,
+      cache_hits: cache.cache_hits,
+      cache_stale: cache.cache_stale,
+      cache_misses: cache.cache_misses,
+      cache_bypass: cache.cache_bypass,
+      coalesced: cache.coalesced,
+      eligible_hits: eligibleHits,
+      eligible_misses: eligibleRequests - eligibleHits,
+      cache_hit_rate: cache.cache_hit_rate,
+      eligible_cache_hit_rate: cache.eligible_cache_hit_rate,
     };
   });
 }

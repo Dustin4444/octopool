@@ -28,6 +28,41 @@ type RelayEnvelope = {
   };
 };
 
+type UsageEnvelope = {
+  requests: number;
+  errors: number;
+  fallbacks: number;
+  cache_hits: number;
+  cache_misses: number;
+  eligible_cache_hit_rate: number | null;
+};
+
+type StatsEnvelope = {
+  pool: string;
+  operator: { github_login: string };
+  pool_usage: UsageEnvelope;
+  caller_usage: UsageEnvelope;
+  routes: (UsageEnvelope & { route_kind: string })[];
+  caller_routes: (UsageEnvelope & { route_kind: string })[];
+  cache: { total_entries: number };
+};
+
+type DashboardEnvelope = {
+  pool: string;
+  operator: { github_login: string; dashboard_role: string };
+  identities: { total: number; active: number };
+  usage: {
+    requests_24h: number;
+    fallbacks_24h: number;
+    denied_24h: number;
+    cache_hit_rate_24h: number | null;
+    eligible_cache_hit_rate_24h: number | null;
+  };
+  route_usage: { route_kind: string; eligible_cache_hit_rate: number | null }[];
+  cache: { total_entries: number };
+  coordinator: CoordinatorSnapshot;
+};
+
 describe("Worker end-to-end relay", () => {
   it("runs the real Worker, D1 migrations, and Durable Object through cache miss and hit", async () => {
     await seedPool();
@@ -254,6 +289,89 @@ describe("Worker end-to-end relay", () => {
   });
 });
 
+describe("Worker end-to-end read models", () => {
+  it("isolates pool and caller stats through the canonical usage queries", async () => {
+    await seedPool();
+    await seedCaller("other", "other-token", "other");
+    await seedAudit("request-1", "caller", "repo_view", "miss", 200);
+    await seedAudit("request-2", "caller", "repo_view", "hit", 200);
+    await seedAudit("request-3", "other", "actions_log", "unknown", 424, {
+      errorCode: "fallback_local",
+      fallbackReason: "owner_denied",
+      cacheable: 0,
+    });
+
+    const response = await callWorker(`/v1/pools/${POOL}/stats?since=24h`, {
+      headers: { authorization: `Bearer ${CALLER_TOKEN}` },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json<StatsEnvelope>();
+    expect(body).toMatchObject({
+      pool: POOL,
+      operator: { github_login: "caller" },
+      pool_usage: {
+        requests: 3,
+        errors: 1,
+        fallbacks: 1,
+        cache_hits: 1,
+        cache_misses: 1,
+      },
+      caller_usage: {
+        requests: 2,
+        errors: 0,
+        fallbacks: 0,
+        cache_hits: 1,
+        cache_misses: 1,
+      },
+      cache: { total_entries: 0 },
+    });
+    expect(body.pool_usage.eligible_cache_hit_rate).toBe(0.5);
+    expect(body.caller_usage.eligible_cache_hit_rate).toBe(0.5);
+    expect(body.routes.map(({ route_kind }) => route_kind)).toEqual(["repo_view", "actions_log"]);
+    expect(body.caller_routes).toEqual([
+      expect.objectContaining({ route_kind: "repo_view", requests: 2 }),
+    ]);
+  });
+
+  it("composes the authenticated dashboard from D1 and Durable Object state", async () => {
+    await seedPool();
+    const session = await seedWebSession();
+    await seedAudit("request-1", "caller", "repo_view", "miss", 200);
+    await seedAudit("request-2", "caller", "repo_view", "hit", 200);
+    await seedAudit("request-3", "caller", "actions_log", "unknown", 424, {
+      errorCode: "fallback_local",
+      fallbackReason: "owner_denied",
+      cacheable: 0,
+    });
+
+    const response = await callWorker(`https://octopool.openclaw.ai/v1/dashboard?pool=${POOL}`, {
+      headers: { cookie: `octopool_session=${session}` },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json<DashboardEnvelope>();
+    expect(body).toMatchObject({
+      pool: POOL,
+      operator: { github_login: "caller", dashboard_role: "admin" },
+      identities: { total: 1, active: 1 },
+      usage: {
+        requests_24h: 3,
+        fallbacks_24h: 0,
+        denied_24h: 1,
+        cache_hit_rate_24h: 0.5,
+        eligible_cache_hit_rate_24h: 0.5,
+      },
+      cache: { total_entries: 0 },
+    });
+    expect(body.route_usage).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ route_kind: "repo_view", eligible_cache_hit_rate: 0.5 }),
+        expect.objectContaining({ route_kind: "actions_log", eligible_cache_hit_rate: null }),
+      ]),
+    );
+    expect(body.coordinator).toEqual({ rates: [], cooldowns: [], leases: [] });
+  });
+});
+
 async function relay(path: string, token = CALLER_TOKEN): Promise<Response> {
   return callWorker("/v1/github/request", {
     method: "POST",
@@ -267,7 +385,8 @@ async function relay(path: string, token = CALLER_TOKEN): Promise<Response> {
 
 async function callWorker(path: string, init?: RequestInit): Promise<Response> {
   const ctx = createExecutionContext();
-  const response = await worker.fetch(new Request(`https://octopool.dev${path}`, init), env, ctx);
+  const url = path.startsWith("https://") ? path : `https://octopool.dev${path}`;
+  const response = await worker.fetch(new Request(url, init), env, ctx);
   await waitOnExecutionContext(ctx);
   return response;
 }
@@ -301,6 +420,61 @@ async function seedPool(options: { secondary?: boolean } = {}): Promise<void> {
       ? [identity("secondary", "TEST_PAT_SECONDARY", 100), scope("secondary")]
       : []),
   ]);
+}
+
+async function seedCaller(id: string, token: string, login: string): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO callers (
+        id, name, token_hash, github_login, org_login, org_verified_at, status, github_user_id
+      ) VALUES (?, ?, ?, ?, 'openclaw', CURRENT_TIMESTAMP, 'active', ?)`,
+    ).bind(id, login, await hashToken(token), login, id === "other" ? 43 : 44),
+    env.DB.prepare("INSERT INTO caller_pools (caller_id, pool_id) VALUES (?, ?)").bind(id, POOL),
+  ]);
+}
+
+async function seedWebSession(): Promise<string> {
+  const session = "test-web-session";
+  await env.DB.prepare(
+    `INSERT INTO web_sessions (session_hash, caller_id, expires_at)
+     VALUES (?, 'caller', datetime('now', '+1 day'))`,
+  )
+    .bind(await hashToken(session))
+    .run();
+  return session;
+}
+
+async function seedAudit(
+  requestId: string,
+  callerId: string,
+  routeKind: string,
+  cacheStatus: string,
+  status: number,
+  options: {
+    errorCode?: string;
+    fallbackReason?: string;
+    cacheable?: number;
+  } = {},
+): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO audit_events (
+      request_id, caller_id, pool_id, route_key, route_kind, identity_id, status, error_code,
+      fallback_reason, duration_ms, cache_status, cacheable, coalesced
+    ) VALUES (?, ?, ?, ?, ?, 'primary', ?, ?, ?, 10, ?, ?, 0)`,
+  )
+    .bind(
+      requestId,
+      callerId,
+      POOL,
+      `${routeKind}:fixture`,
+      routeKind,
+      status,
+      options.errorCode ?? null,
+      options.fallbackReason ?? null,
+      cacheStatus,
+      options.cacheable ?? 1,
+    )
+    .run();
 }
 
 function identity(id: string, secretRef: string, weight: number): D1PreparedStatement {
