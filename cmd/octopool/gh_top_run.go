@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 )
 
@@ -60,4 +62,130 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 	default:
 		return ghDelegated()
 	}
+}
+
+func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string, opts ghTopOptions) error {
+	client, err := newGHRelayClient()
+	if err != nil {
+		return err
+	}
+	run := map[string]any{}
+	if len(opts.json) > 1 || !hasJSONField(opts.json, "jobs") {
+		envelope, err := client.do(ctx, ghAPIRequest{
+			method:  "GET",
+			path:    repoPath(repo, "actions", "runs", id),
+			headers: map[string]string{"x-octopool-public-shape": "actions-summary-v1"},
+		})
+		if err != nil {
+			return err
+		}
+		body, err := envelopeBodyBytes(envelope)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(body, &run); err != nil {
+			return err
+		}
+	}
+	if hasJSONField(opts.json, "jobs") {
+		envelope, err := client.do(ctx, ghAPIRequest{
+			method: "GET",
+			path:   repoPath(repo, "actions", "runs", id, "jobs"),
+			query:  map[string]any{"per_page": "100"},
+			headers: map[string]string{
+				"x-octopool-public-shape": "actions-jobs-v1",
+			},
+		})
+		if err != nil {
+			return err
+		}
+		jobs, err := runJobs(envelope)
+		if err != nil {
+			return err
+		}
+		run["jobs"] = jobs
+	}
+	raw, err := json.Marshal(run)
+	if err != nil {
+		return err
+	}
+	filtered, err := filterJSONFields(raw, opts.json, fieldMapRun)
+	if err != nil {
+		return err
+	}
+	return writeBytes(ctx, stdout, filtered, opts.jq)
+}
+
+func runJobs(envelope relayEnvelope) ([]any, error) {
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return nil, err
+	}
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+	rawJobs, ok := response["jobs"].([]any)
+	if !ok {
+		return nil, errors.New("workflow jobs response did not include jobs")
+	}
+	if total, ok := response["total_count"].(float64); ok && total > float64(len(rawJobs)) {
+		return nil, localFallbackError{Reason: "workflow jobs response requires pagination"}
+	}
+	jobs := make([]any, 0, len(rawJobs))
+	for _, rawJob := range rawJobs {
+		job, ok := rawJob.(map[string]any)
+		if !ok {
+			return nil, errors.New("workflow jobs response included an invalid job")
+		}
+		mapped := map[string]any{}
+		for field, path := range map[string][]string{
+			"databaseId":  {"id"},
+			"name":        {"name"},
+			"status":      {"status"},
+			"conclusion":  {"conclusion"},
+			"startedAt":   {"started_at"},
+			"completedAt": {"completed_at"},
+			"url":         {"html_url"},
+		} {
+			if value, ok := valueAtPath(job, path...); ok {
+				mapped[field] = value
+			}
+		}
+		if rawSteps, ok := job["steps"].([]any); ok {
+			steps := make([]any, 0, len(rawSteps))
+			for _, rawStep := range rawSteps {
+				step, ok := rawStep.(map[string]any)
+				if !ok {
+					return nil, errors.New("workflow jobs response included an invalid step")
+				}
+				mappedStep := map[string]any{}
+				for field, path := range map[string][]string{
+					"name":        {"name"},
+					"number":      {"number"},
+					"status":      {"status"},
+					"conclusion":  {"conclusion"},
+					"startedAt":   {"started_at"},
+					"completedAt": {"completed_at"},
+				} {
+					if value, ok := valueAtPath(step, path...); ok {
+						mappedStep[field] = value
+					}
+				}
+				steps = append(steps, mappedStep)
+			}
+			mapped["steps"] = steps
+		}
+		jobs = append(jobs, mapped)
+	}
+	return jobs, nil
+}
+
+func hasJSONField(fields []string, expected string) bool {
+	for _, field := range fields {
+		if field == expected {
+			return true
+		}
+	}
+	return false
 }
