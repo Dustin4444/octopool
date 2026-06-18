@@ -35,6 +35,7 @@ import { rootResponse } from "./landing";
 import { githubResponseLocalFallbackReason, localFallbackError } from "./local-fallback";
 import { runScheduledMaintenance } from "./maintenance";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
+import { capabilitiesForRouteKind } from "./route-manifest";
 import { ensureCliCaller } from "./callers";
 import { PoolCoordinator } from "./pool-coordinator";
 import { verifyPRStateHint, verifyPRStateHintLive } from "./pr-state";
@@ -571,7 +572,7 @@ async function relayGitHub(
         reason: "web_only_unavailable",
       });
     }
-    if (route.kind === "user_view") {
+    if (capabilitiesForRouteKind(route.kind).fallback === "github_public") {
       const github = sanitizeGitHubResponse(
         route,
         await callPublicGitHub(env, relayRequest, route),
@@ -843,7 +844,12 @@ async function serveCachedGitHubResponse(
         : { cache_expires_at: params.cached.expires_at }),
       route_kind: params.route.kind,
       ...(params.cached.identity === undefined
-        ? { backend: params.route.kind === "user_view" ? "github_public" : "web" }
+        ? {
+            backend:
+              capabilitiesForRouteKind(params.route.kind).fallback === "github_public"
+                ? "github_public"
+                : "web",
+          }
         : {}),
     },
   });
@@ -889,34 +895,7 @@ function staleFallbackReasonFromError(error: unknown): string | undefined {
 }
 
 function webOnlyRoute(route: RouteInfo): boolean {
-  return (
-    route.kind === "release_list" ||
-    route.kind === "release_latest" ||
-    route.kind === "release_view" ||
-    route.kind === "release_assets" ||
-    route.kind === "release_asset" ||
-    route.kind === "org_repo_list" ||
-    route.kind === "org_event_list" ||
-    route.kind === "org_public_member_list" ||
-    route.kind === "org_public_member_view" ||
-    route.kind === "user_repo_list" ||
-    route.kind === "user_org_list" ||
-    route.kind === "user_gist_list" ||
-    route.kind === "user_follower_list" ||
-    route.kind === "user_following_list" ||
-    route.kind === "user_event_list" ||
-    route.kind === "user_received_event_list" ||
-    route.kind === "user_key_list" ||
-    route.kind === "user_gpg_key_list" ||
-    route.kind === "gist_view" ||
-    route.kind === "emoji_list" ||
-    route.kind === "github_meta" ||
-    route.kind === "license_list" ||
-    route.kind === "license_view" ||
-    route.kind === "gitignore_template_list" ||
-    route.kind === "gitignore_template_view" ||
-    route.kind === "search_repositories"
-  );
+  return capabilitiesForRouteKind(route.kind).fallback === "local";
 }
 
 async function selectIdentity(
@@ -946,7 +925,7 @@ async function cachedIdentityAvailable(
   if (identity === undefined) {
     return true;
   }
-  if (route.kind === "user_view") {
+  if (capabilitiesForRouteKind(route.kind).fallback === "github_public") {
     return false;
   }
   const activeIdentities = await loadIdentities(env, pool, route);

@@ -3,6 +3,7 @@ import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import { HttpError, parsePositiveInt } from "./http";
 import type { PoolCoordinator } from "./pool-coordinator";
+import { capabilitiesForRouteKind } from "./route-manifest";
 import type { RouteInfo } from "./types";
 
 type GitHubRepoResponse = {
@@ -80,7 +81,11 @@ export async function recordPublicGitHubRepo(env: Env, route: RouteInfo): Promis
 }
 
 export function anonymousGitHubResponseProvesPublicRepo(route: RouteInfo): boolean {
-  return route.owner !== undefined && route.repo !== undefined && !route.kind.startsWith("search_");
+  return (
+    route.owner !== undefined &&
+    route.repo !== undefined &&
+    capabilitiesForRouteKind(route.kind).anonymousRepoProof
+  );
 }
 
 async function refreshPublicGitHubRepoProof(

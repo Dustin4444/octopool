@@ -18,4 +18,17 @@ describe("route manifest", () => {
       ).toEqual([route.id]);
     }
   });
+
+  it("defines backend eligibility on every concrete route", () => {
+    expect(ROUTES.filter((route) => route.capabilities.publicApi)).toHaveLength(104);
+    expect(ROUTES.filter((route) => route.capabilities.fallback === "local")).toHaveLength(27);
+    expect(ROUTES.filter((route) => route.capabilities.fallback === "github_public")).toHaveLength(
+      1,
+    );
+    expect(
+      ROUTES.filter(
+        (route) => route.capabilities.publicApi || route.capabilities.fallback !== "pool",
+      ),
+    ).toHaveLength(109);
+  });
 });

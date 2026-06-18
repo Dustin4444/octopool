@@ -6,6 +6,16 @@ type RouteOptions = {
   fullResponseCap?: boolean;
   search?: boolean;
   logs?: boolean;
+  publicApi?: boolean;
+  fallback?: RouteFallback;
+};
+
+export type RouteFallback = "pool" | "github_public" | "local";
+
+export type RouteCapabilities = {
+  publicApi: boolean;
+  fallback: RouteFallback;
+  anonymousRepoProof: boolean;
 };
 
 type RouteRule<Kind extends string> = {
@@ -21,6 +31,7 @@ type RouteRule<Kind extends string> = {
   fullResponseCap: boolean;
   search: boolean;
   logs: boolean;
+  capabilities: RouteCapabilities;
 };
 
 const routeParameters = {
@@ -88,7 +99,22 @@ function route<const Kind extends string>(
     fullResponseCap: options.fullResponseCap ?? false,
     search: options.search ?? false,
     logs: options.logs ?? false,
+    capabilities: {
+      publicApi: options.publicApi ?? true,
+      fallback: options.fallback ?? "pool",
+      anonymousRepoProof:
+        template.includes("{owner}") && template.includes("{repo}") && resource !== "search",
+    },
   };
+}
+
+function localRoute<const Kind extends string>(
+  template: string,
+  kind: Kind,
+  resource: RouteResource = "core",
+  options: RouteOptions = {},
+): RouteRule<Kind> {
+  return route(template, kind, resource, { ...options, fallback: "local" });
 }
 
 function normalizeRouteKeyTemplate(template: string): string {
@@ -157,27 +183,30 @@ function compileRoutePattern(template: string): RegExp {
 }
 
 export const ROUTES = [
-  route("/users/{login}", "user_view"),
-  route("/users/{login}/repos", "user_repo_list"),
-  route("/users/{login}/orgs", "user_org_list"),
-  route("/users/{login}/gists", "user_gist_list"),
-  route("/users/{login}/followers", "user_follower_list"),
-  route("/users/{login}/following", "user_following_list"),
-  route("/users/{login}/events", "user_event_list"),
-  route("/users/{login}/received_events", "user_received_event_list"),
-  route("/users/{login}/keys", "user_key_list"),
-  route("/users/{login}/gpg_keys", "user_gpg_key_list"),
-  route("/orgs/{org}/repos", "org_repo_list"),
-  route("/orgs/{org}/events", "org_event_list"),
-  route("/orgs/{org}/public_members", "org_public_member_list"),
-  route("/orgs/{org}/public_members/{login}", "org_public_member_view"),
-  route("/gists/{gistId}", "gist_view"),
-  route("/emojis", "emoji_list"),
-  route("/meta", "github_meta"),
-  route("/licenses", "license_list"),
-  route("/licenses/{slug}", "license_view"),
-  route("/gitignore/templates", "gitignore_template_list"),
-  route("/gitignore/templates/{template}", "gitignore_template_view"),
+  route("/users/{login}", "user_view", "core", {
+    publicApi: false,
+    fallback: "github_public",
+  }),
+  localRoute("/users/{login}/repos", "user_repo_list"),
+  localRoute("/users/{login}/orgs", "user_org_list"),
+  localRoute("/users/{login}/gists", "user_gist_list"),
+  localRoute("/users/{login}/followers", "user_follower_list"),
+  localRoute("/users/{login}/following", "user_following_list"),
+  localRoute("/users/{login}/events", "user_event_list"),
+  localRoute("/users/{login}/received_events", "user_received_event_list"),
+  localRoute("/users/{login}/keys", "user_key_list"),
+  localRoute("/users/{login}/gpg_keys", "user_gpg_key_list"),
+  localRoute("/orgs/{org}/repos", "org_repo_list"),
+  localRoute("/orgs/{org}/events", "org_event_list"),
+  localRoute("/orgs/{org}/public_members", "org_public_member_list"),
+  localRoute("/orgs/{org}/public_members/{login}", "org_public_member_view"),
+  localRoute("/gists/{gistId}", "gist_view"),
+  localRoute("/emojis", "emoji_list"),
+  localRoute("/meta", "github_meta"),
+  localRoute("/licenses", "license_list"),
+  localRoute("/licenses/{slug}", "license_view"),
+  localRoute("/gitignore/templates", "gitignore_template_list"),
+  localRoute("/gitignore/templates/{template}", "gitignore_template_view"),
   route("/repos/{owner}/{repo}", "repo_view"),
   route("/repos/{owner}/{repo}/commits", "commit_list"),
   route("/repos/{owner}/{repo}/commits/{sha}", "commit_view"),
@@ -219,6 +248,7 @@ export const ROUTES = [
   route("/repos/{owner}/{repo}/actions/jobs/{id}/logs", "job_logs", "core", {
     largePayload: true,
     logs: true,
+    publicApi: false,
   }),
   route("/repos/{owner}/{repo}/check-runs/{id}/annotations", "check_run_annotations"),
   route("/repos/{owner}/{repo}/issues/{number}", "issue_view"),
@@ -268,18 +298,51 @@ export const ROUTES = [
   route("/repos/{owner}/{repo}/actions/workflows/{workflow}/runs", "workflow_run_list", "core", {
     fullResponseCap: true,
   }),
-  route("/repos/{owner}/{repo}/releases", "release_list"),
-  route("/repos/{owner}/{repo}/releases/latest", "release_latest"),
-  route("/repos/{owner}/{repo}/releases/tags/{tag}", "release_view"),
-  route("/repos/{owner}/{repo}/releases/{id}", "release_view"),
-  route("/repos/{owner}/{repo}/releases/{id}/assets", "release_assets"),
-  route("/repos/{owner}/{repo}/releases/assets/{id}", "release_asset"),
+  localRoute("/repos/{owner}/{repo}/releases", "release_list", "core", {
+    publicApi: false,
+  }),
+  localRoute("/repos/{owner}/{repo}/releases/latest", "release_latest", "core", {
+    publicApi: false,
+  }),
+  localRoute("/repos/{owner}/{repo}/releases/tags/{tag}", "release_view", "core", {
+    publicApi: false,
+  }),
+  localRoute("/repos/{owner}/{repo}/releases/{id}", "release_view", "core", {
+    publicApi: false,
+  }),
+  localRoute("/repos/{owner}/{repo}/releases/{id}/assets", "release_assets"),
+  localRoute("/repos/{owner}/{repo}/releases/assets/{id}", "release_asset"),
   route("/search/issues", "search_issues", "search", { search: true }),
-  route("/search/code", "search_code", "search", { search: true }),
+  route("/search/code", "search_code", "search", { search: true, publicApi: false }),
   route("/search/commits", "search_commits", "search", { search: true }),
-  route("/search/repositories", "search_repositories", "search", { search: true }),
-  route("/rate_limit", "rate_limit"),
+  localRoute("/search/repositories", "search_repositories", "search", { search: true }),
+  route("/rate_limit", "rate_limit", "core", { publicApi: false }),
 ] as const;
 
 export type RouteKind = (typeof ROUTES)[number]["kind"];
 export type RouteManifestEntry = (typeof ROUTES)[number];
+
+const capabilitiesByKind = new Map<RouteKind, RouteCapabilities>();
+for (const route of ROUTES) {
+  const existing = capabilitiesByKind.get(route.kind);
+  if (existing !== undefined && !sameCapabilities(existing, route.capabilities)) {
+    throw new Error(`Inconsistent capabilities for route kind: ${route.kind}`);
+  }
+  capabilitiesByKind.set(route.kind, route.capabilities);
+}
+
+export function capabilitiesForRouteKind(kind: RouteKind): RouteCapabilities {
+  const capabilities = capabilitiesByKind.get(kind);
+  if (capabilities === undefined) {
+    throw new Error(`Unknown route kind: ${kind}`);
+  }
+  return capabilities;
+}
+
+function sameCapabilities(left: RouteCapabilities, right: RouteCapabilities): boolean {
+  return (
+    left.publicApi === right.publicApi &&
+    left.fallback === right.fallback &&
+    left.anonymousRepoProof === right.anonymousRepoProof
+  );
+}

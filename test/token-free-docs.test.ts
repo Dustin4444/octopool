@@ -2,8 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { publicApiRoute } from "../src/github-web";
-import { ROUTES, type RouteKind } from "../src/route-manifest";
+import { ROUTES } from "../src/route-manifest";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -16,16 +15,10 @@ describe("token-free endpoint documentation", () => {
         .match(/^GET (\/\S+)$/gm)
         ?.map((line) => line.slice("GET ".length)) ?? [],
     );
-    const specialTokenFreeKinds = new Set<RouteKind>([
-      "user_view",
-      "release_list",
-      "release_latest",
-      "release_view",
-    ]);
     const implemented = new Set(
-      ROUTES.filter((route) => publicApiRoute(route) || specialTokenFreeKinds.has(route.kind)).map(
-        (route) => normalizeRoute(route.template),
-      ),
+      ROUTES.filter(
+        (route) => route.capabilities.publicApi || route.capabilities.fallback !== "pool",
+      ).map((route) => normalizeRoute(route.template)),
     );
 
     expect([...documented].sort()).toEqual([...implemented].sort());

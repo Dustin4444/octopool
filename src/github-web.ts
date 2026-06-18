@@ -17,6 +17,7 @@ import {
   parseWorkflowPageCount,
 } from "./github-html";
 import { queries } from "./generated/sql";
+import { capabilitiesForRouteKind } from "./route-manifest";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 const MEDIA_DIFF = new Set([
@@ -1158,115 +1159,8 @@ function headerInt(headers: Headers, name: string): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
-export function publicApiRoute(route: Pick<RouteInfo, "kind">): boolean {
-  switch (route.kind) {
-    case "repo_view":
-    case "user_repo_list":
-    case "user_org_list":
-    case "user_gist_list":
-    case "user_follower_list":
-    case "user_following_list":
-    case "user_event_list":
-    case "user_received_event_list":
-    case "user_key_list":
-    case "user_gpg_key_list":
-    case "org_repo_list":
-    case "org_event_list":
-    case "org_public_member_list":
-    case "org_public_member_view":
-    case "gist_view":
-    case "emoji_list":
-    case "github_meta":
-    case "license_list":
-    case "license_view":
-    case "gitignore_template_list":
-    case "gitignore_template_view":
-    case "commit_list":
-    case "commit_view":
-    case "commit_comments":
-    case "commit_pulls":
-    case "commit_branches_where_head":
-    case "commit_statuses":
-    case "repo_comment":
-    case "compare":
-    case "contents":
-    case "repo_readme":
-    case "pr_view":
-    case "pr_list":
-    case "pr_files":
-    case "pr_commits":
-    case "pr_review_comments":
-    case "pr_review_comment_list":
-    case "pr_review_comment_view":
-    case "pr_review_comment_reactions":
-    case "pr_reviews":
-    case "pr_review_view":
-    case "pr_review_comments_for_review":
-    case "pr_requested_reviewers":
-    case "commit_check_runs":
-    case "commit_check_suites":
-    case "commit_status":
-    case "ref_statuses":
-    case "run_list":
-    case "run_view":
-    case "run_jobs":
-    case "run_artifacts":
-    case "job_view":
-    case "check_run_annotations":
-    case "issue_view":
-    case "issue_list":
-    case "issue_comments":
-    case "issue_comment_list":
-    case "issue_comment_view":
-    case "issue_comment_reactions":
-    case "issue_events":
-    case "issue_event_list":
-    case "issue_event_view":
-    case "issue_labels":
-    case "issue_reactions":
-    case "issue_timeline":
-    case "assignee_list":
-    case "assignee_view":
-    case "label_list":
-    case "label_view":
-    case "milestone_list":
-    case "milestone_view":
-    case "branch_list":
-    case "branch_view":
-    case "tag_list":
-    case "repo_languages":
-    case "repo_contributors":
-    case "repo_license":
-    case "repo_topics":
-    case "community_profile":
-    case "fork_list":
-    case "stargazer_list":
-    case "subscriber_list":
-    case "deployment_list":
-    case "repo_event_list":
-    case "network_event_list":
-    case "repo_stats_contributors":
-    case "repo_stats_commit_activity":
-    case "repo_stats_code_frequency":
-    case "repo_stats_participation":
-    case "repo_stats_punch_card":
-    case "git_blob":
-    case "git_commit":
-    case "git_tree":
-    case "git_ref":
-    case "git_matching_refs":
-    case "workflow_list":
-    case "workflow_view":
-    case "workflow_run_list":
-    case "release_assets":
-    case "release_asset":
-    case "search_issues":
-    case "search_commits":
-    case "search_repositories":
-      return true;
-    default:
-      return false;
-  }
+function publicApiRoute(route: Pick<RouteInfo, "kind">): boolean {
+  return capabilitiesForRouteKind(route.kind).publicApi;
 }
 
 function publicGist(value: unknown): boolean {
