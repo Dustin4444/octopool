@@ -7,6 +7,7 @@ import {
   verifyGitHubOrgMember,
 } from "./auth";
 import { ensureWebCaller } from "./callers";
+import { defaultLoginPool } from "./config";
 import { queries } from "./generated/sql";
 import { effectiveOrigin } from "./hosts";
 import { HttpError, jsonResponse } from "./http";
@@ -71,7 +72,7 @@ export async function finishGitHubWebLogin(
   const githubToken = await exchangeGitHubCode(request, env, code);
   const user = await githubUserFromToken(githubToken);
   const verifiedAt = await verifyGitHubOrgMember(env, user.login);
-  const pool = loginPool(env);
+  const pool = defaultLoginPool(env);
   const caller = await ensureWebCaller(env, pool, user, verifiedAt);
 
   const session = newToken("sess");
@@ -159,11 +160,6 @@ export function webMeResponse(session: WebSession): Response {
     },
     expires_at: session.expires_at,
   });
-}
-
-function loginPool(env: Env): string {
-  const configured = envSecret(env, "DEFAULT_LOGIN_POOL");
-  return configured === undefined || configured.trim() === "" ? "maintainers" : configured.trim();
 }
 
 async function exchangeGitHubCode(request: Request, env: Env, code: string): Promise<string> {

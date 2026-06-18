@@ -1,4 +1,4 @@
-import { envSecret } from "./auth";
+import { defaultLoginPool } from "./config";
 import { APP_ORIGIN, PUBLIC_HOST, effectiveHost, effectiveOrigin } from "./hosts";
 import { jsonResponse } from "./http";
 
@@ -16,7 +16,7 @@ export function discoveryResponse(request: Request, env: Env): Response {
       version: DISCOVERY_VERSION,
       api_base: apiBase,
       app_base: appBase,
-      default_pool: loginPool(env),
+      default_pool: defaultLoginPool(env),
       allowed_org: env.ALLOWED_GITHUB_ORG,
       auth: {
         cli_github_token: true,
@@ -27,9 +27,4 @@ export function discoveryResponse(request: Request, env: Env): Response {
     200,
     { "cache-control": "public, max-age=300" },
   );
-}
-
-function loginPool(env: Env): string {
-  const configured = envSecret(env, "DEFAULT_LOGIN_POOL");
-  return configured === undefined || configured.trim() === "" ? "maintainers" : configured.trim();
 }
