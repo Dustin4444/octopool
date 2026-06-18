@@ -1,3 +1,5 @@
+import type { RouteKind } from "./route-manifest";
+
 export type JsonObject = Record<string, unknown>;
 
 export type RelayRequest = {
@@ -47,7 +49,7 @@ export type Identity = {
 };
 
 export type RouteInfo = {
-  kind: string;
+  kind: RouteKind;
   owner?: string;
   repo?: string;
   publicOnly: boolean;

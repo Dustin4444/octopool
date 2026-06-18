@@ -1,188 +1,10 @@
 import { HttpError, isObject } from "./http";
+import { ROUTES, routeKeyForMatch, type RouteManifestEntry } from "./route-manifest";
 import type { PoolPolicy, RelayRequest, RouteInfo } from "./types";
 
-const owner = "(?<owner>[A-Za-z0-9_.-]+)";
-const repo = "(?<repo>[A-Za-z0-9_.-]+)";
-const org = "(?<org>[A-Za-z0-9_.-]+)";
-const loginPath = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?(?:\\[bot\\]|%5[Bb]bot%5[Dd])?";
-const login = `(?<login>${loginPath})`;
-const number = "[0-9]+";
-const sha = "[0-9A-Fa-f]{7,64}";
-const id = "[0-9]+";
-const tag = "(?<tag>[^/?#]+)";
-const gistId = "(?<gistId>[0-9A-Fa-f]+)";
-const slug = "(?<slug>[A-Za-z0-9_.-]+)";
+type RouteRule = RouteManifestEntry;
 
-type RouteRule = {
-  pattern: RegExp;
-  kind: string;
-  resource: string;
-  cacheable: boolean;
-  largePayload?: boolean;
-  fullResponseCap?: boolean;
-  search?: boolean;
-  logs?: boolean;
-};
-
-const rules: RouteRule[] = [
-  route(`/users/${login}`, "user_view", "core"),
-  route(`/users/${login}/repos`, "user_repo_list", "core"),
-  route(`/users/${login}/orgs`, "user_org_list", "core"),
-  route(`/users/${login}/gists`, "user_gist_list", "core"),
-  route(`/users/${login}/followers`, "user_follower_list", "core"),
-  route(`/users/${login}/following`, "user_following_list", "core"),
-  route(`/users/${login}/events`, "user_event_list", "core"),
-  route(`/users/${login}/received_events`, "user_received_event_list", "core"),
-  route(`/users/${login}/keys`, "user_key_list", "core"),
-  route(`/users/${login}/gpg_keys`, "user_gpg_key_list", "core"),
-  route(`/orgs/${org}/repos`, "org_repo_list", "core"),
-  route(`/orgs/${org}/events`, "org_event_list", "core"),
-  route(`/orgs/${org}/public_members`, "org_public_member_list", "core"),
-  route(`/orgs/${org}/public_members/${login}`, "org_public_member_view", "core"),
-  route(`/gists/${gistId}`, "gist_view", "core"),
-  route("/emojis", "emoji_list", "core"),
-  route("/meta", "github_meta", "core"),
-  route("/licenses", "license_list", "core"),
-  route(`/licenses/${slug}`, "license_view", "core"),
-  route("/gitignore/templates", "gitignore_template_list", "core"),
-  route("/gitignore/templates/(?<template>[^/?#]+)", "gitignore_template_view", "core"),
-  route(`/repos/${owner}/${repo}`, "repo_view", "core"),
-  route(`/repos/${owner}/${repo}/commits`, "commit_list", "core"),
-  route(`/repos/${owner}/${repo}/commits/${sha}`, "commit_view", "core"),
-  route(`/repos/${owner}/${repo}/commits/${sha}/comments`, "commit_comments", "core"),
-  route(`/repos/${owner}/${repo}/commits/${sha}/pulls`, "commit_pulls", "core"),
-  route(
-    `/repos/${owner}/${repo}/commits/${sha}/branches-where-head`,
-    "commit_branches_where_head",
-    "core",
-  ),
-  route(`/repos/${owner}/${repo}/commits/${sha}/statuses`, "commit_statuses", "core"),
-  route(`/repos/${owner}/${repo}/comments/${id}`, "repo_comment", "core"),
-  route(`/repos/${owner}/${repo}/compare/(?<compare>[^/?#]+)`, "compare", "core"),
-  route(`/repos/${owner}/${repo}/contents/(?<contentPath>.+)`, "contents", "core"),
-  route(`/repos/${owner}/${repo}/readme`, "repo_readme", "core"),
-  route(`/repos/${owner}/${repo}/readme/(?<readmeDir>.+)`, "repo_readme", "core"),
-  route(`/repos/${owner}/${repo}/pulls/${number}`, "pr_view", "core"),
-  route(`/repos/${owner}/${repo}/pulls`, "pr_list", "core"),
-  route(`/repos/${owner}/${repo}/pulls/${number}/files`, "pr_files", "core"),
-  route(`/repos/${owner}/${repo}/pulls/${number}/commits`, "pr_commits", "core"),
-  route(`/repos/${owner}/${repo}/pulls/${number}/comments`, "pr_review_comments", "core"),
-  route(`/repos/${owner}/${repo}/pulls/comments`, "pr_review_comment_list", "core"),
-  route(`/repos/${owner}/${repo}/pulls/comments/${id}`, "pr_review_comment_view", "core"),
-  route(
-    `/repos/${owner}/${repo}/pulls/comments/${id}/reactions`,
-    "pr_review_comment_reactions",
-    "core",
-  ),
-  route(`/repos/${owner}/${repo}/pulls/${number}/reviews`, "pr_reviews", "core"),
-  route(`/repos/${owner}/${repo}/pulls/${number}/reviews/${id}`, "pr_review_view", "core"),
-  route(
-    `/repos/${owner}/${repo}/pulls/${number}/reviews/${id}/comments`,
-    "pr_review_comments_for_review",
-    "core",
-  ),
-  route(
-    `/repos/${owner}/${repo}/pulls/${number}/requested_reviewers`,
-    "pr_requested_reviewers",
-    "core",
-  ),
-  route(`/repos/${owner}/${repo}/commits/${sha}/check-runs`, "commit_check_runs", "core"),
-  route(`/repos/${owner}/${repo}/commits/${sha}/check-suites`, "commit_check_suites", "core"),
-  route(`/repos/${owner}/${repo}/commits/${sha}/status`, "commit_status", "core"),
-  route(`/repos/${owner}/${repo}/statuses/${sha}`, "ref_statuses", "core"),
-  route(`/repos/${owner}/${repo}/actions/runs`, "run_list", "core", {
-    fullResponseCap: true,
-  }),
-  route(`/repos/${owner}/${repo}/actions/runs/${id}`, "run_view", "core"),
-  route(`/repos/${owner}/${repo}/actions/runs/${id}/jobs`, "run_jobs", "core"),
-  route(`/repos/${owner}/${repo}/actions/runs/${id}/artifacts`, "run_artifacts", "core"),
-  route(`/repos/${owner}/${repo}/actions/jobs/${id}`, "job_view", "core"),
-  route(`/repos/${owner}/${repo}/actions/jobs/${id}/logs`, "job_logs", "core", {
-    largePayload: true,
-    logs: true,
-  }),
-  route(`/repos/${owner}/${repo}/check-runs/${id}/annotations`, "check_run_annotations", "core"),
-  route(`/repos/${owner}/${repo}/issues/${number}`, "issue_view", "core"),
-  route(`/repos/${owner}/${repo}/issues`, "issue_list", "core"),
-  route(`/repos/${owner}/${repo}/issues/${number}/comments`, "issue_comments", "core"),
-  route(`/repos/${owner}/${repo}/issues/comments`, "issue_comment_list", "core"),
-  route(`/repos/${owner}/${repo}/issues/comments/${id}`, "issue_comment_view", "core"),
-  route(
-    `/repos/${owner}/${repo}/issues/comments/${id}/reactions`,
-    "issue_comment_reactions",
-    "core",
-  ),
-  route(`/repos/${owner}/${repo}/issues/${number}/events`, "issue_events", "core"),
-  route(`/repos/${owner}/${repo}/issues/events`, "issue_event_list", "core"),
-  route(`/repos/${owner}/${repo}/issues/events/${id}`, "issue_event_view", "core"),
-  route(`/repos/${owner}/${repo}/issues/${number}/labels`, "issue_labels", "core"),
-  route(`/repos/${owner}/${repo}/issues/${number}/reactions`, "issue_reactions", "core"),
-  route(`/repos/${owner}/${repo}/issues/${number}/timeline`, "issue_timeline", "core"),
-  route(`/repos/${owner}/${repo}/assignees`, "assignee_list", "core"),
-  route(`/repos/${owner}/${repo}/assignees/${login}`, "assignee_view", "core"),
-  route(`/repos/${owner}/${repo}/labels`, "label_list", "core"),
-  route(`/repos/${owner}/${repo}/labels/(?<label>[^/?#]+)`, "label_view", "core"),
-  route(`/repos/${owner}/${repo}/milestones`, "milestone_list", "core"),
-  route(`/repos/${owner}/${repo}/milestones/${id}`, "milestone_view", "core"),
-  route(`/repos/${owner}/${repo}/branches`, "branch_list", "core"),
-  route(`/repos/${owner}/${repo}/branches/(?<branch>[^/?#]+)`, "branch_view", "core"),
-  route(`/repos/${owner}/${repo}/tags`, "tag_list", "core"),
-  route(`/repos/${owner}/${repo}/languages`, "repo_languages", "core"),
-  route(`/repos/${owner}/${repo}/contributors`, "repo_contributors", "core"),
-  route(`/repos/${owner}/${repo}/license`, "repo_license", "core"),
-  route(`/repos/${owner}/${repo}/topics`, "repo_topics", "core"),
-  route(`/repos/${owner}/${repo}/community/profile`, "community_profile", "core"),
-  route(`/repos/${owner}/${repo}/forks`, "fork_list", "core"),
-  route(`/repos/${owner}/${repo}/stargazers`, "stargazer_list", "core"),
-  route(`/repos/${owner}/${repo}/subscribers`, "subscriber_list", "core"),
-  route(`/repos/${owner}/${repo}/deployments`, "deployment_list", "core"),
-  route(`/repos/${owner}/${repo}/events`, "repo_event_list", "core"),
-  route(`/networks/${owner}/${repo}/events`, "network_event_list", "core"),
-  route(`/repos/${owner}/${repo}/stats/contributors`, "repo_stats_contributors", "core"),
-  route(`/repos/${owner}/${repo}/stats/commit_activity`, "repo_stats_commit_activity", "core"),
-  route(`/repos/${owner}/${repo}/stats/code_frequency`, "repo_stats_code_frequency", "core"),
-  route(`/repos/${owner}/${repo}/stats/participation`, "repo_stats_participation", "core"),
-  route(`/repos/${owner}/${repo}/stats/punch_card`, "repo_stats_punch_card", "core"),
-  route(`/repos/${owner}/${repo}/git/blobs/${sha}`, "git_blob", "core"),
-  route(`/repos/${owner}/${repo}/git/commits/${sha}`, "git_commit", "core"),
-  route(`/repos/${owner}/${repo}/git/trees/${sha}`, "git_tree", "core"),
-  route(`/repos/${owner}/${repo}/git/ref/(?<gitRef>.+)`, "git_ref", "core"),
-  route(`/repos/${owner}/${repo}/git/matching-refs/(?<gitRef>.+)`, "git_matching_refs", "core"),
-  route(`/repos/${owner}/${repo}/actions/workflows`, "workflow_list", "core"),
-  route(`/repos/${owner}/${repo}/actions/workflows/(?<workflow>[^/?#]+)`, "workflow_view", "core"),
-  route(
-    `/repos/${owner}/${repo}/actions/workflows/(?<workflow>[^/?#]+)/runs`,
-    "workflow_run_list",
-    "core",
-    { fullResponseCap: true },
-  ),
-  route(`/repos/${owner}/${repo}/releases`, "release_list", "core"),
-  route(`/repos/${owner}/${repo}/releases/latest`, "release_latest", "core"),
-  route(`/repos/${owner}/${repo}/releases/tags/${tag}`, "release_view", "core"),
-  route(`/repos/${owner}/${repo}/releases/${id}`, "release_view", "core"),
-  route(`/repos/${owner}/${repo}/releases/${id}/assets`, "release_assets", "core"),
-  route(`/repos/${owner}/${repo}/releases/assets/${id}`, "release_asset", "core"),
-  route("/search/issues", "search_issues", "search", { search: true }),
-  route("/search/code", "search_code", "search", { search: true }),
-  route("/search/commits", "search_commits", "search", { search: true }),
-  route("/search/repositories", "search_repositories", "search", { search: true }),
-  route("/rate_limit", "rate_limit", "core"),
-];
-
-function route(
-  path: string,
-  kind: string,
-  resource: string,
-  extra: Partial<RouteRule> = {},
-): RouteRule {
-  return {
-    pattern: new RegExp(`^${path}$`),
-    kind,
-    resource,
-    cacheable: true,
-    ...extra,
-  };
-}
+const rules = ROUTES;
 
 export function defaultPolicy(owners: string): PoolPolicy {
   return {
@@ -312,7 +134,7 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
     const info: RouteInfo = {
       kind: rule.kind,
       resource: rule.resource,
-      routeKey: normalizeRouteKey(request.method, request.path),
+      routeKey: routeKeyForMatch(request.method, rule, match),
       publicOnly: !allowedOwner,
       cacheable: rule.cacheable,
       largePayload: rule.largePayload === true,
@@ -416,27 +238,13 @@ function validateRepositorySearchQuery(query: Record<string, string | string[]> 
 }
 
 export function normalizeRouteKey(method: string, path: string): string {
-  const routePath = new RegExp(`^/users/${loginPath}$`).test(path) ? "/users/:login" : path;
-  return `${method.toUpperCase()} ${routePath
-    .replace(new RegExp(`^/users/${loginPath}/`), "/users/:login/")
-    .replace(/^\/orgs\/[A-Za-z0-9_.-]+/, "/orgs/:org")
-    .replace(/\/gists\/[0-9A-Fa-f]+/g, "/gists/:id")
-    .replace(/\/pulls\/[0-9]+/g, "/pulls/:number")
-    .replace(/\/issues\/[0-9]+/g, "/issues/:number")
-    .replace(/\/comments\/[0-9]+/g, "/comments/:id")
-    .replace(/\/commits\/[0-9A-Fa-f]{7,64}/g, "/commits/:sha")
-    .replace(/\/comments\/[0-9]+/g, "/comments/:id")
-    .replace(/\/actions\/runs\/[0-9]+/g, "/actions/runs/:id")
-    .replace(/\/actions\/jobs\/[0-9]+/g, "/actions/jobs/:id")
-    .replace(/\/check-runs\/[0-9]+/g, "/check-runs/:id")
-    .replace(/\/milestones\/[0-9]+/g, "/milestones/:id")
-    .replace(/\/git\/(blobs|commits|trees)\/[0-9A-Fa-f]{7,64}/g, "/git/$1/:sha")
-    .replace(/\/git\/ref\/.+/g, "/git/ref/:ref")
-    .replace(/\/git\/matching-refs\/.+/g, "/git/matching-refs/:ref")
-    .replace(/\/actions\/workflows\/[^/]+\/runs/g, "/actions/workflows/:workflow/runs")
-    .replace(/\/actions\/workflows\/[^/]+/g, "/actions/workflows/:workflow")
-    .replace(/\/releases\/assets\/[0-9]+/g, "/releases/assets/:id")
-    .replace(/\/releases\/[0-9]+/g, "/releases/:id")}`;
+  for (const route of rules) {
+    const match = route.pattern.exec(path);
+    if (match !== null) {
+      return routeKeyForMatch(method, route, match);
+    }
+  }
+  return `${method.toUpperCase()} ${path}`;
 }
 
 function requireText(value: unknown, field: string): string {

@@ -1158,7 +1158,7 @@ function headerInt(headers: Headers, name: string): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
-function publicApiRoute(route: RouteInfo): boolean {
+export function publicApiRoute(route: Pick<RouteInfo, "kind">): boolean {
   switch (route.kind) {
     case "repo_view":
     case "user_repo_list":

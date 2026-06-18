@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sanitizeGitHubResponse } from "../src/github-sanitize";
 import type { RouteInfo } from "../src/types";
+import type { RouteKind } from "../src/route-manifest";
 
 describe("GitHub response sanitizer", () => {
   it("preserves public app permissions while stripping repo-token fields", () => {
@@ -74,7 +75,7 @@ describe("GitHub response sanitizer", () => {
   });
 });
 
-function route(kind: string): RouteInfo {
+function route(kind: RouteKind): RouteInfo {
   return {
     kind,
     owner: "openclaw",

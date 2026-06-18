@@ -365,7 +365,7 @@ describe("public repo guard", () => {
 
   it("does not treat ambiguous search responses as public repo proof", () => {
     expect(anonymousGitHubResponseProvesPublicRepo(route())).toBe(true);
-    for (const kind of ["search_issues", "search_code", "search_commits"]) {
+    for (const kind of ["search_issues", "search_code", "search_commits"] as const) {
       expect(anonymousGitHubResponseProvesPublicRepo({ ...route(), kind })).toBe(false);
     }
     const { owner: _owner, repo: _repo, ...ownerlessRoute } = route();
