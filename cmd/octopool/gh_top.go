@@ -29,32 +29,49 @@ type ghTopOptions struct {
 	positionals []string
 }
 
-func runGHTopLevel(ctx context.Context, args []string, stdout io.Writer) (bool, error) {
+type ghAction uint8
+
+const (
+	ghDelegate ghAction = iota
+	ghComplete
+	ghFail
+)
+
+type ghResult struct {
+	action ghAction
+	err    error
+}
+
+type ghTopHandler func(context.Context, []string, io.Writer) (bool, error)
+
+var ghTopHandlers = map[string]ghTopHandler{
+	"pr":       runGHPR,
+	"issue":    runGHIssue,
+	"run":      runGHRun,
+	"repo":     runGHRepo,
+	"release":  runGHRelease,
+	"workflow": runGHWorkflow,
+	"label":    runGHLabel,
+	"gist":     runGHGist,
+	"search":   runGHSearch,
+}
+
+func runGHTopLevel(ctx context.Context, args []string, stdout io.Writer) ghResult {
 	if len(args) < 2 {
-		return false, nil
+		return ghResult{action: ghDelegate}
 	}
-	switch args[0] {
-	case "pr":
-		return runGHPR(ctx, args[1:], stdout)
-	case "issue":
-		return runGHIssue(ctx, args[1:], stdout)
-	case "run":
-		return runGHRun(ctx, args[1:], stdout)
-	case "repo":
-		return runGHRepo(ctx, args[1:], stdout)
-	case "release":
-		return runGHRelease(ctx, args[1:], stdout)
-	case "workflow":
-		return runGHWorkflow(ctx, args[1:], stdout)
-	case "label":
-		return runGHLabel(ctx, args[1:], stdout)
-	case "gist":
-		return runGHGist(ctx, args[1:], stdout)
-	case "search":
-		return runGHSearch(ctx, args[1:], stdout)
-	default:
-		return false, nil
+	handler, ok := ghTopHandlers[args[0]]
+	if !ok {
+		return ghResult{action: ghDelegate}
 	}
+	handled, err := handler(ctx, args[1:], stdout)
+	if err != nil {
+		return ghResult{action: ghFail, err: err}
+	}
+	if handled {
+		return ghResult{action: ghComplete}
+	}
+	return ghResult{action: ghDelegate}
 }
 
 func parseGHTopOptions(args []string) (ghTopOptions, bool, error) {

@@ -31,17 +31,20 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 		return nil
 	}
 	if args[0] != "api" {
-		handled, err := runGHTopLevel(ctx, args, stdout)
-		if err != nil {
-			if shouldRunRealGH(err) {
-				return execRealGHAfterLocalFallback(ctx, args, stdout, stderr, err)
-			}
-			return err
-		}
-		if handled {
+		result := runGHTopLevel(ctx, args, stdout)
+		switch result.action {
+		case ghComplete:
 			return nil
+		case ghFail:
+			if shouldRunRealGH(result.err) {
+				return execRealGHAfterLocalFallback(ctx, args, stdout, stderr, result.err)
+			}
+			return result.err
+		case ghDelegate:
+			return execRealGH(ctx, args, stdout, stderr)
+		default:
+			return errors.New("invalid gh dispatch outcome")
 		}
-		return execRealGH(ctx, args, stdout, stderr)
 	}
 	request, fallback, err := parseGHAPIArgs(args[1:])
 	if err != nil {
