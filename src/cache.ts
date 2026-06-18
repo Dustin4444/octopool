@@ -1,6 +1,7 @@
 import { hashToken } from "./auth";
 import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
+import { defaultGitHubJSONAccept } from "./github-response";
 import { cachePolicyForRouteKind } from "./route-manifest";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
@@ -244,7 +245,7 @@ function cacheVaryHeaders(headers: RelayRequest["headers"]): Record<string, stri
   const accept = headers?.accept;
   const version = headers?.["x-github-api-version"];
   const publicShape = headers?.["x-octopool-public-shape"];
-  if (accept !== undefined && !defaultJSONAccept(accept)) {
+  if (accept !== undefined && !defaultGitHubJSONAccept(accept, false)) {
     out.accept = accept.toLowerCase();
   }
   if (version !== undefined) {
@@ -288,15 +289,6 @@ function defaultQueryValue(key: string, value: string | string[]): boolean {
     return false;
   }
   return (key === "page" && value === "1") || (key === "per_page" && value === "30");
-}
-
-function defaultJSONAccept(value: string): boolean {
-  const normalized = value.toLowerCase();
-  return (
-    normalized === "application/vnd.github+json" ||
-    normalized === "application/json" ||
-    normalized === "application/vnd.github.v3+json"
-  );
 }
 
 function closedPR(response?: GitHubRelayResponse): boolean {

@@ -2,7 +2,13 @@ import { bytesToBase64 } from "./encoding";
 import { HttpError, parsePositiveInt } from "./http";
 import { responseCapBytes } from "./github";
 import { gitRefResponse, parseGitUploadPackAdvertisement } from "./github-git";
-import { decodeURIComponentSafe, encodedPathSegments } from "./github-path";
+import {
+  appendRelayQuery,
+  decodeURIComponentSafe,
+  encodedPathSegments,
+  safeRelativePath,
+} from "./github-path";
+import { defaultGitHubJSONAccept, githubResponseHeaders } from "./github-response";
 import {
   parseActionsJobGroupsJSON,
   parseActionsJobHTML,
@@ -227,7 +233,7 @@ function summaryPageRequest(
     request.method !== "GET" ||
     route.owner === undefined ||
     route.repo === undefined ||
-    !defaultJSONAccept(request.headers?.accept)
+    !defaultGitHubJSONAccept(request.headers?.accept)
   ) {
     return undefined;
   }
@@ -408,7 +414,7 @@ function gitRefRequest(env: Env, request: RelayRequest, route: RouteInfo): WebRe
     route.owner === undefined ||
     route.repo === undefined ||
     (route.kind !== "git_ref" && route.kind !== "git_matching_refs") ||
-    !defaultJSONAccept(request.headers?.accept) ||
+    !defaultGitHubJSONAccept(request.headers?.accept) ||
     Object.keys(request.query ?? {}).length !== 0
   ) {
     return undefined;
@@ -565,7 +571,7 @@ function actionsPageRequest(
     request.method !== "GET" ||
     route.owner === undefined ||
     route.repo === undefined ||
-    !defaultJSONAccept(request.headers?.accept)
+    !defaultGitHubJSONAccept(request.headers?.accept)
   ) {
     return undefined;
   }
@@ -922,7 +928,7 @@ function rawContentRequest(
   if (request.method !== "GET" || route.owner === undefined || route.repo === undefined) {
     return undefined;
   }
-  if (route.kind !== "contents" || !defaultJSONAccept(request.headers?.accept)) {
+  if (route.kind !== "contents" || !defaultGitHubJSONAccept(request.headers?.accept)) {
     return undefined;
   }
   const ref = stringQuery(request.query, "ref");
@@ -930,7 +936,7 @@ function rawContentRequest(
     return undefined;
   }
   const contentPath = contentPathFromRequest(request, route);
-  if (contentPath === undefined || !safeRelativePath(contentPath)) {
+  if (contentPath === undefined || !safeRelativePath(contentPath, 1024)) {
     return undefined;
   }
   const rawURL = `https://raw.githubusercontent.com/${encodedPathSegments([route.owner, route.repo, ref, contentPath])}`;
@@ -973,11 +979,11 @@ function rawContentRequest(
 }
 
 function releaseRequest(env: Env, request: RelayRequest, route: RouteInfo): WebRequest | undefined {
-  if (!releaseRoute(route) || !defaultJSONAccept(request.headers?.accept)) {
+  if (!releaseRoute(route) || !defaultGitHubJSONAccept(request.headers?.accept)) {
     return undefined;
   }
   const url = new URL(`https://api.github.com${request.path}`);
-  appendQuery(url, request.query);
+  appendRelayQuery(url, request.query);
   const ref = stringQuery(request.query, "ref");
   if (ref !== undefined) {
     return undefined;
@@ -1017,7 +1023,7 @@ function releasePageRequest(
     route.owner === undefined ||
     route.repo === undefined ||
     request.headers?.["x-octopool-public-shape"] !== RELEASE_SUMMARY_SHAPE ||
-    !defaultJSONAccept(request.headers?.accept) ||
+    !defaultGitHubJSONAccept(request.headers?.accept) ||
     Object.keys(request.query ?? {}).length !== 0
   ) {
     return undefined;
@@ -1071,12 +1077,12 @@ function publicApiRequest(
   if (
     request.method !== "GET" ||
     !publicApiRoute(route) ||
-    !defaultJSONAccept(request.headers?.accept)
+    !defaultGitHubJSONAccept(request.headers?.accept)
   ) {
     return undefined;
   }
   const url = new URL(`https://api.github.com${request.path}`);
-  appendQuery(url, request.query);
+  appendRelayQuery(url, request.query);
   return {
     url: url.toString(),
     headers: {
@@ -1174,18 +1180,6 @@ function publicGist(value: unknown): boolean {
   return typeof value === "object" && value !== null && "public" in value && value.public === true;
 }
 
-function appendQuery(url: URL, query: Record<string, string | string[]> | undefined): void {
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        url.searchParams.append(key, item);
-      }
-    } else {
-      url.searchParams.set(key, value);
-    }
-  }
-}
-
 function parsePublicReleaseBody(body: Uint8Array, route: RouteInfo): unknown | undefined {
   let parsed: unknown;
   try {
@@ -1274,38 +1268,8 @@ function decodePathComponent(value: string): string | undefined {
   }
 }
 
-function defaultJSONAccept(value: string | undefined): boolean {
-  if (value === undefined || value.trim() === "") {
-    return true;
-  }
-  const normalized = value.toLowerCase();
-  return (
-    normalized === "application/vnd.github+json" ||
-    normalized === "application/json" ||
-    normalized === "application/vnd.github.v3+json"
-  );
-}
-
 function safeGitRefPath(value: string): boolean {
-  return (
-    value.length <= 200 &&
-    !value.includes("\\") &&
-    !value.includes("\0") &&
-    !value.startsWith("/") &&
-    !value.endsWith("/") &&
-    value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..")
-  );
-}
-
-function safeRelativePath(value: string): boolean {
-  return (
-    value.length <= 1024 &&
-    !value.includes("\\") &&
-    !value.includes("\0") &&
-    !value.startsWith("/") &&
-    !value.endsWith("/") &&
-    value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..")
-  );
+  return safeRelativePath(value, 200);
 }
 
 function stringQuery(
@@ -1317,26 +1281,7 @@ function stringQuery(
 }
 
 function webHeaders(headers: Headers, contentType: string): Record<string, string> {
-  const out: Record<string, string> = { "content-type": contentType };
-  for (const key of [
-    "etag",
-    "last-modified",
-    "cache-control",
-    "link",
-    "x-ratelimit-limit",
-    "x-ratelimit-remaining",
-    "x-ratelimit-reset",
-    "x-ratelimit-resource",
-    "x-ratelimit-used",
-    "retry-after",
-    "x-github-request-id",
-  ]) {
-    const value = headers.get(key);
-    if (value !== null) {
-      out[key] = value;
-    }
-  }
-  return out;
+  return githubResponseHeaders(headers, { contentType, includeCacheControl: true });
 }
 
 function readWebBody(response: Response, capBytes: number): Promise<Uint8Array> {

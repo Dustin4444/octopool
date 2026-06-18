@@ -1,5 +1,7 @@
 import { bytesToBase64 } from "./encoding";
 import { githubToken } from "./github-auth";
+import { appendRelayQuery } from "./github-path";
+import { githubResponseHeaders } from "./github-response";
 import { HttpError, parsePositiveInt } from "./http";
 import { readBodyCapped } from "./response-body";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
@@ -47,7 +49,7 @@ async function callGitHubAPI(
   const { body, encoding } = decodeBody(bodyBytes, contentType);
   return {
     status: response.status,
-    headers: filteredHeaders(response.headers),
+    headers: githubResponseHeaders(response.headers),
     body,
     body_encoding: encoding,
   };
@@ -106,8 +108,8 @@ function isAllowedLogRedirectHost(hostname: string): boolean {
 }
 
 function logRedirectHeaders(original: Headers, redirected: Headers): Record<string, string> {
-  const headers = filteredHeaders(redirected);
-  const originalHeaders = filteredHeaders(original);
+  const headers = githubResponseHeaders(redirected);
+  const originalHeaders = githubResponseHeaders(original);
   for (const key of [
     "x-ratelimit-limit",
     "x-ratelimit-remaining",
@@ -152,15 +154,7 @@ export function rateFromHeaders(headers: Record<string, string>): {
 
 function githubUrl(request: RelayRequest): string {
   const url = new URL(`https://api.github.com${request.path}`);
-  for (const [key, value] of Object.entries(request.query ?? {})) {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        url.searchParams.append(key, item);
-      }
-    } else {
-      url.searchParams.set(key, value);
-    }
-  }
+  appendRelayQuery(url, request.query);
   return url.toString();
 }
 
@@ -211,30 +205,6 @@ function decodeBody(
     return { body: text, encoding: "text" };
   }
   return { body: bytesToBase64(bytes), encoding: "base64" };
-}
-
-function filteredHeaders(headers: Headers): Record<string, string> {
-  const allowed = [
-    "content-type",
-    "etag",
-    "last-modified",
-    "link",
-    "x-ratelimit-limit",
-    "x-ratelimit-remaining",
-    "x-ratelimit-reset",
-    "x-ratelimit-resource",
-    "x-ratelimit-used",
-    "retry-after",
-    "x-github-request-id",
-  ];
-  const out: Record<string, string> = {};
-  for (const key of allowed) {
-    const value = headers.get(key);
-    if (value !== null) {
-      out[key] = value;
-    }
-  }
-  return out;
 }
 
 function parseHeaderInt(value: string | undefined): number | undefined {
