@@ -29,6 +29,11 @@ type ghTopOptions struct {
 	positionals []string
 }
 
+const (
+	relayPageSize = 100
+	maxRelayPages = 10
+)
+
 type ghAction uint8
 
 const (
@@ -401,11 +406,11 @@ func relayHydratedPRView(ctx context.Context, stdout io.Writer, repo string, num
 func prCheckItemsForSHA(ctx context.Context, client ghRelayClient, repo string, sha string) ([]any, error) {
 	checkRuns := []any{}
 	totalCheckRuns := 0
-	for page := 1; page <= 10; page++ {
+	for page := 1; page <= maxRelayPages; page++ {
 		request := ghAPIRequest{
 			method: "GET",
 			path:   repoPath(repo, "commits", sha, "check-runs"),
-			query:  map[string]any{"per_page": "100", "page": strconv.Itoa(page)},
+			query:  map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
 		}
 		checkRunsEnvelope, err := client.do(ctx, request)
 		if err != nil {
@@ -419,9 +424,12 @@ func prCheckItemsForSHA(ctx context.Context, client ghRelayClient, repo string, 
 			totalCheckRuns = total
 		}
 		checkRuns = append(checkRuns, items...)
-		if len(checkRuns) >= totalCheckRuns || len(items) < 100 {
+		if len(checkRuns) >= totalCheckRuns || len(items) < relayPageSize {
 			break
 		}
+	}
+	if len(checkRuns) < totalCheckRuns {
+		return nil, localFallbackError{Reason: "pagination_exhausted"}
 	}
 	statusEnvelope, err := client.do(ctx, ghAPIRequest{
 		method: "GET",
@@ -443,12 +451,12 @@ func relayIssueList(ctx context.Context, stdout io.Writer, request ghAPIRequest,
 		return err
 	}
 	limit := desiredLimit(opts)
-	perPage := 100
 	filtered := make([]map[string]any, 0, limit)
-	for page := 1; page <= 10 && len(filtered) < limit; page++ {
+	complete := false
+	for page := 1; page <= maxRelayPages && len(filtered) < limit; page++ {
 		paged := request
 		paged.query = cloneQuery(request.query)
-		paged.query["per_page"] = strconv.Itoa(perPage)
+		paged.query["per_page"] = strconv.Itoa(relayPageSize)
 		paged.query["page"] = strconv.Itoa(page)
 		envelope, err := client.do(ctx, paged)
 		if err != nil {
@@ -470,9 +478,13 @@ func relayIssueList(ctx context.Context, stdout io.Writer, request ghAPIRequest,
 				}
 			}
 		}
-		if len(items) < perPage {
+		if len(items) < relayPageSize {
+			complete = true
 			break
 		}
+	}
+	if len(filtered) < limit && !complete {
+		return localFallbackError{Reason: "pagination_exhausted"}
 	}
 	raw, err := json.Marshal(filtered)
 	if err != nil {
@@ -648,11 +660,12 @@ func relayGitHubSearch(
 
 func relayPagedArray(ctx context.Context, client ghRelayClient, path string) ([]any, error) {
 	items := []any{}
-	for page := 1; page <= 10; page++ {
+	complete := false
+	for page := 1; page <= maxRelayPages; page++ {
 		envelope, err := client.do(ctx, ghAPIRequest{
 			method: "GET",
 			path:   path,
-			query:  map[string]any{"per_page": "100", "page": strconv.Itoa(page)},
+			query:  map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
 		})
 		if err != nil {
 			return nil, err
@@ -666,9 +679,13 @@ func relayPagedArray(ctx context.Context, client ghRelayClient, path string) ([]
 			return nil, err
 		}
 		items = append(items, pageItems...)
-		if len(pageItems) < 100 {
+		if len(pageItems) < relayPageSize {
+			complete = true
 			break
 		}
+	}
+	if !complete {
+		return nil, localFallbackError{Reason: "pagination_exhausted"}
 	}
 	return items, nil
 }
