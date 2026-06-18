@@ -1,5 +1,6 @@
 import { authenticateCaller } from "./auth";
 import {
+  type CachedGitHubResponse,
   githubCacheKey,
   readGitHubCache,
   readStaleGitHubCache,
@@ -22,7 +23,43 @@ import {
   recordPublicGitHubRepo,
 } from "./public-repos";
 import { capabilitiesForRouteKind } from "./route-manifest";
-import type { GitHubRelayResponse, Identity, RouteInfo, SelectionRequest } from "./types";
+import type {
+  GitHubRelayResponse,
+  Identity,
+  RecordResult,
+  RelayRequest,
+  RouteInfo,
+  SelectionRequest,
+  SelectionResult,
+} from "./types";
+
+type RelayBase = {
+  env: Env;
+  ctx: ExecutionContext;
+  requestId: string;
+  started: number;
+  request: RelayRequest;
+  callerId: string;
+  coordinator: DurableObjectStub<PoolCoordinator>;
+};
+
+type ActiveRelay = RelayBase & {
+  route: RouteInfo;
+  cacheEnabled: boolean;
+  cacheKey: string | undefined;
+  cacheFillToken: string | undefined;
+  cacheStatus: "miss" | "bypass";
+  cacheable: boolean;
+  identity: Identity | undefined;
+};
+
+type RelaySuccess = {
+  github: GitHubRelayResponse;
+  identity?: Identity;
+  backend?: "web" | "github_public";
+  leaseReason?: SelectionResult["reason"];
+  rate?: ReturnType<typeof rateFromHeaders>;
+};
 
 export async function relayGitHub(
   request: Request,
@@ -40,332 +77,384 @@ export async function relayGitHub(
   if (policy === null) {
     throw new HttpError(404, "pool_not_found", "Pool not found");
   }
-  const coordinator = env.POOL_COORDINATOR.getByName(`pool:${relayRequest.pool}`);
-  let route: ReturnType<typeof classifyRoute> | undefined;
-  let cacheKey: string | undefined;
-  let identity: Identity | undefined;
-  let cacheFillToken: string | undefined;
-  let auditCacheStatus: "hit" | "miss" | "bypass" | "stale" | "unknown" = "unknown";
-  let auditCacheable = false;
+  const base: RelayBase = {
+    env,
+    ctx,
+    requestId,
+    started,
+    request: relayRequest,
+    callerId: caller.id,
+    coordinator: env.POOL_COORDINATOR.getByName(`pool:${relayRequest.pool}`),
+  };
+  let active: ActiveRelay | undefined;
   try {
-    route = await verifyPRStateHint(env, relayRequest, classifyRoute(relayRequest, policy));
-    const cacheEnabled = shouldUseGitHubCache(relayRequest, route);
-    cacheKey = cacheEnabled
-      ? await githubCacheKey(relayRequest.pool, relayRequest, route)
-      : undefined;
-    auditCacheable = cacheKey !== undefined;
-    auditCacheStatus = cacheKey === undefined ? "bypass" : "miss";
-    if (cacheKey !== undefined) {
-      const cached = await readGitHubCache(env, cacheKey, ctx);
-      if (cached !== undefined) {
-        if (await cachedResponseAvailable(env, relayRequest.pool, route, cached, coordinator)) {
-          return serveCachedGitHubResponse(env, ctx, {
-            requestId,
-            callerId: caller.id,
-            pool: relayRequest.pool,
-            route,
-            cached,
-            started,
-            cacheStatus: "hit",
-          });
-        }
-      }
+    active = await prepareRelay(base, policy);
+    return await executeRelay(active);
+  } catch (error) {
+    return await handleRelayError(base, active, error);
+  } finally {
+    if (active?.cacheKey !== undefined) {
+      await finishGitHubCacheFill(active.coordinator, active.cacheKey, active.cacheFillToken);
     }
-    if (cacheKey !== undefined && route.state_hint_source === "cached") {
-      route = await verifyPRStateHintLive(env, relayRequest, route);
-      cacheKey = cacheEnabled
-        ? await githubCacheKey(relayRequest.pool, relayRequest, route)
-        : undefined;
-      auditCacheable = cacheKey !== undefined;
-      auditCacheStatus = cacheKey === undefined ? "bypass" : "miss";
-      if (cacheKey !== undefined) {
-        const cached = await readGitHubCache(env, cacheKey, ctx);
-        if (cached !== undefined) {
-          if (await cachedResponseAvailable(env, relayRequest.pool, route, cached, coordinator)) {
-            return serveCachedGitHubResponse(env, ctx, {
-              requestId,
-              callerId: caller.id,
-              pool: relayRequest.pool,
-              route,
-              cached,
-              started,
-              cacheStatus: "hit",
-            });
-          }
-        }
-      }
-    }
-    if (cacheKey !== undefined) {
-      const fill = await coalesceGitHubCacheMiss(env, coordinator, cacheKey);
-      cacheFillToken = fill.leaseToken;
-      if (
-        fill.cached !== undefined &&
-        (await cachedResponseAvailable(env, relayRequest.pool, route, fill.cached, coordinator))
-      ) {
-        return serveCachedGitHubResponse(env, ctx, {
-          requestId,
-          callerId: caller.id,
-          pool: relayRequest.pool,
-          route,
-          cached: fill.cached,
-          started,
-          cacheStatus: "hit",
-          coalesced: true,
-        });
-      }
-    }
-    if (cacheKey !== undefined) {
-      const webGitHub = await callGitHubWeb(env, relayRequest, route);
-      if (webGitHub !== undefined) {
-        const sanitizedWebGitHub = sanitizeGitHubResponse(route, webGitHub);
-        if (anonymousGitHubResponseProvesPublicRepo(route)) {
-          await Promise.all([
-            recordPublicGitHubRepo(env, route),
-            publishGitHubCache(env, cacheKey, relayRequest, route, sanitizedWebGitHub),
-          ]);
-        } else {
-          await ensurePublicGitHubRepo(env, route, undefined, coordinator);
-          await publishGitHubCache(env, cacheKey, relayRequest, route, sanitizedWebGitHub);
-        }
-        await finishGitHubCacheFill(coordinator, cacheKey, cacheFillToken);
-        ctx.waitUntil(
-          insertAudit(env, {
-            requestId,
-            callerId: caller.id,
-            pool: relayRequest.pool,
-            routeKey: route.routeKey,
-            routeKind: route.kind,
-            status: sanitizedWebGitHub.status,
-            durationMs: Date.now() - started,
-            cacheStatus: auditCacheStatus,
-            cacheable: auditCacheable,
-          }),
-        );
-        return jsonResponse({
-          status: sanitizedWebGitHub.status,
-          headers: sanitizedWebGitHub.headers,
-          body: sanitizedWebGitHub.body,
-          body_encoding: sanitizedWebGitHub.body_encoding,
-          relay: {
-            pool: relayRequest.pool,
-            request_id: requestId,
-            cacheable: route.cacheable,
-            cache: "miss",
-            stale_ok: false,
-            route_kind: route.kind,
-            backend: "web",
-          },
-        });
-      }
-    }
-    await ensurePublicGitHubRepo(env, route, undefined, coordinator);
-    if (webOnlyRoute(route)) {
-      throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
-        reason: "web_only_unavailable",
-      });
-    }
-    if (capabilitiesForRouteKind(route.kind).fallback === "github_public") {
-      const github = sanitizeGitHubResponse(
-        route,
-        await callPublicGitHub(env, relayRequest, route),
-      );
-      const localFallbackReason = githubResponseLocalFallbackReason(
-        github.status,
-        rateFromHeaders(github.headers),
-      );
-      if (localFallbackReason !== undefined) {
-        throw new HttpError(
-          424,
-          "fallback_local",
-          "Run this request with local GitHub credentials",
-          {
-            reason: localFallbackReason,
-          },
-        );
-      }
-      if (cacheKey !== undefined) {
-        await publishGitHubCache(env, cacheKey, relayRequest, route, github);
-        await finishGitHubCacheFill(coordinator, cacheKey, cacheFillToken);
-      }
-      ctx.waitUntil(
-        insertAudit(env, {
-          requestId,
-          callerId: caller.id,
-          pool: relayRequest.pool,
-          routeKey: route.routeKey,
-          routeKind: route.kind,
-          status: github.status,
-          durationMs: Date.now() - started,
-          cacheStatus: auditCacheStatus,
-          cacheable: auditCacheable,
-        }),
-      );
-      return jsonResponse({
-        status: github.status,
-        headers: github.headers,
-        body: github.body,
-        body_encoding: github.body_encoding,
-        relay: {
-          pool: relayRequest.pool,
-          request_id: requestId,
-          cacheable: route.cacheable,
-          cache: cacheKey === undefined ? "bypass" : "miss",
-          stale_ok: false,
-          route_kind: route.kind,
-          backend: "github_public",
-        },
-      });
-    }
-    const identities = await loadIdentities(env, relayRequest.pool, route);
-    if (identities.length === 0) {
-      throw new HttpError(503, "no_identity", "No active identity can serve this route");
-    }
-    const attemptedIdentityIds = new Set<string>();
-    let fallbackReason = "identity_pool_depleted";
-    for (let attempt = 0; attempt < identities.length; attempt++) {
-      const candidates = identities
-        .filter((candidate) => !attemptedIdentityIds.has(candidate.id))
-        .map((candidate) => ({ id: candidate.id, weight: candidate.weight }));
-      if (candidates.length === 0) {
-        break;
-      }
-      const selectionRequest: SelectionRequest = {
-        pool: relayRequest.pool,
-        routeKey: route.routeKey,
-        resource: route.resource,
-        candidates,
-      };
-      const selection = await selectIdentity(coordinator, selectionRequest);
-      identity = findIdentity(identities, selection.identityId);
-      const rawGitHub = await callGitHub(env, identity, relayRequest, route);
-      const github = sanitizeGitHubResponse(route, rawGitHub);
-      const rate = rateFromHeaders(github.headers);
-      const localFallbackReason = githubResponseLocalFallbackReason(github.status, rate);
-      if (localFallbackReason !== undefined) {
-        attemptedIdentityIds.add(identity.id);
-        fallbackReason = localFallbackReason;
-        await coordinator.recordResult({
-          identityId: identity.id,
-          routeKey: route.routeKey,
-          resource: route.resource,
-          status: github.status,
-          rate,
-        });
-        continue;
-      }
-      if (cacheKey !== undefined) {
-        await publishGitHubCache(env, cacheKey, relayRequest, route, github, identity);
-        await finishGitHubCacheFill(coordinator, cacheKey, cacheFillToken);
-      }
-      ctx.waitUntil(
-        Promise.all([
-          coordinator.recordResult({
-            identityId: identity.id,
-            routeKey: route.routeKey,
-            resource: route.resource,
-            status: github.status,
-            rate,
-          }),
-          insertAudit(env, {
-            requestId,
-            callerId: caller.id,
-            pool: relayRequest.pool,
-            routeKey: route.routeKey,
-            routeKind: route.kind,
-            identityId: identity.id,
-            status: github.status,
-            durationMs: Date.now() - started,
-            cacheStatus: auditCacheStatus,
-            cacheable: auditCacheable,
-          }),
-        ]),
-      );
-      return jsonResponse({
-        status: github.status,
-        headers: github.headers,
-        body: github.body,
-        body_encoding: github.body_encoding,
-        identity: {
-          id: identity.id,
-          kind: identity.kind,
-        },
-        relay: {
-          pool: relayRequest.pool,
-          request_id: requestId,
-          cacheable: route.cacheable,
-          cache: cacheKey === undefined ? "bypass" : "miss",
-          stale_ok: false,
-          route_kind: route.kind,
-          lease_reason: selection.reason,
-        },
-      });
-    }
-    if (cacheKey !== undefined && staleFallbackReason(fallbackReason)) {
-      const cached = await readStaleGitHubCache(env, cacheKey, route);
-      if (
-        cached !== undefined &&
-        (await cachedResponseAvailable(env, relayRequest.pool, route, cached, coordinator, true))
-      ) {
-        await finishGitHubCacheFill(coordinator, cacheKey, cacheFillToken);
-        return serveCachedGitHubResponse(env, ctx, {
-          requestId,
-          callerId: caller.id,
-          pool: relayRequest.pool,
-          route,
-          cached,
-          started,
-          cacheStatus: "stale",
-          staleReason: fallbackReason,
-        });
-      }
-    }
+  }
+}
+
+async function prepareRelay(
+  base: RelayBase,
+  policy: NonNullable<Awaited<ReturnType<typeof loadPoolPolicy>>>,
+): Promise<ActiveRelay> {
+  const route = await verifyPRStateHint(
+    base.env,
+    base.request,
+    classifyRoute(base.request, policy),
+  );
+  const cacheEnabled = shouldUseGitHubCache(base.request, route);
+  const cacheKey = cacheEnabled
+    ? await githubCacheKey(base.request.pool, base.request, route)
+    : undefined;
+  return {
+    ...base,
+    route,
+    cacheEnabled,
+    cacheKey,
+    cacheFillToken: undefined,
+    cacheStatus: cacheKey === undefined ? "bypass" : "miss",
+    cacheable: cacheKey !== undefined,
+    identity: undefined,
+  };
+}
+
+async function executeRelay(state: ActiveRelay): Promise<Response> {
+  const cached = await readFreshRelayCache(state);
+  if (cached !== undefined) {
+    return serveCachedGitHubResponse(
+      state.env,
+      state.ctx,
+      cachedResponseParams(state, cached, "hit"),
+    );
+  }
+
+  const coalesced = await coalesceRelayCacheMiss(state);
+  if (coalesced !== undefined) {
+    return serveCachedGitHubResponse(
+      state.env,
+      state.ctx,
+      cachedResponseParams(state, coalesced, "hit", { coalesced: true }),
+    );
+  }
+
+  const web = await callTokenFreeBackend(state);
+  if (web !== undefined) {
+    return web;
+  }
+
+  await ensurePublicGitHubRepo(state.env, state.route, undefined, state.coordinator);
+  const fallback = capabilitiesForRouteKind(state.route.kind).fallback;
+  if (fallback === "local") {
+    throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
+      reason: "web_only_unavailable",
+    });
+  }
+  if (fallback === "github_public") {
+    return callPublicBackend(state);
+  }
+  return callIdentityPool(state);
+}
+
+async function readFreshRelayCache(state: ActiveRelay): Promise<CachedGitHubResponse | undefined> {
+  let cached = await readAvailableCache(state);
+  if (
+    cached !== undefined ||
+    state.cacheKey === undefined ||
+    state.route.state_hint_source !== "cached"
+  ) {
+    return cached;
+  }
+  state.route = await verifyPRStateHintLive(state.env, state.request, state.route);
+  state.cacheKey = state.cacheEnabled
+    ? await githubCacheKey(state.request.pool, state.request, state.route)
+    : undefined;
+  state.cacheStatus = state.cacheKey === undefined ? "bypass" : "miss";
+  state.cacheable = state.cacheKey !== undefined;
+  cached = await readAvailableCache(state);
+  return cached;
+}
+
+async function readAvailableCache(state: ActiveRelay): Promise<CachedGitHubResponse | undefined> {
+  if (state.cacheKey === undefined) {
+    return undefined;
+  }
+  const cached = await readGitHubCache(state.env, state.cacheKey, state.ctx);
+  if (
+    cached === undefined ||
+    !(await cachedResponseAvailable(
+      state.env,
+      state.request.pool,
+      state.route,
+      cached,
+      state.coordinator,
+    ))
+  ) {
+    return undefined;
+  }
+  return cached;
+}
+
+async function coalesceRelayCacheMiss(
+  state: ActiveRelay,
+): Promise<CachedGitHubResponse | undefined> {
+  if (state.cacheKey === undefined) {
+    return undefined;
+  }
+  const fill = await coalesceGitHubCacheMiss(state.env, state.coordinator, state.cacheKey);
+  state.cacheFillToken = fill.leaseToken;
+  if (
+    fill.cached === undefined ||
+    !(await cachedResponseAvailable(
+      state.env,
+      state.request.pool,
+      state.route,
+      fill.cached,
+      state.coordinator,
+    ))
+  ) {
+    return undefined;
+  }
+  return fill.cached;
+}
+
+async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | undefined> {
+  if (state.cacheKey === undefined) {
+    return undefined;
+  }
+  const response = await callGitHubWeb(state.env, state.request, state.route);
+  if (response === undefined) {
+    return undefined;
+  }
+  const github = sanitizeGitHubResponse(state.route, response);
+  if (anonymousGitHubResponseProvesPublicRepo(state.route)) {
+    await recordPublicGitHubRepo(state.env, state.route);
+  } else {
+    await ensurePublicGitHubRepo(state.env, state.route, undefined, state.coordinator);
+  }
+  return finalizeRelaySuccess(state, { github, backend: "web" });
+}
+
+async function callPublicBackend(state: ActiveRelay): Promise<Response> {
+  const github = sanitizeGitHubResponse(
+    state.route,
+    await callPublicGitHub(state.env, state.request, state.route),
+  );
+  const fallbackReason = githubResponseLocalFallbackReason(
+    github.status,
+    rateFromHeaders(github.headers),
+  );
+  if (fallbackReason !== undefined) {
     throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
       reason: fallbackReason,
     });
-  } catch (error) {
-    const reported = localFallbackError(error) ?? error;
-    if (cacheKey !== undefined) {
-      await finishGitHubCacheFill(coordinator, cacheKey, cacheFillToken);
-    }
-    const staleReason = staleFallbackReasonFromError(reported);
-    if (cacheKey !== undefined && route !== undefined && staleReason !== undefined) {
-      const cached = await readStaleGitHubCache(env, cacheKey, route);
-      if (
-        cached !== undefined &&
-        (await cachedResponseAvailable(env, relayRequest.pool, route, cached, coordinator, true))
-      ) {
-        return serveCachedGitHubResponse(env, ctx, {
-          requestId,
-          callerId: caller.id,
-          pool: relayRequest.pool,
-          route,
-          cached,
-          started,
-          cacheStatus: "stale",
-          staleReason,
-        });
-      }
-    }
-    const audit = auditError(reported);
-    const fallbackReason = auditFallbackReason(reported);
-    ctx.waitUntil(
-      insertAudit(env, {
-        requestId,
-        callerId: caller.id,
-        pool: relayRequest.pool,
-        routeKey: route?.routeKey ?? normalizeRouteKey(relayRequest.method, relayRequest.path),
-        routeKind: route?.kind ?? "denied",
-        status: audit.status,
-        errorCode: audit.code,
-        ...(fallbackReason === undefined ? {} : { fallbackReason }),
-        durationMs: Date.now() - started,
-        cacheStatus: auditCacheStatus,
-        cacheable: auditCacheable,
-        ...(identity === undefined ? {} : { identityId: identity.id }),
-      }),
-    );
-    throw reported;
   }
+  return finalizeRelaySuccess(state, { github, backend: "github_public" });
+}
+
+async function callIdentityPool(state: ActiveRelay): Promise<Response> {
+  const identities = await loadIdentities(state.env, state.request.pool, state.route);
+  if (identities.length === 0) {
+    throw new HttpError(503, "no_identity", "No active identity can serve this route");
+  }
+  const attemptedIdentityIds = new Set<string>();
+  let fallbackReason = "identity_pool_depleted";
+  for (let attempt = 0; attempt < identities.length; attempt++) {
+    const candidates = identities
+      .filter((candidate) => !attemptedIdentityIds.has(candidate.id))
+      .map((candidate) => ({ id: candidate.id, weight: candidate.weight }));
+    if (candidates.length === 0) {
+      break;
+    }
+    const selection = await selectIdentity(state.coordinator, {
+      pool: state.request.pool,
+      routeKey: state.route.routeKey,
+      resource: state.route.resource,
+      candidates,
+    });
+    const identity = findIdentity(identities, selection.identityId);
+    state.identity = identity;
+    const github = sanitizeGitHubResponse(
+      state.route,
+      await callGitHub(state.env, identity, state.request, state.route),
+    );
+    const rate = rateFromHeaders(github.headers);
+    const identityFallback = githubResponseLocalFallbackReason(github.status, rate);
+    if (identityFallback !== undefined) {
+      attemptedIdentityIds.add(identity.id);
+      fallbackReason = identityFallback;
+      await state.coordinator.recordResult(coordinatorResult(state, identity, github.status, rate));
+      continue;
+    }
+    return finalizeRelaySuccess(state, {
+      github,
+      identity,
+      leaseReason: selection.reason,
+      rate,
+    });
+  }
+  const stale = await serveStaleRelayCache(state, fallbackReason);
+  if (stale !== undefined) {
+    return stale;
+  }
+  throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
+    reason: fallbackReason,
+  });
+}
+
+async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): Promise<Response> {
+  if (state.cacheKey !== undefined) {
+    await publishGitHubCache(
+      state.env,
+      state.cacheKey,
+      state.request,
+      state.route,
+      result.github,
+      result.identity,
+    );
+  }
+  const background: Promise<unknown>[] = [
+    insertAudit(state.env, {
+      requestId: state.requestId,
+      callerId: state.callerId,
+      pool: state.request.pool,
+      routeKey: state.route.routeKey,
+      routeKind: state.route.kind,
+      ...(result.identity === undefined ? {} : { identityId: result.identity.id }),
+      status: result.github.status,
+      durationMs: Date.now() - state.started,
+      cacheStatus: state.cacheStatus,
+      cacheable: state.cacheable,
+    }),
+  ];
+  if (result.identity !== undefined) {
+    background.push(
+      state.coordinator.recordResult(
+        coordinatorResult(state, result.identity, result.github.status, result.rate),
+      ),
+    );
+  }
+  state.ctx.waitUntil(Promise.all(background));
+  return jsonResponse({
+    status: result.github.status,
+    headers: result.github.headers,
+    body: result.github.body,
+    body_encoding: result.github.body_encoding,
+    ...(result.identity === undefined
+      ? {}
+      : { identity: { id: result.identity.id, kind: result.identity.kind } }),
+    relay: {
+      pool: state.request.pool,
+      request_id: state.requestId,
+      cacheable: state.route.cacheable,
+      cache: state.cacheStatus,
+      stale_ok: false,
+      route_kind: state.route.kind,
+      ...(result.backend === undefined ? {} : { backend: result.backend }),
+      ...(result.leaseReason === undefined ? {} : { lease_reason: result.leaseReason }),
+    },
+  });
+}
+
+function coordinatorResult(
+  state: ActiveRelay,
+  identity: Identity,
+  status: number,
+  rate: ReturnType<typeof rateFromHeaders> | undefined,
+): RecordResult {
+  return {
+    identityId: identity.id,
+    routeKey: state.route.routeKey,
+    resource: state.route.resource,
+    status,
+    ...(rate === undefined ? {} : { rate }),
+  };
+}
+
+async function handleRelayError(
+  base: RelayBase,
+  active: ActiveRelay | undefined,
+  error: unknown,
+): Promise<Response> {
+  const reported = localFallbackError(error) ?? error;
+  const staleReason = staleFallbackReasonFromError(reported);
+  if (active !== undefined && staleReason !== undefined) {
+    const stale = await serveStaleRelayCache(active, staleReason);
+    if (stale !== undefined) {
+      return stale;
+    }
+  }
+  const audit = auditError(reported);
+  const fallbackReason = auditFallbackReason(reported);
+  base.ctx.waitUntil(
+    insertAudit(base.env, {
+      requestId: base.requestId,
+      callerId: base.callerId,
+      pool: base.request.pool,
+      routeKey: active?.route.routeKey ?? normalizeRouteKey(base.request.method, base.request.path),
+      routeKind: active?.route.kind ?? "denied",
+      status: audit.status,
+      errorCode: audit.code,
+      ...(fallbackReason === undefined ? {} : { fallbackReason }),
+      durationMs: Date.now() - base.started,
+      cacheStatus: active?.cacheStatus ?? "unknown",
+      cacheable: active?.cacheable ?? false,
+      ...(active?.identity === undefined ? {} : { identityId: active.identity.id }),
+    }),
+  );
+  throw reported;
+}
+
+async function serveStaleRelayCache(
+  state: ActiveRelay,
+  staleReason: string,
+): Promise<Response | undefined> {
+  if (state.cacheKey === undefined || !staleFallbackReason(staleReason)) {
+    return undefined;
+  }
+  const cached = await readStaleGitHubCache(state.env, state.cacheKey, state.route);
+  if (
+    cached === undefined ||
+    !(await cachedResponseAvailable(
+      state.env,
+      state.request.pool,
+      state.route,
+      cached,
+      state.coordinator,
+      true,
+    ))
+  ) {
+    return undefined;
+  }
+  return serveCachedGitHubResponse(
+    state.env,
+    state.ctx,
+    cachedResponseParams(state, cached, "stale", { staleReason }),
+  );
+}
+
+function cachedResponseParams(
+  state: ActiveRelay,
+  cached: CachedGitHubResponse,
+  cacheStatus: "hit" | "stale",
+  extras: { staleReason?: string; coalesced?: boolean } = {},
+): Parameters<typeof serveCachedGitHubResponse>[2] {
+  return {
+    requestId: state.requestId,
+    callerId: state.callerId,
+    pool: state.request.pool,
+    route: state.route,
+    cached,
+    started: state.started,
+    cacheStatus,
+    ...(extras.staleReason === undefined ? {} : { staleReason: extras.staleReason }),
+    ...(extras.coalesced === undefined ? {} : { coalesced: extras.coalesced }),
+  };
 }
 
 function auditError(error: unknown): { status: number; code: string } {
@@ -484,10 +573,6 @@ function staleFallbackReasonFromError(error: unknown): string | undefined {
   }
   const reason = error.details?.reason;
   return typeof reason === "string" && staleFallbackReason(reason) ? reason : undefined;
-}
-
-function webOnlyRoute(route: RouteInfo): boolean {
-  return capabilitiesForRouteKind(route.kind).fallback === "local";
 }
 
 async function selectIdentity(

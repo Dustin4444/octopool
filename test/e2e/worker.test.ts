@@ -7,6 +7,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import worker, { PoolCoordinator } from "../../src/index";
 import { hashToken } from "../../src/auth";
+import { deleteEdgeJSON } from "../../src/edge-cache";
 import type { CoordinatorSnapshot } from "../../src/types";
 
 const CALLER_TOKEN = "caller-token";
@@ -20,7 +21,10 @@ type RelayEnvelope = {
     backend?: string;
     cache: string;
     cacheable: boolean;
+    coalesced?: boolean;
     route_kind: string;
+    stale_ok?: boolean;
+    stale_reason?: string;
   };
 };
 
@@ -120,6 +124,122 @@ describe("Worker end-to-end relay", () => {
         expect.objectContaining({ identity_id: "secondary", remaining: 4999 }),
       ]),
     );
+  });
+
+  it("coalesces concurrent cache misses into one authenticated GitHub request", async () => {
+    await seedPool();
+    let releasePrimary!: () => void;
+    let primaryStarted!: () => void;
+    const primaryGate = new Promise<void>((resolve) => {
+      releasePrimary = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      primaryStarted = resolve;
+    });
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const token = bearer(input, init);
+      if (token === "test-org-token") {
+        return jsonResponse({ private: false });
+      }
+      if (token === "test-primary-token") {
+        primaryStarted();
+        await primaryGate;
+        return jsonResponse({ id: 3, full_name: "openclaw/octopool", private: false });
+      }
+      return jsonResponse({ message: "public backend unavailable" }, 503);
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const firstPromise = relay("/repos/openclaw/octopool");
+    await started;
+    const secondPromise = relay("/repos/openclaw/octopool");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    releasePrimary();
+    const envelopes = await Promise.all(
+      [firstPromise, secondPromise].map(async (responsePromise) => {
+        const response = await responsePromise;
+        expect(response.status).toBe(200);
+        return response.json<RelayEnvelope>();
+      }),
+    );
+
+    expect(envelopes.map(({ relay: result }) => result.cache).sort()).toEqual(["hit", "miss"]);
+    expect(envelopes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ relay: expect.objectContaining({ coalesced: true }) }),
+      ]),
+    );
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-primary-token",
+      ),
+    ).toHaveLength(1);
+    const audits = await env.DB.prepare(
+      "SELECT cache_status, coalesced FROM audit_events ORDER BY cache_status",
+    ).all<{ cache_status: string; coalesced: number }>();
+    expect(audits.results).toEqual([
+      { cache_status: "hit", coalesced: 1 },
+      { cache_status: "miss", coalesced: 0 },
+    ]);
+  });
+
+  it("serves a stale cache entry when the only identity becomes rate limited", async () => {
+    await seedPool();
+    vi.stubGlobal(
+      "fetch",
+      githubUpstream({
+        primary: jsonResponse({ id: 4, full_name: "openclaw/octopool", private: false }),
+      }),
+    );
+    const primed = await relay("/repos/openclaw/octopool");
+    expect(primed.status).toBe(200);
+    const cacheRow = await env.DB.prepare(
+      "SELECT cache_key FROM github_cache_entries LIMIT 1",
+    ).first<{ cache_key: string }>();
+    expect(cacheRow).not.toBeNull();
+    await env.DB.prepare(
+      `UPDATE github_cache_entries
+       SET expires_at = datetime('now', '-1 second'),
+           stale_expires_at = datetime('now', '+1 hour')
+       WHERE cache_key = ?`,
+    )
+      .bind(cacheRow!.cache_key)
+      .run();
+    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+    const limited = githubUpstream({
+      primary: jsonResponse(
+        { message: "rate limited" },
+        429,
+        rateHeaders({ remaining: 0, retryAfter: 60 }),
+      ),
+    });
+    vi.stubGlobal("fetch", limited);
+
+    const response = await relay("/repos/openclaw/octopool");
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      status: 200,
+      body: { id: 4, full_name: "openclaw/octopool", private: false },
+      identity: { id: "primary", kind: "pat" },
+      relay: {
+        cache: "stale",
+        route_kind: "repo_view",
+        stale_ok: true,
+        stale_reason: "github_rate_limited",
+      },
+    });
+    expect(
+      limited.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-primary-token",
+      ),
+    ).toHaveLength(1);
+    const audits = await env.DB.prepare(
+      "SELECT cache_status, status FROM audit_events ORDER BY created_at",
+    ).all<{ cache_status: string; status: number }>();
+    expect(audits.results).toEqual([
+      { cache_status: "miss", status: 200 },
+      { cache_status: "stale", status: 200 },
+    ]);
   });
 
   it("rejects invalid caller authentication before touching GitHub", async () => {
