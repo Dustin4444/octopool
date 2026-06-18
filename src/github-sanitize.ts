@@ -1,3 +1,4 @@
+import { isRecord } from "./object";
 import type { GitHubRelayResponse, RouteInfo } from "./types";
 
 export function sanitizeGitHubResponse(
@@ -143,8 +144,4 @@ function tokenScopedGitHubField(key: string, repoObject: boolean): boolean {
   return (
     key === "temp_clone_token" || (repoObject && (key === "permissions" || key === "role_name"))
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

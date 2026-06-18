@@ -1,3 +1,4 @@
+import { isRecord } from "./object";
 import type { JsonObject } from "./types";
 
 export class HttpError extends Error {
@@ -58,14 +59,10 @@ export async function parseJsonObject(request: Request): Promise<JsonObject> {
   } catch {
     throw new HttpError(400, "invalid_json", "Expected a valid JSON object");
   }
-  if (!isObject(value)) {
+  if (!isRecord(value)) {
     throw new HttpError(400, "invalid_json", "Expected a JSON object");
   }
   return value;
-}
-
-export function isObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function requireString(value: unknown, field: string): string {

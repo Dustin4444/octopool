@@ -1,6 +1,7 @@
 import { envSecret } from "./auth";
 import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
+import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import { HttpError, parsePositiveInt } from "./http";
 import type { PoolCoordinator } from "./pool-coordinator";
 import { capabilitiesForRouteKind } from "./route-manifest";
@@ -322,17 +323,6 @@ function publicProofCovers(
 
 function publicProofKey(owner: string, repo: string): string {
   return `${owner}/${repo}`;
-}
-
-function parseSQLiteTimestamp(value: string): number {
-  return Date.parse(value.endsWith("Z") ? value : `${value.replace(" ", "T")}Z`);
-}
-
-function sqliteTimestamp(value: Date): string {
-  return value
-    .toISOString()
-    .replace("T", " ")
-    .replace(/\.\d{3}Z$/, "");
 }
 
 function sleep(ms: number): Promise<void> {

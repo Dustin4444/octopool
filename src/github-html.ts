@@ -1,5 +1,6 @@
 import { base64ToBytesSafe } from "./encoding";
 import { decodeURIComponentSafe } from "./github-path";
+import { isRecord } from "./object";
 
 type RunState = {
   status: string;
@@ -758,10 +759,6 @@ function firstTimestamp(items: Record<string, unknown>[], field: string): string
     .filter((value): value is string => typeof value === "string")
     .sort();
   return values[0] ?? null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function runState(label: string): RunState | undefined {

@@ -2,7 +2,9 @@ import { hashToken } from "./auth";
 import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import { defaultGitHubJSONAccept } from "./github-response";
+import { isRecord } from "./object";
 import { cachePolicyForRouteKind } from "./route-manifest";
+import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
 const TERMINAL_CI_TTL_SECONDS = 3_600;
@@ -206,10 +208,6 @@ function writeEdgeCachedResponse(cacheKey: string, cached: CachedGitHubResponse)
   return writeEdgeJSON(EDGE_CACHE_NAMESPACE, cacheKey, cached, ttlSeconds);
 }
 
-function parseSQLiteTimestamp(value: string): number {
-  return Date.parse(value.endsWith("Z") ? value : `${value.replace(" ", "T")}Z`);
-}
-
 export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): number {
   const strategy = cachePolicyForRouteKind(route.kind).fresh;
   switch (strategy.kind) {
@@ -397,10 +395,6 @@ export async function pruneExpiredGitHubCache(env: Env, limit = 500): Promise<nu
   return result.meta.changes;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function parseJSONRecord(raw: string): Record<string, string> {
   const value: unknown = JSON.parse(raw);
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -413,11 +407,4 @@ function parseJSONRecord(raw: string): Record<string, string> {
     }
   }
   return out;
-}
-
-function sqliteTimestamp(value: Date): string {
-  return value
-    .toISOString()
-    .replace("T", " ")
-    .replace(/\.\d{3}Z$/, "");
 }

@@ -7,7 +7,9 @@ import {
   safeRelativePath,
 } from "../src/github-path";
 import { defaultGitHubJSONAccept, githubResponseHeaders } from "../src/github-response";
+import { isRecord } from "../src/object";
 import { readBodyCapped } from "../src/response-body";
+import { parseSQLiteTimestamp, sqliteTimestamp } from "../src/sqlite-time";
 
 describe("shared GitHub primitives", () => {
   it("round-trips standard and URL-safe base64", () => {
@@ -16,6 +18,19 @@ describe("shared GitHub primitives", () => {
     expect(base64ToBytes(bytesToBase64(bytes))).toEqual(bytes);
     expect(base64ToBytesSafe(bytesToBase64URL(bytes))).toEqual(bytes);
     expect(base64ToBytesSafe("not base64!")).toBeUndefined();
+  });
+
+  it("normalizes SQLite UTC timestamps at second precision", () => {
+    const epoch = Date.UTC(2026, 5, 18, 7, 30, 15, 987);
+    expect(sqliteTimestamp(epoch)).toBe("2026-06-18 07:30:15");
+    expect(parseSQLiteTimestamp("2026-06-18 07:30:15")).toBe(Date.UTC(2026, 5, 18, 7, 30, 15));
+    expect(parseSQLiteTimestamp("2026-06-18T07:30:15Z")).toBe(Date.UTC(2026, 5, 18, 7, 30, 15));
+  });
+
+  it("recognizes records without accepting arrays", () => {
+    expect(isRecord({ value: 1 })).toBe(true);
+    expect(isRecord([])).toBe(false);
+    expect(isRecord(null)).toBe(false);
   });
 
   it("encodes slash-separated GitHub path components without losing boundaries", () => {

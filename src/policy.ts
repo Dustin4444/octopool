@@ -1,4 +1,5 @@
-import { HttpError, isObject } from "./http";
+import { HttpError } from "./http";
+import { isRecord } from "./object";
 import { ROUTES, routeKeyForMatch, type RouteManifestEntry } from "./route-manifest";
 import type { PoolPolicy, RelayRequest, RouteInfo } from "./types";
 
@@ -21,7 +22,7 @@ export function defaultPolicy(owners: string): PoolPolicy {
 export function parsePolicy(raw: string, fallbackOwners: string): PoolPolicy {
   try {
     const value: unknown = JSON.parse(raw);
-    if (!isObject(value)) {
+    if (!isRecord(value)) {
       return defaultPolicy(fallbackOwners);
     }
     const fallback = defaultPolicy(fallbackOwners);
@@ -45,7 +46,7 @@ export function parsePolicy(raw: string, fallbackOwners: string): PoolPolicy {
 }
 
 export function validateRelayRequest(value: unknown): RelayRequest {
-  if (!isObject(value)) {
+  if (!isRecord(value)) {
     throw new HttpError(400, "invalid_request", "Request body must be an object");
   }
   const pool = requireText(value.pool, "pool");
@@ -75,7 +76,7 @@ export function validateRelayRequest(value: unknown): RelayRequest {
     path,
     ...(query === undefined ? {} : { query }),
     ...(headers === undefined ? {} : { headers }),
-    ...(isObject(value.route_hint) ? { route_hint: normalizeRouteHint(value.route_hint) } : {}),
+    ...(isRecord(value.route_hint) ? { route_hint: normalizeRouteHint(value.route_hint) } : {}),
   };
 }
 
@@ -254,7 +255,7 @@ function normalizeQuery(value: unknown): Record<string, string | string[]> | und
   if (value === undefined || value === null) {
     return undefined;
   }
-  if (!isObject(value)) {
+  if (!isRecord(value)) {
     throw new HttpError(400, "invalid_query", "query must be an object");
   }
   const out: Record<string, string | string[]> = {};
@@ -281,7 +282,7 @@ function normalizeHeaders(value: unknown): Record<string, string> | undefined {
   if (value === undefined || value === null) {
     return undefined;
   }
-  if (!isObject(value)) {
+  if (!isRecord(value)) {
     throw new HttpError(400, "invalid_headers", "headers must be an object");
   }
   const allowed = new Set([

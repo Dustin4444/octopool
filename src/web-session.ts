@@ -8,9 +8,11 @@ import {
 } from "./auth";
 import { ensureWebCaller } from "./callers";
 import { defaultLoginPool } from "./config";
+import { base64ToBytesSafe, bytesToBase64URL } from "./encoding";
 import { queries } from "./generated/sql";
 import { effectiveOrigin } from "./hosts";
 import { HttpError, jsonResponse } from "./http";
+import { sqliteTimestamp } from "./sqlite-time";
 import type { WebSession } from "./types";
 
 const SESSION_COOKIE = "octopool_session";
@@ -253,7 +255,11 @@ async function verifyOAuthState(env: Env, state: string): Promise<string> {
   }
   let body: unknown;
   try {
-    body = JSON.parse(new TextDecoder().decode(base64UrlToBytes(payload)));
+    const bytes = base64ToBytesSafe(payload);
+    if (bytes === undefined) {
+      throw new Error("invalid base64url");
+    }
+    body = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     throw new HttpError(401, "github_state_invalid", "GitHub login state is invalid");
   }
@@ -281,32 +287,11 @@ async function oauthStateSignature(env: Env, payload: string): Promise<string> {
     ["sign"],
   );
   const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
-  return base64Url(new Uint8Array(signature));
+  return bytesToBase64URL(new Uint8Array(signature));
 }
 
 function base64UrlJSON(value: unknown): string {
-  return base64Url(new TextEncoder().encode(JSON.stringify(value)));
-}
-
-function base64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-}
-
-function base64UrlToBytes(value: string): Uint8Array {
-  const padded = value
-    .replaceAll("-", "+")
-    .replaceAll("_", "/")
-    .padEnd(Math.ceil(value.length / 4) * 4, "=");
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
+  return bytesToBase64URL(new TextEncoder().encode(JSON.stringify(value)));
 }
 
 function constantTimeEqual(left: string, right: string): boolean {
@@ -320,10 +305,6 @@ function constantTimeEqual(left: string, right: string): boolean {
     diff |= leftBytes[index]! ^ rightBytes[index]!;
   }
   return diff === 0;
-}
-
-function sqliteTimestamp(epochMs: number): string {
-  return new Date(epochMs).toISOString().replace("T", " ").slice(0, 19);
 }
 
 function readCookie(request: Request, name: string): string | undefined {
