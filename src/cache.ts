@@ -1,10 +1,10 @@
 import { hashToken } from "./auth";
 import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
+import { cachePolicyForRouteKind } from "./route-manifest";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
 const TERMINAL_CI_TTL_SECONDS = 3_600;
-const TERMINAL_CI_STALE_SECONDS = 86_400;
 const TERMINAL_CI_TTL_DETECTION_SECONDS = 1_800;
 const EDGE_CACHE_NAMESPACE = "github-v1";
 
@@ -44,7 +44,12 @@ export async function githubCacheKey(
 }
 
 export function shouldUseGitHubCache(request: RelayRequest, route: RouteInfo): boolean {
-  if (!route.cacheable || route.logs || route.largePayload || route.kind === "rate_limit") {
+  if (
+    !route.cacheable ||
+    !cachePolicyForRouteKind(route.kind).enabled ||
+    route.logs ||
+    route.largePayload
+  ) {
     return false;
   }
   const headers = request.headers ?? {};
@@ -87,122 +92,15 @@ export async function readStaleGitHubCache(
 }
 
 export function staleCacheSeconds(route: RouteInfo, freshTtlSeconds?: number): number {
+  const policy = cachePolicyForRouteKind(route.kind);
   if (
-    terminalCIRoute(route) &&
+    policy.terminalStaleSeconds !== undefined &&
     freshTtlSeconds !== undefined &&
     freshTtlSeconds >= TERMINAL_CI_TTL_DETECTION_SECONDS
   ) {
-    return TERMINAL_CI_STALE_SECONDS;
+    return policy.terminalStaleSeconds;
   }
-  switch (route.kind) {
-    case "run_view":
-    case "run_list":
-    case "workflow_run_list":
-    case "run_jobs":
-    case "commit_check_runs":
-    case "commit_check_suites":
-    case "commit_status":
-    case "commit_statuses":
-    case "ref_statuses":
-    case "job_view":
-    case "git_ref":
-    case "git_matching_refs":
-      return 300;
-    case "pr_list":
-    case "issue_list":
-    case "org_repo_list":
-    case "user_repo_list":
-      return 600;
-    case "pr_view":
-    case "issue_view":
-    case "pr_files":
-    case "pr_commits":
-    case "pr_review_comments":
-    case "pr_review_comment_list":
-    case "pr_review_comment_view":
-    case "pr_reviews":
-    case "pr_review_view":
-    case "pr_review_comments_for_review":
-    case "pr_requested_reviewers":
-    case "commit_comments":
-    case "commit_pulls":
-    case "commit_branches_where_head":
-    case "repo_comment":
-    case "issue_comments":
-    case "issue_comment_list":
-    case "issue_comment_view":
-    case "issue_events":
-    case "issue_event_list":
-    case "issue_event_view":
-    case "issue_labels":
-    case "issue_timeline":
-    case "label_list":
-    case "label_view":
-    case "milestone_list":
-    case "milestone_view":
-    case "issue_reactions":
-    case "issue_comment_reactions":
-    case "pr_review_comment_reactions":
-    case "assignee_list":
-    case "assignee_view":
-    case "repo_event_list":
-    case "network_event_list":
-    case "org_event_list":
-    case "deployment_list":
-      return 3_600;
-    case "repo_view":
-    case "user_view":
-    case "user_org_list":
-    case "user_gist_list":
-    case "user_follower_list":
-    case "user_following_list":
-    case "user_event_list":
-    case "user_received_event_list":
-    case "user_key_list":
-    case "user_gpg_key_list":
-    case "org_public_member_list":
-    case "org_public_member_view":
-    case "gist_view":
-    case "emoji_list":
-    case "github_meta":
-    case "license_list":
-    case "license_view":
-    case "gitignore_template_list":
-    case "gitignore_template_view":
-    case "repo_readme":
-    case "branch_list":
-    case "branch_view":
-    case "tag_list":
-    case "repo_languages":
-    case "repo_contributors":
-    case "repo_license":
-    case "repo_topics":
-    case "community_profile":
-    case "fork_list":
-    case "stargazer_list":
-    case "subscriber_list":
-    case "commit_list":
-    case "compare":
-    case "contents":
-    case "release_list":
-    case "release_view":
-    case "release_latest":
-    case "release_assets":
-    case "release_asset":
-    case "repo_stats_contributors":
-    case "repo_stats_commit_activity":
-    case "repo_stats_code_frequency":
-    case "repo_stats_participation":
-    case "repo_stats_punch_card":
-      return 7_200;
-    case "commit_view":
-    case "git_blob":
-    case "git_commit":
-    case "git_tree":
-      return 86_400;
-    default:
-      return 1_800;
-  }
+  return policy.staleSeconds;
 }
 
 function cacheRowResponse(row: CacheRow | null): CachedGitHubResponse | undefined {
@@ -312,147 +210,32 @@ function parseSQLiteTimestamp(value: string): number {
 }
 
 export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): number {
-  switch (route.kind) {
-    case "user_view":
-      return 3_600;
-    case "repo_view":
-      return 600;
-    case "org_repo_list":
-    case "user_repo_list":
-      return 600;
-    case "user_org_list":
-    case "user_gist_list":
-    case "user_follower_list":
-    case "user_following_list":
-    case "user_event_list":
-    case "user_received_event_list":
-    case "user_key_list":
-    case "user_gpg_key_list":
-    case "org_event_list":
-    case "org_public_member_list":
-    case "org_public_member_view":
-    case "gist_view":
-    case "emoji_list":
-    case "github_meta":
-    case "license_list":
-    case "license_view":
-    case "gitignore_template_list":
-    case "gitignore_template_view":
-      return 3_600;
-    case "repo_readme":
-      return 3_600;
-    case "commit_list":
-      return 300;
-    case "commit_pulls":
-    case "commit_branches_where_head":
-      return 300;
-    case "commit_view":
-    case "git_blob":
-    case "git_commit":
-    case "git_tree":
-      return 86_400;
-    case "contents":
-      return 3_600;
-    case "compare":
-      return 300;
-    case "release_view":
-      return 3_600;
-    case "release_latest":
-    case "release_list":
-      return 300;
-    case "workflow_list":
-    case "workflow_view":
-      return 3_600;
-    case "pr_view":
+  const strategy = cachePolicyForRouteKind(route.kind).fresh;
+  switch (strategy.kind) {
+    case "static":
+      return strategy.seconds;
+    case "pr":
       return closedPR(response) ? 3_600 : 120;
-    case "pr_list":
-      return 60;
-    case "issue_view":
+    case "issue":
       return closedIssue(response) ? 3_600 : 300;
-    case "issue_list":
-      return 60;
-    case "branch_list":
-    case "branch_view":
-      return 120;
-    case "tag_list":
-    case "repo_languages":
-    case "repo_contributors":
-    case "repo_license":
-    case "repo_topics":
-    case "community_profile":
-    case "fork_list":
-    case "stargazer_list":
-    case "subscriber_list":
-    case "repo_event_list":
-    case "network_event_list":
-    case "deployment_list":
-      return 3_600;
-    case "git_ref":
-    case "git_matching_refs":
-      return 120;
-    case "run_view":
+    case "run":
       return completedRun(response) ? TERMINAL_CI_TTL_SECONDS : 30;
     case "run_list":
-    case "workflow_run_list":
       return completedRunList(response) ? 120 : 30;
-    case "run_jobs":
+    case "jobs":
       return completedJobs(response) ? TERMINAL_CI_TTL_SECONDS : 30;
-    case "commit_check_runs":
+    case "checks":
       return completedChecks(response) ? TERMINAL_CI_TTL_SECONDS : 30;
-    case "commit_check_suites":
+    case "check_suites":
       return completedCheckSuites(response) ? TERMINAL_CI_TTL_SECONDS : 30;
-    case "commit_status":
+    case "status":
       return completedStatus(response) ? TERMINAL_CI_TTL_SECONDS : 30;
-    case "commit_statuses":
-    case "ref_statuses":
+    case "status_list":
       return completedStatusList(response) ? TERMINAL_CI_TTL_SECONDS : 30;
-    case "job_view":
+    case "job":
       return completedJob(response) ? TERMINAL_CI_TTL_SECONDS : 30;
-    case "pr_files":
+    case "pr_state":
       return stateAwarePRSubresource(route, response) ? 300 : 60;
-    case "pr_commits":
-    case "pr_review_comments":
-    case "pr_review_comment_list":
-    case "pr_review_comment_view":
-    case "pr_reviews":
-    case "pr_review_view":
-    case "pr_review_comments_for_review":
-    case "pr_requested_reviewers":
-    case "commit_comments":
-    case "repo_comment":
-    case "issue_comments":
-    case "issue_comment_list":
-    case "issue_comment_view":
-    case "issue_events":
-    case "issue_event_list":
-    case "issue_event_view":
-    case "issue_labels":
-    case "issue_timeline":
-    case "label_list":
-    case "label_view":
-    case "milestone_list":
-    case "milestone_view":
-    case "issue_reactions":
-    case "issue_comment_reactions":
-    case "pr_review_comment_reactions":
-    case "assignee_list":
-    case "assignee_view":
-      return 300;
-    case "search_issues":
-    case "search_code":
-    case "search_commits":
-    case "search_repositories":
-      return 120;
-    case "release_assets":
-    case "release_asset":
-    case "repo_stats_contributors":
-    case "repo_stats_commit_activity":
-    case "repo_stats_code_frequency":
-    case "repo_stats_participation":
-    case "repo_stats_punch_card":
-      return 3_600;
-    default:
-      return 60;
   }
 }
 
@@ -614,23 +397,7 @@ function routeStateHint(route: RouteInfo): string | undefined {
 }
 
 function stateAwarePRRoute(route: RouteInfo): boolean {
-  return route.kind === "pr_files";
-}
-
-function terminalCIRoute(route: RouteInfo): boolean {
-  switch (route.kind) {
-    case "run_view":
-    case "run_jobs":
-    case "commit_check_runs":
-    case "commit_check_suites":
-    case "commit_status":
-    case "commit_statuses":
-    case "ref_statuses":
-    case "job_view":
-      return true;
-    default:
-      return false;
-  }
+  return cachePolicyForRouteKind(route.kind).stateAware;
 }
 
 export async function pruneExpiredGitHubCache(env: Env, limit = 500): Promise<number> {
