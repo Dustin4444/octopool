@@ -33,11 +33,9 @@ export type CacheFreshStrategy =
   | { kind: "pr_state" };
 
 export type RouteCachePolicy = {
-  enabled: boolean;
   fresh: CacheFreshStrategy;
   staleSeconds: number;
   terminalStaleSeconds?: number;
-  stateAware: boolean;
 };
 
 type RouteRule<Kind extends string> = {
@@ -338,7 +336,7 @@ export const ROUTES = [
   route("/search/code", "search_code", "search", { search: true, publicApi: false }),
   route("/search/commits", "search_commits", "search", { search: true }),
   localRoute("/search/repositories", "search_repositories", "search", { search: true }),
-  route("/rate_limit", "rate_limit", "core", { publicApi: false }),
+  route("/rate_limit", "rate_limit", "core", { publicApi: false, cacheable: false }),
 ] as const;
 
 export type RouteKind = (typeof ROUTES)[number]["kind"];
@@ -371,11 +369,9 @@ function sameCapabilities(left: RouteCapabilities, right: RouteCapabilities): bo
 
 export function cachePolicyForRouteKind(kind: RouteKind): RouteCachePolicy {
   return {
-    enabled: kind !== "rate_limit",
     fresh: freshCacheStrategy(kind),
     staleSeconds: staleCacheSeconds(kind),
     ...(terminalCIRoute(kind) ? { terminalStaleSeconds: 86_400 } : {}),
-    stateAware: kind === "pr_files",
   };
 }
 
@@ -507,8 +503,13 @@ function freshCacheStrategy(kind: RouteKind): CacheFreshStrategy {
     case "search_commits":
     case "search_repositories":
       return staticCache(120);
-    default:
+    case "run_artifacts":
+    case "job_logs":
+    case "check_run_annotations":
+    case "rate_limit":
       return staticCache(60);
+    default:
+      return assertNever(kind);
   }
 }
 
@@ -619,8 +620,19 @@ function staleCacheSeconds(kind: RouteKind): number {
     case "git_commit":
     case "git_tree":
       return 86_400;
-    default:
+    case "run_artifacts":
+    case "job_logs":
+    case "check_run_annotations":
+    case "workflow_list":
+    case "workflow_view":
+    case "search_issues":
+    case "search_code":
+    case "search_commits":
+    case "search_repositories":
+    case "rate_limit":
       return 1_800;
+    default:
+      return assertNever(kind);
   }
 }
 
@@ -642,4 +654,8 @@ function terminalCIRoute(kind: RouteKind): boolean {
 
 function staticCache(seconds: number): CacheFreshStrategy {
   return { kind: "static", seconds };
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Missing cache policy for route kind: ${String(value)}`);
 }

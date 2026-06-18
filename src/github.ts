@@ -1,5 +1,6 @@
 import { bytesToBase64 } from "./encoding";
 import { githubToken } from "./github-auth";
+import { responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
 import { githubResponseHeaders } from "./github-response";
 import { HttpError, parsePositiveInt } from "./http";
@@ -95,11 +96,6 @@ async function fetchGitHubLogRedirect(
   };
 }
 
-export function responseCapBytes(env: Env, route: RouteInfo): number {
-  const cap = parsePositiveInt(env.MAX_RESPONSE_BYTES, 2_097_152);
-  return route.largePayload || route.fullResponseCap ? cap : Math.min(cap, 1_048_576);
-}
-
 function isAllowedLogRedirectHost(hostname: string): boolean {
   const lower = hostname.toLowerCase();
   return (
@@ -124,32 +120,6 @@ function logRedirectHeaders(original: Headers, redirected: Headers): Record<stri
     }
   }
   return headers;
-}
-
-export function rateFromHeaders(headers: Record<string, string>): {
-  limit?: number;
-  remaining?: number;
-  resetAt?: number;
-  retryAfter?: number;
-} {
-  const out: { limit?: number; remaining?: number; resetAt?: number; retryAfter?: number } = {};
-  const limit = parseHeaderInt(headers["x-ratelimit-limit"]);
-  const remaining = parseHeaderInt(headers["x-ratelimit-remaining"]);
-  const resetAt = parseHeaderInt(headers["x-ratelimit-reset"]);
-  const retryAfter = parseHeaderInt(headers["retry-after"]);
-  if (limit !== undefined) {
-    out.limit = limit;
-  }
-  if (remaining !== undefined) {
-    out.remaining = remaining;
-  }
-  if (resetAt !== undefined) {
-    out.resetAt = resetAt;
-  }
-  if (retryAfter !== undefined) {
-    out.retryAfter = retryAfter;
-  }
-  return out;
 }
 
 function githubUrl(request: RelayRequest): string {
@@ -205,14 +175,6 @@ function decodeBody(
     return { body: text, encoding: "text" };
   }
   return { body: bytesToBase64(bytes), encoding: "base64" };
-}
-
-function parseHeaderInt(value: string | undefined): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function isMostlyText(bytes: Uint8Array): boolean {

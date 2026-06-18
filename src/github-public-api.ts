@@ -1,4 +1,4 @@
-import { responseCapBytes } from "./github";
+import { responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
 import { defaultGitHubJSONAccept, githubResponseHeaders } from "./github-response";
 import type { WebRequest } from "./github-web-types";

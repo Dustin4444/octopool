@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { callPublicGitHub, responseCapBytes } from "../src/github";
+import { callPublicGitHub } from "../src/github";
+import { responseCapBytes } from "../src/github-limits";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 
 describe("github api provider", () => {

@@ -1,5 +1,5 @@
 import { bytesToBase64 } from "./encoding";
-import { responseCapBytes } from "./github";
+import { responseCapBytes } from "./github-limits";
 import { encodedPathSegments, safeRelativePath } from "./github-path";
 import { defaultGitHubJSONAccept, githubResponseHeaders } from "./github-response";
 import type { WebRequest } from "./github-web-types";

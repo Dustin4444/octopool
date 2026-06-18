@@ -1,4 +1,4 @@
-import { rateFromHeaders } from "./github";
+import type { GitHubRate } from "./github-rate";
 import { HttpError } from "./http";
 
 export function localFallbackError(error: unknown): HttpError | undefined {
@@ -10,16 +10,13 @@ export function localFallbackError(error: unknown): HttpError | undefined {
   });
 }
 
-export function githubResponseNeedsLocalFallback(
-  status: number,
-  rate: ReturnType<typeof rateFromHeaders>,
-): boolean {
+export function githubResponseNeedsLocalFallback(status: number, rate: GitHubRate): boolean {
   return githubResponseLocalFallbackReason(status, rate) !== undefined;
 }
 
 export function githubResponseLocalFallbackReason(
   status: number,
-  rate: ReturnType<typeof rateFromHeaders>,
+  rate: GitHubRate,
 ): string | undefined {
   if (status === 401) {
     return "github_identity_unauthorized";

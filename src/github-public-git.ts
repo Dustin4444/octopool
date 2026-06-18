@@ -1,4 +1,4 @@
-import { responseCapBytes } from "./github";
+import { responseCapBytes } from "./github-limits";
 import { gitRefResponse, parseGitUploadPackAdvertisement } from "./github-git";
 import { encodedPathSegments, safeRelativePath } from "./github-path";
 import { defaultGitHubJSONAccept, githubResponseHeaders } from "./github-response";

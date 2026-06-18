@@ -9,7 +9,8 @@ import {
 } from "./cache";
 import { coalesceGitHubCacheMiss, finishGitHubCacheFill } from "./cache-coalesce";
 import { insertAudit, loadIdentities, loadPoolPolicy } from "./db";
-import { callGitHub, callPublicGitHub, rateFromHeaders } from "./github";
+import { callGitHub, callPublicGitHub } from "./github";
+import { rateFromHeaders, type GitHubRate } from "./github-rate";
 import { callGitHubWeb } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { HttpError, jsonResponse, parseJsonObject } from "./http";
@@ -58,7 +59,7 @@ type RelaySuccess = {
   identity?: Identity;
   backend?: "web" | "github_public";
   leaseReason?: SelectionResult["reason"];
-  rate?: ReturnType<typeof rateFromHeaders>;
+  rate?: GitHubRate;
 };
 
 export async function relayGitHub(
@@ -365,7 +366,7 @@ function coordinatorResult(
   state: ActiveRelay,
   identity: Identity,
   status: number,
-  rate: ReturnType<typeof rateFromHeaders> | undefined,
+  rate: GitHubRate | undefined,
 ): RecordResult {
   return {
     identityId: identity.id,

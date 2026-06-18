@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ROUTES } from "../src/route-manifest";
+import { cachePolicyForRouteKind, ROUTES } from "../src/route-manifest";
 
 describe("route manifest", () => {
   it("has unique route identities and patterns", () => {
@@ -30,5 +30,14 @@ describe("route manifest", () => {
         (route) => route.capabilities.publicApi || route.capabilities.fallback !== "pool",
       ),
     ).toHaveLength(109);
+  });
+
+  it("defines cache policy on every route kind", () => {
+    for (const route of ROUTES) {
+      const policy = cachePolicyForRouteKind(route.kind);
+      expect(policy.staleSeconds).toBeGreaterThan(0);
+      expect(policy.fresh).toBeDefined();
+    }
+    expect(ROUTES.find((route) => route.kind === "rate_limit")?.cacheable).toBe(false);
   });
 });

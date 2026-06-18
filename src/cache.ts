@@ -47,12 +47,7 @@ export async function githubCacheKey(
 }
 
 export function shouldUseGitHubCache(request: RelayRequest, route: RouteInfo): boolean {
-  if (
-    !route.cacheable ||
-    !cachePolicyForRouteKind(route.kind).enabled ||
-    route.logs ||
-    route.largePayload
-  ) {
+  if (!route.cacheable || route.logs || route.largePayload) {
     return false;
   }
   const headers = request.headers ?? {};
@@ -387,7 +382,7 @@ function routeStateHint(route: RouteInfo): string | undefined {
 }
 
 function stateAwarePRRoute(route: RouteInfo): boolean {
-  return cachePolicyForRouteKind(route.kind).stateAware;
+  return cachePolicyForRouteKind(route.kind).fresh.kind === "pr_state";
 }
 
 export async function pruneExpiredGitHubCache(env: Env, limit = 500): Promise<number> {

@@ -1,5 +1,6 @@
 import { queries } from "./generated/sql";
 import { parsePositiveInt } from "./http";
+import { cachePolicyForRouteKind } from "./route-manifest";
 import type { RelayRequest, RouteInfo } from "./types";
 
 type PullResponse = {
@@ -115,7 +116,7 @@ function pullNumber(path: string): string | undefined {
 }
 
 function stateAwarePRRoute(route: RouteInfo): boolean {
-  return route.kind === "pr_files";
+  return cachePolicyForRouteKind(route.kind).fresh.kind === "pr_state";
 }
 
 function stateHintFromRequest(request: RelayRequest): string | undefined {
