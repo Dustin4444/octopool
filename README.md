@@ -67,6 +67,7 @@ brew install openclaw/tap/octopool
 
 octopool login                                  # default endpoint: https://octopool.dev
 octopool login https://octopool.your-org.dev    # self-hosted endpoint
+octopool install-shim                           # make gh use Octopool in every zsh
 octopool whoami
 ```
 
@@ -87,11 +88,13 @@ octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 octopool stats
 ```
 
-Symlink it as `gh` for a transparent shim — safe reads try Octopool first, while mutations, unusual flags, and explicit server fallback signals pass through to your local `gh`:
+Install it as a transparent `gh` shim — safe reads try Octopool first, while mutations, unusual flags, and explicit server fallback signals pass through to your local `gh`:
 
 ```sh
-ln -s "$(command -v octopool)" ~/bin/gh
+octopool install-shim
 ```
+
+The installer pins the real GitHub CLI path, creates an isolated shim symlink, updates a managed block in `.zshenv`, and verifies that non-interactive `zsh -c` commands cannot bypass Octopool. Re-running it is safe; use `--dry-run` to preview changes.
 
 Full command surface, fallback rules, and discovery details: [docs.octopool.dev/cli](https://docs.octopool.dev/cli.html).
 

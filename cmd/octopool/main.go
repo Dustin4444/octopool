@@ -65,6 +65,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return nil
 	case "login":
 		return runLogin(ctx, args[1:], stdout)
+	case "install-shim":
+		return runInstallShim(args[1:], stdout)
 	case "whoami":
 		return runWhoami(args[1:], stdout)
 	case "gh":
@@ -135,5 +137,5 @@ func isGHArgv(argv0 string) bool {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: octopool <login|whoami|gh|health|stats|request|admin> [flags]")
+	fmt.Fprintln(w, "usage: octopool <login|install-shim|whoami|gh|health|stats|request|admin> [flags]")
 }

@@ -30,6 +30,29 @@ The binary inspects `argv[0]` and behaves as a `gh` shim when invoked as `gh` or
 - symlink `octopool` as `gh` — transparent shim on `PATH`.
 - symlink `octopool` as `octopool-gh` — side-by-side shim.
 
+### `octopool install-shim [--shell zsh] [--dry-run]`
+
+Installs the transparent `gh` shim for interactive, login, and non-interactive zsh
+processes. The command:
+
+- resolves and pins the real GitHub CLI as `OCTOPOOL_GH_PATH`, preventing fallback loops;
+- creates an isolated `gh` symlink under `$XDG_DATA_HOME/octopool/bin` (or
+  `~/.local/share/octopool/bin`);
+- adds or replaces a clearly marked managed block in `$ZDOTDIR/.zshenv` (or
+  `~/.zshenv`) so the shim directory stays first on `PATH`; and
+- verifies the result with a non-interactive `zsh -c` process.
+
+Re-running the command is idempotent. Existing shell configuration outside the managed
+block is preserved. `--dry-run` validates the plan and prints its paths without writing.
+Only zsh is currently supported because it has a startup file that every interactive
+and non-interactive invocation reads.
+
+```sh
+octopool install-shim --dry-run
+octopool install-shim
+zsh -c 'command -v gh'
+```
+
 ## Commands
 
 ### `octopool login [server]`

@@ -1,0 +1,134 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestUpdateShimBlockAppendsAndReplaces(t *testing.T) {
+	before := []byte("export EXISTING=1\n")
+	first, err := updateShimBlock(before, "/home/alice/.local/share/octopool/bin/gh", "/opt/bin/gh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(first)
+	for _, want := range []string{
+		"export EXISTING=1",
+		shimBlockStart,
+		"export OCTOPOOL_GH_PATH='/opt/bin/gh'",
+		`export PATH='/home/alice/.local/share/octopool/bin':"${PATH#'/home/alice/.local/share/octopool/bin':}"`,
+		shimBlockEnd,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("updated block missing %q:\n%s", want, text)
+		}
+	}
+
+	second, err := updateShimBlock(first, "/home/alice/.local/share/octopool/bin/gh", "/usr/local/bin/gh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(second), shimBlockStart) != 1 || strings.Contains(string(second), "/opt/bin/gh") {
+		t.Fatalf("managed block was not replaced:\n%s", second)
+	}
+}
+
+func TestUpdateShimBlockRejectsIncompleteBlock(t *testing.T) {
+	_, err := updateShimBlock([]byte(shimBlockStart+"\n"), "/tmp/shim/gh", "/tmp/real/gh")
+	if err == nil || !strings.Contains(err.Error(), "incomplete") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestApplyShimInstallPlanIsIdempotent(t *testing.T) {
+	home := t.TempDir()
+	octopoolPath := filepath.Join(home, "tools", "octopool")
+	realGHPath := filepath.Join(home, "tools", "gh")
+	for _, path := range []string{octopoolPath, realGHPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("binary"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shimPath := filepath.Join(home, ".local", "share", "octopool", "bin", "gh")
+	startupPath := filepath.Join(home, ".zshenv")
+	startupAfter, err := updateShimBlock(nil, shimPath, realGHPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := shimInstallPlan{
+		shimPath:       shimPath,
+		octopoolPath:   octopoolPath,
+		realGHPath:     realGHPath,
+		startupPath:    startupPath,
+		startupAfter:   startupAfter,
+		shimChanged:    true,
+		startupChanged: true,
+	}
+	if err := applyShimInstallPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+	if !samePath(shimPath, octopoolPath) {
+		t.Fatalf("shim %s does not point to %s", shimPath, octopoolPath)
+	}
+	got, err := os.ReadFile(startupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(startupAfter) {
+		t.Fatalf("startup file = %q, want %q", got, startupAfter)
+	}
+
+	changed, err := shimNeedsUpdate(shimPath, octopoolPath)
+	if err != nil || changed {
+		t.Fatalf("shimNeedsUpdate() = %v, %v", changed, err)
+	}
+	updated, err := updateShimBlock(got, shimPath, realGHPath)
+	if err != nil || string(updated) != string(got) {
+		t.Fatalf("second update changed startup file: err=%v\n%s", err, updated)
+	}
+}
+
+func TestShimNeedsUpdateRejectsRegularFile(t *testing.T) {
+	dir := t.TempDir()
+	shim := filepath.Join(dir, "gh")
+	if err := os.WriteFile(shim, []byte("do not replace"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := shimNeedsUpdate(shim, filepath.Join(dir, "octopool"))
+	if err == nil || !strings.Contains(err.Error(), "not a symlink") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestShellSingleQuote(t *testing.T) {
+	if got := shellSingleQuote("/tmp/alice's tools"); got != `'/tmp/alice'"'"'s tools'` {
+		t.Fatalf("shellSingleQuote() = %q", got)
+	}
+}
+
+func TestExecutableNamedOctopool(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "octopool")
+	if err := os.WriteFile(binary, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "stable")
+	if err := os.Symlink(binary, link); err != nil {
+		t.Fatal(err)
+	}
+	if !executableNamedOctopool(link) {
+		t.Fatal("expected symlink to octopool to be accepted")
+	}
+	other := filepath.Join(dir, "other")
+	if err := os.WriteFile(other, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if executableNamedOctopool(other) {
+		t.Fatal("expected differently named executable to be rejected")
+	}
+}
