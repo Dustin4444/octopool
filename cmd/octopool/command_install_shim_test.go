@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,7 +19,8 @@ func TestUpdateShimBlockAppendsAndReplaces(t *testing.T) {
 		"export EXISTING=1",
 		shimBlockStart,
 		"export OCTOPOOL_GH_PATH='/opt/bin/gh'",
-		`export PATH='/home/alice/.local/share/octopool/bin':"${PATH#'/home/alice/.local/share/octopool/bin':}"`,
+		"octopool_shim_dir='/home/alice/.local/share/octopool/bin'",
+		`export PATH="$octopool_path_next"`,
 		shimBlockEnd,
 	} {
 		if !strings.Contains(text, want) {
@@ -32,6 +34,44 @@ func TestUpdateShimBlockAppendsAndReplaces(t *testing.T) {
 	}
 	if strings.Count(string(second), shimBlockStart) != 1 || strings.Contains(string(second), "/opt/bin/gh") {
 		t.Fatalf("managed block was not replaced:\n%s", second)
+	}
+}
+
+func TestUpdateShimBlockKeepsPathIdempotentInZsh(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is required to exercise .zshenv PATH behavior")
+	}
+	home := t.TempDir()
+	shimDir := filepath.Join(home, "shim [x]* ' dir")
+	shimPath := filepath.Join(shimDir, "gh")
+	if err := os.MkdirAll(shimDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	block, err := updateShimBlock(nil, shimPath, "/opt/bin/gh")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	script := strings.Join([]string{
+		"PATH=" + shellSingleQuote(shimDir+":/usr/bin"),
+		string(block),
+		string(block),
+		"printf '%s' \"$PATH\"",
+	}, "\n")
+	out, err := exec.Command(zsh, "-f", "-c", script).Output()
+	if err != nil {
+		t.Fatalf("zsh failed: %v", err)
+	}
+	parts := strings.Split(string(out), ":")
+	count := 0
+	for _, part := range parts {
+		if part == shimDir {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("shim dir appeared %d times in PATH %q", count, out)
 	}
 }
 

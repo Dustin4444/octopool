@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
+import { deleteEdgeJSON } from "../../src/edge-cache";
 import { jsonResponse, relay, seedPool } from "./harness";
 
 const HEAD = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -145,6 +146,82 @@ describe("Worker end-to-end PR-state cache", () => {
       "SELECT cache_status FROM audit_events ORDER BY rowid",
     ).all<{ cache_status: string }>();
     expect(audits.results).toEqual([{ cache_status: "miss" }, { cache_status: "hit" }]);
+  });
+
+  it("does not serve stale data for a PR-state hint rejected by live revalidation", async () => {
+    await seedPool();
+    await env.DB.prepare(
+      `INSERT INTO github_pr_state_proofs
+       (owner, repo, number, state_hint, checked_at, expires_at)
+       VALUES ('openclaw', 'octopool', 42, ?, CURRENT_TIMESTAMP, datetime('now', '+5 minutes'))`,
+    )
+      .bind(`pr-head:${FORGED_HEAD}`)
+      .run();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        expect(request.headers.get("authorization")).toBeNull();
+        const url = new URL(request.url);
+        if (url.pathname === "/repos/openclaw/octopool/pulls/42") {
+          return jsonResponse({ state: "open", merged_at: null, head: { sha: FORGED_HEAD } });
+        }
+        if (url.pathname === FILES_PATH) {
+          return jsonResponse([{ filename: "forged-stale.ts" }]);
+        }
+        return jsonResponse({ message: "unexpected prime request" }, 500);
+      }),
+    );
+    const primed = await hintedRelay({ pr_head_sha: FORGED_HEAD });
+    expect(await primed.json<RelayEnvelope>()).toMatchObject({
+      body: [{ filename: "forged-stale.ts" }],
+      relay: { backend: "web", cache: "miss", route_kind: "pr_files" },
+    });
+
+    const cacheRow = await env.DB.prepare(
+      "SELECT cache_key FROM github_cache_entries WHERE route_kind = 'pr_files' LIMIT 1",
+    ).first<{ cache_key: string }>();
+    expect(cacheRow).not.toBeNull();
+    await env.DB.prepare(
+      `UPDATE github_cache_entries
+       SET expires_at = datetime('now', '-1 second'),
+           stale_expires_at = datetime('now', '+1 hour')
+       WHERE cache_key = ?`,
+    )
+      .bind(cacheRow!.cache_key)
+      .run();
+    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        const token = request.headers.get("authorization");
+        const url = new URL(request.url);
+        if (token === null && url.pathname === "/repos/openclaw/octopool/pulls/42") {
+          return jsonResponse({ state: "open", merged_at: null, head: { sha: HEAD } });
+        }
+        if (token === null && url.pathname === "/repos/openclaw/octopool") {
+          return jsonResponse({ private: false });
+        }
+        if (token === null && url.pathname === FILES_PATH) {
+          return jsonResponse({ message: "public unavailable" }, 503);
+        }
+        return jsonResponse({ message: "rate limited" }, 429, {
+          "retry-after": "60",
+          "x-ratelimit-limit": "5000",
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 3600),
+          "x-ratelimit-resource": "core",
+        });
+      }),
+    );
+
+    const response = await hintedRelay({ pr_head_sha: FORGED_HEAD });
+    expect(response.status).toBe(424);
+    expect(await response.json()).toMatchObject({
+      error: { code: "fallback_local", details: { reason: "github_rate_limited" } },
+    });
   });
 });
 

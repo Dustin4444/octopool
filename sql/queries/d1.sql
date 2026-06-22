@@ -454,6 +454,14 @@ SELECT
     ELSE 0
   END) AS service_errors,
   SUM(CASE WHEN error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
+  SUM(CASE
+    WHEN error_code = 'fallback_local'
+      AND COALESCE(fallback_reason, '') NOT IN (
+        'logs_denied', 'owner_denied', 'repo_not_public', 'repo_public_check_failed',
+        'route_denied', 'search_denied'
+      )
+    THEN 1 ELSE 0
+  END) AS operational_fallbacks,
   AVG(duration_ms) AS avg_duration_ms,
   SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
   SUM(CASE WHEN cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,

@@ -72,7 +72,7 @@ export async function finishGitHubWebLogin(
   const nextPath = await verifyOAuthState(env, state);
 
   const githubToken = await exchangeGitHubCode(request, env, code);
-  const user = await githubUserFromToken(githubToken);
+  const user = await githubUserFromToken(env, githubToken);
   const verifiedAt = await verifyGitHubOrgMember(env, user.login);
   const pool = defaultLoginPool(env);
   const caller = await ensureWebCaller(env, pool, user, verifiedAt);
@@ -145,8 +145,9 @@ export async function requireDashboardAdmin(
 
 export function webLoginRedirect(request: Request, env: Env): Response {
   const url = new URL(request.url);
+  const next = `${url.pathname}${url.search}`;
   return Response.redirect(
-    `${effectiveOrigin(request, env)}/login/github?next=${encodeURIComponent(url.pathname)}`,
+    `${effectiveOrigin(request, env)}/login/github?next=${encodeURIComponent(next)}`,
     302,
   );
 }
@@ -211,11 +212,21 @@ function safeNextPath(value: string | null): string {
     !value.startsWith("/") ||
     value.startsWith("//") ||
     value.includes("\\") ||
-    value.includes("\n")
+    hasControlCharacter(value)
   ) {
     return "/dashboard";
   }
   return value;
+}
+
+function hasControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function githubOAuthCallbackOrigin(request: Request, env: Env): string {

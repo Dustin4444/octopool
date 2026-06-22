@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS leases (
 CREATE TABLE IF NOT EXISTS rate_states (
   identity_id TEXT NOT NULL,
   resource TEXT NOT NULL,
+  limit_count INTEGER NOT NULL DEFAULT 5000,
   remaining INTEGER NOT NULL,
   reset_at INTEGER NOT NULL,
   PRIMARY KEY (identity_id, resource)

@@ -589,8 +589,8 @@ function pageCanonicalUrl(page) {
 
 function tagHtml([tag, k1, v1, k2, v2]) {
   return tag === "link"
-    ? `<link ${k1}="${v1}" ${k2}="${escapeAttr(v2)}">`
-    : `<meta ${k1}="${v1}" ${k2}="${escapeAttr(v2)}">`;
+    ? `<link ${k1}="${escapeAttr(v1)}" ${k2}="${escapeAttr(v2)}">`
+    : `<meta ${k1}="${escapeAttr(v1)}" ${k2}="${escapeAttr(v2)}">`;
 }
 
 function pageNavHtml(prev, next, currentOutRel) {

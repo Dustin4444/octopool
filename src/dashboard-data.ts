@@ -167,7 +167,7 @@ async function dashboardRouteUsage(env: Env, pool: string) {
       requests: row.requests,
       errors: row.errors ?? 0,
       service_errors: row.service_errors ?? 0,
-      fallbacks: row.fallbacks ?? 0,
+      fallbacks: row.operational_fallbacks ?? 0,
       cache_hits: cache.cache_hits,
       cache_stale: cache.cache_stale,
       cache_misses: cache.cache_misses,

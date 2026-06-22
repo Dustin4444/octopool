@@ -242,11 +242,16 @@ function renderRates(data) {
   for (const rate of data.coordinator.rates) {
     const identity = identities.get(rate.identity_id);
     const label = (identity ? identity.login : rate.identity_id) + " · " + rate.resource;
-    const pct = Math.max(0, Math.min(100, rate.remaining / 50));
     const row = el("div", "", "bar");
-    row.append(el("div", label), meter(pct), el("div", fmt(rate.remaining)));
+    row.append(el("div", label), meter(ratePercent(rate)), el("div", fmt(rate.remaining)));
     target.append(row);
   }
+}
+
+function ratePercent(rate) {
+  const limit = Number(rate.limit_count || 0);
+  if (limit <= 0) return 0;
+  return Math.max(0, Math.min(100, (Number(rate.remaining || 0) / limit) * 100));
 }
 
 function rows(id, items, map, columns = 5) {

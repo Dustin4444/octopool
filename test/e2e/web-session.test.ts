@@ -27,7 +27,8 @@ describe("Worker end-to-end web sessions", () => {
     });
     vi.stubGlobal("fetch", upstream);
 
-    const start = await callWorker(`${APP}/login/github?next=${encodeURIComponent("/dashboard")}`);
+    const next = "/dashboard?pool=alt";
+    const start = await callWorker(`${APP}/login/github?next=${encodeURIComponent(next)}`);
     expect(start.status).toBe(302);
     const authorize = new URL(start.headers.get("location")!);
     expect(authorize.origin + authorize.pathname).toBe("https://github.com/login/oauth/authorize");
@@ -43,7 +44,7 @@ describe("Worker end-to-end web sessions", () => {
       { headers: { cookie: `octopool_oauth_state=${encodeURIComponent(state)}` } },
     );
     expect(callback.status).toBe(302);
-    expect(callback.headers.get("location")).toBe("/dashboard");
+    expect(callback.headers.get("location")).toBe(next);
     const session = cookieValue(callback, "octopool_session");
     expect(session).toMatch(/^sess_/);
     expect(upstream).toHaveBeenCalledTimes(3);
@@ -91,6 +92,48 @@ describe("Worker end-to-end web sessions", () => {
     const afterLogout = await callWorker(`${APP}/v1/me`, { headers: { cookie } });
     expect(afterLogout.status).toBe(401);
     expect(await afterLogout.json()).toMatchObject({ error: { code: "invalid_web_session" } });
+  });
+
+  it("redirects dashboard login through query-bearing next paths and rejects control chars", async () => {
+    await seedPool();
+    const session = await seedWebSession();
+
+    const redirect = await callWorker(`${APP}/dashboard?pool=alt`);
+    expect(redirect.status).toBe(302);
+    expect(redirect.headers.get("location")).toBe(
+      "https://octopool.openclaw.ai/login/github?next=%2Fdashboard%3Fpool%3Dalt",
+    );
+
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      if (url.hostname === "github.com" && url.pathname === "/login/oauth/access_token") {
+        return jsonResponse({ access_token: "oauth-user-token" });
+      }
+      if (url.pathname === "/user" && bearer(request) === "oauth-user-token") {
+        return jsonResponse({ id: 502, login: "web-user-2" });
+      }
+      if (
+        url.pathname === "/orgs/openclaw/members/web-user-2" &&
+        bearer(request) === "test-org-token"
+      ) {
+        return new Response(null, { status: 204 });
+      }
+      return jsonResponse({ message: "unexpected OAuth request" }, 500);
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const start = await callWorker(
+      `${APP}/login/github?next=${encodeURIComponent("/dashboard\rset-cookie:x")}`,
+      { headers: { cookie: `octopool_session=${session}` } },
+    );
+    const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
+    const callback = await callWorker(
+      `${APP}/login/github/callback?code=oauth-code&state=${encodeURIComponent(state)}`,
+      { headers: { cookie: `octopool_oauth_state=${encodeURIComponent(state)}` } },
+    );
+    expect(callback.status).toBe(302);
+    expect(callback.headers.get("location")).toBe("/dashboard");
   });
 
   it("refreshes stale membership and rejects revoked members", async () => {

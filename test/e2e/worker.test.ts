@@ -152,9 +152,13 @@ describe("Worker end-to-end relay", () => {
         ([request, init]) => bearer(request, init) === "test-secondary-token",
       ),
     ).toHaveLength(1);
-    expect(await env.DB.prepare("SELECT identity_id FROM github_cache_entries").first()).toEqual({
-      identity_id: "secondary",
-    });
+    const cacheIdentities = await env.DB.prepare(
+      "SELECT identity_id FROM github_cache_entries ORDER BY identity_id",
+    ).all<{ identity_id: string }>();
+    expect(cacheIdentities.results).toEqual([
+      { identity_id: "primary" },
+      { identity_id: "secondary" },
+    ]);
     const audits = await env.DB.prepare(
       "SELECT identity_id, cache_status, status FROM audit_events ORDER BY rowid",
     ).all<{ identity_id: string; cache_status: string; status: number }>();
@@ -207,10 +211,43 @@ describe("Worker end-to-end relay", () => {
     ]);
     expect(snapshot.rates).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ identity_id: "primary", remaining: 0 }),
-        expect.objectContaining({ identity_id: "secondary", remaining: 4999 }),
+        expect.objectContaining({ identity_id: "primary", limit_count: 5000, remaining: 0 }),
+        expect.objectContaining({ identity_id: "secondary", limit_count: 5000, remaining: 4999 }),
       ]),
     );
+  });
+
+  it("serves fresh identity cache before excluding a rate-depleted identity", async () => {
+    await seedPool();
+    const upstream = githubUpstream({
+      primary: jsonResponse(
+        { id: 3, full_name: "openclaw/octopool", private: false },
+        200,
+        rateHeaders({ remaining: 0 }),
+      ),
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const primed = await relay("/repos/openclaw/octopool");
+    expect(primed.status).toBe(200);
+    expect(await primed.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 3 },
+      identity: { id: "primary", kind: "pat" },
+      relay: { cache: "miss", route_kind: "repo_view" },
+    });
+
+    const cached = await relay("/repos/openclaw/octopool");
+    expect(cached.status).toBe(200);
+    expect(await cached.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 3 },
+      identity: { id: "primary", kind: "pat" },
+      relay: { cache: "hit", route_kind: "repo_view" },
+    });
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-primary-token",
+      ),
+    ).toHaveLength(1);
   });
 
   it("coalesces concurrent cache misses into one authenticated GitHub request", async () => {
@@ -327,6 +364,206 @@ describe("Worker end-to-end relay", () => {
       { cache_status: "miss", status: 200 },
       { cache_status: "stale", status: 200 },
     ]);
+
+    const blocked = await relay("/repos/openclaw/octopool");
+    expect(blocked.status).toBe(200);
+    expect(await blocked.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 4, full_name: "openclaw/octopool", private: false },
+      identity: { id: "primary", kind: "pat" },
+      relay: {
+        cache: "stale",
+        route_kind: "repo_view",
+        stale_ok: true,
+        stale_reason: "identities_cooling_down",
+      },
+    });
+    expect(
+      limited.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-primary-token",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("tries another identity before serving stale cache", async () => {
+    await seedPool({ secondary: true });
+    vi.stubGlobal(
+      "fetch",
+      githubUpstream({
+        primary: jsonResponse({ id: 6, full_name: "openclaw/octopool", private: false }),
+      }),
+    );
+    const primed = await relay("/repos/openclaw/octopool");
+    expect(primed.status).toBe(200);
+    const cacheRow = await env.DB.prepare(
+      "SELECT cache_key FROM github_cache_entries LIMIT 1",
+    ).first<{ cache_key: string }>();
+    expect(cacheRow).not.toBeNull();
+    await env.DB.prepare(
+      `UPDATE github_cache_entries
+       SET expires_at = datetime('now', '-1 second'),
+           stale_expires_at = datetime('now', '+1 hour')
+       WHERE cache_key = ?`,
+    )
+      .bind(cacheRow!.cache_key)
+      .run();
+    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+
+    const upstream = githubUpstream({
+      primary: jsonResponse(
+        { message: "rate limited" },
+        429,
+        rateHeaders({ remaining: 0, retryAfter: 60 }),
+      ),
+      secondary: jsonResponse(
+        { id: 7, full_name: "openclaw/octopool", private: false },
+        200,
+        rateHeaders({ remaining: 4998 }),
+      ),
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay("/repos/openclaw/octopool");
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 7 },
+      identity: { id: "secondary", kind: "pat" },
+      relay: { cache: "miss", route_kind: "repo_view" },
+    });
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-secondary-token",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("serves stale cache from an earlier identity after all identities fail", async () => {
+    await seedPool({ secondary: true });
+    vi.stubGlobal(
+      "fetch",
+      githubUpstream({
+        primary: jsonResponse({ id: 8, full_name: "openclaw/octopool", private: false }),
+      }),
+    );
+    const primed = await relay("/repos/openclaw/octopool");
+    expect(primed.status).toBe(200);
+    const cacheRow = await env.DB.prepare(
+      "SELECT cache_key FROM github_cache_entries LIMIT 1",
+    ).first<{ cache_key: string }>();
+    expect(cacheRow).not.toBeNull();
+    await env.DB.prepare(
+      `UPDATE github_cache_entries
+       SET expires_at = datetime('now', '-1 second'),
+           stale_expires_at = datetime('now', '+1 hour')
+       WHERE cache_key = ?`,
+    )
+      .bind(cacheRow!.cache_key)
+      .run();
+    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+
+    const upstream = githubUpstream({
+      primary: jsonResponse(
+        { message: "rate limited" },
+        429,
+        rateHeaders({ remaining: 0, retryAfter: 60 }),
+      ),
+      secondary: jsonResponse(
+        { message: "rate limited" },
+        429,
+        rateHeaders({ remaining: 0, retryAfter: 60 }),
+      ),
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay("/repos/openclaw/octopool");
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 8 },
+      identity: { id: "primary", kind: "pat" },
+      relay: {
+        cache: "stale",
+        route_kind: "repo_view",
+        stale_ok: true,
+        stale_reason: "github_rate_limited",
+      },
+    });
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-secondary-token",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("serves stale anonymous cache after selected identities become rate limited", async () => {
+    await seedPool();
+    const publicResponse = {
+      type: "file",
+      encoding: "base64",
+      name: "README.md",
+      path: "README.md",
+      content: "IyBPY3RvcG9vbAo=",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const token = bearer(input, init);
+        if (token === undefined) {
+          return jsonResponse(publicResponse);
+        }
+        return jsonResponse({ message: "unexpected identity request" }, 500);
+      }),
+    );
+    const primed = await relay("/repos/openclaw/octopool/contents/README.md");
+    expect(primed.status).toBe(200);
+    expect(await primed.json<RelayEnvelope>()).toMatchObject({
+      body: publicResponse,
+      relay: { backend: "web", cache: "miss" },
+    });
+
+    const cacheRow = await env.DB.prepare(
+      "SELECT cache_key, identity_id FROM github_cache_entries LIMIT 1",
+    ).first<{ cache_key: string; identity_id: string | null }>();
+    expect(cacheRow).toMatchObject({ identity_id: null });
+    await env.DB.prepare(
+      `UPDATE github_cache_entries
+       SET expires_at = datetime('now', '-1 second'),
+           stale_expires_at = datetime('now', '+1 hour')
+       WHERE cache_key = ?`,
+    )
+      .bind(cacheRow!.cache_key)
+      .run();
+    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+
+    const limited = vi.fn<typeof fetch>(async (input, init) => {
+      const token = bearer(input, init);
+      const url = new URL(new Request(input, init).url);
+      if (token === undefined) {
+        if (url.pathname === "/repos/openclaw/octopool") {
+          return jsonResponse({ private: false });
+        }
+        return jsonResponse({ message: "public unavailable" }, 503);
+      }
+      if (token === "test-primary-token") {
+        return jsonResponse(
+          { message: "rate limited" },
+          429,
+          rateHeaders({ remaining: 0, retryAfter: 60 }),
+        );
+      }
+      return jsonResponse({ message: "unexpected request" }, 500);
+    });
+    vi.stubGlobal("fetch", limited);
+
+    const response = await relay("/repos/openclaw/octopool/contents/README.md");
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      body: publicResponse,
+      relay: {
+        backend: "web",
+        cache: "stale",
+        stale_ok: true,
+        stale_reason: "github_rate_limited",
+      },
+    });
   });
 
   it("rejects invalid caller authentication before touching GitHub", async () => {
@@ -417,7 +654,11 @@ describe("Worker end-to-end read models", () => {
     expect(body.route_usage).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ route_kind: "repo_view", eligible_cache_hit_rate: 0.5 }),
-        expect.objectContaining({ route_kind: "actions_log", eligible_cache_hit_rate: null }),
+        expect.objectContaining({
+          route_kind: "actions_log",
+          eligible_cache_hit_rate: null,
+          fallbacks: 0,
+        }),
       ]),
     );
     expect(body.coordinator).toEqual({ rates: [], cooldowns: [], leases: [] });

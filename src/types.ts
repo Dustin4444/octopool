@@ -101,6 +101,7 @@ export type CoordinatorSnapshot = {
   rates: {
     identity_id: string;
     resource: string;
+    limit_count: number;
     remaining: number;
     reset_at: number;
   }[];

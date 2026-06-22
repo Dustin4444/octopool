@@ -216,11 +216,18 @@ func updateShimBlock(before []byte, shimPath string, realGHPath string) ([]byte,
 		return nil, errors.New("found multiple Octopool managed blocks")
 	}
 
-	quotedShimDir := shellSingleQuote(filepath.Dir(shimPath))
+	shimDir := filepath.Dir(shimPath)
 	block := strings.Join([]string{
 		shimBlockStart,
 		"export OCTOPOOL_GH_PATH=" + shellSingleQuote(realGHPath),
-		"export PATH=" + quotedShimDir + ":\"${PATH#" + quotedShimDir + ":}\"",
+		"octopool_shim_dir=" + shellSingleQuote(shimDir),
+		"octopool_path_next=\"$octopool_shim_dir\"",
+		"for octopool_path_part in \"${(@s/:/)PATH}\"; do",
+		"  [ \"$octopool_path_part\" = \"$octopool_shim_dir\" ] && continue",
+		"  octopool_path_next=\"$octopool_path_next:$octopool_path_part\"",
+		"done",
+		"export PATH=\"$octopool_path_next\"",
+		"unset octopool_shim_dir octopool_path_next octopool_path_part",
 		shimBlockEnd,
 	}, "\n")
 	if start >= 0 {

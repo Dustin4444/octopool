@@ -152,6 +152,24 @@ describe("github cache policy", () => {
     expect(classifyRoute(request, policy).state_hint).toBeUndefined();
   });
 
+  it("separates authenticated cache entries by GitHub identity", async () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/85341",
+    });
+    const route = classifyRoute(request, policy);
+
+    await expect(
+      githubCacheKey("maintainers", request, route, { id: "primary", kind: "pat" }),
+    ).resolves.not.toBe(
+      await githubCacheKey("maintainers", request, route, { id: "secondary", kind: "pat" }),
+    );
+    await expect(githubCacheKey("maintainers", request, route)).resolves.not.toBe(
+      await githubCacheKey("maintainers", request, route, { id: "primary", kind: "pat" }),
+    );
+  });
+
   it("bypasses conditional and rate-limit reads", () => {
     const pr = validateRelayRequest({
       pool: "maintainers",

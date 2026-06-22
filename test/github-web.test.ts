@@ -36,10 +36,11 @@ describe("github web provider", () => {
   });
 
   it("follows GitHub public diff redirects to the patch host", async () => {
+    const cancel = vi.fn();
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        new Response(null, {
+        new Response(new ReadableStream({ cancel }), {
           status: 302,
           headers: {
             location: "https://patch-diff.githubusercontent.com/raw/openclaw/octopool/pull/12.diff",
@@ -58,6 +59,7 @@ describe("github web provider", () => {
     const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
 
     expect(response).toMatchObject({ status: 200, backend: "web" });
+    expect(cancel).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "https://patch-diff.githubusercontent.com/raw/openclaw/octopool/pull/12.diff",

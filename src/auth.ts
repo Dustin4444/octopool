@@ -1,5 +1,5 @@
 import { bytesToBase64URL } from "./encoding";
-import { HttpError, requestBearer } from "./http";
+import { HttpError, parsePositiveInt, requestBearer } from "./http";
 import { queries } from "./generated/sql";
 import type { Caller } from "./types";
 
@@ -56,18 +56,17 @@ export function newToken(prefix: string): string {
   return `${prefix}_${bytesToBase64URL(bytes)}`;
 }
 
-export async function githubUserFromToken(token: string): Promise<{
+export async function githubUserFromToken(
+  env: Env,
+  token: string,
+): Promise<{
   id: number;
   login: string;
   name?: string;
 }> {
   const response = await fetch("https://api.github.com/user", {
-    headers: {
-      accept: "application/vnd.github+json",
-      authorization: `Bearer ${token}`,
-      "user-agent": "octopool",
-      "x-github-api-version": "2022-11-28",
-    },
+    headers: githubHeaders(token),
+    signal: githubRequestSignal(env),
   });
   if (!response.ok) {
     throw new HttpError(
@@ -112,16 +111,16 @@ function githubRateLimitDetails(headers: Headers): Record<string, string> | unde
   return Object.keys(details).length === 0 ? undefined : details;
 }
 
-export async function githubUserByLogin(login: string): Promise<{
+export async function githubUserByLogin(
+  env: Env,
+  login: string,
+): Promise<{
   id: number;
   login: string;
 }> {
   const response = await fetch(`https://api.github.com/users/${encodeURIComponent(login)}`, {
-    headers: {
-      accept: "application/vnd.github+json",
-      "user-agent": "octopool",
-      "x-github-api-version": "2022-11-28",
-    },
+    headers: githubHeaders(),
+    signal: githubRequestSignal(env),
   });
   if (!response.ok) {
     throw new HttpError(
@@ -155,12 +154,8 @@ export async function verifyGitHubOrgMember(env: Env, login: string): Promise<st
   const response = await fetch(
     `https://api.github.com/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(login)}`,
     {
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${token}`,
-        "user-agent": "octopool",
-        "x-github-api-version": "2022-11-28",
-      },
+      headers: githubHeaders(token),
+      signal: githubRequestSignal(env),
     },
   );
   if (response.status === 204) {
@@ -189,12 +184,8 @@ export async function verifyGitHubOrgMemberWithToken(
   const response = await fetch(
     `https://api.github.com/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(login)}`,
     {
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${token}`,
-        "user-agent": "octopool",
-        "x-github-api-version": "2022-11-28",
-      },
+      headers: githubHeaders(token),
+      signal: githubRequestSignal(env),
     },
   );
   if (response.status === 204) {
@@ -238,4 +229,17 @@ async function constantTimeEqual(left: string, right: string): Promise<boolean> 
 
 export function envSecret(env: Env, name: string): string | undefined {
   return (env as unknown as Record<string, string | undefined>)[name];
+}
+
+function githubHeaders(token?: string): Record<string, string> {
+  return {
+    accept: "application/vnd.github+json",
+    ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+    "user-agent": "octopool",
+    "x-github-api-version": "2022-11-28",
+  };
+}
+
+function githubRequestSignal(env: Env): AbortSignal {
+  return AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000));
 }

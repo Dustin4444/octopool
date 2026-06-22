@@ -33,6 +33,7 @@ export async function githubCacheKey(
   pool: string,
   request: RelayRequest,
   route: RouteInfo,
+  identity?: Pick<Identity, "id" | "kind">,
 ): Promise<string> {
   const stable = {
     pool,
@@ -42,6 +43,7 @@ export async function githubCacheKey(
     headers: stableRecord(cacheVaryHeaders(request.headers)),
     route_key: route.routeKey,
     state: cacheStateDiscriminator(route),
+    ...(identity === undefined ? {} : { identity: `${identity.kind}:${identity.id}` }),
   };
   return hashToken(JSON.stringify(stable));
 }

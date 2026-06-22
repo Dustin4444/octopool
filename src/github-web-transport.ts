@@ -28,18 +28,22 @@ export async function fetchWebResponse(
   }
   const location = response.headers.get("location");
   if (location === null) {
+    await cancelResponseBody(response);
     return undefined;
   }
   let redirectedURL: URL;
   try {
     redirectedURL = new URL(location, responseURL);
   } catch {
+    await cancelResponseBody(response);
     return undefined;
   }
   if (redirectedURL.protocol !== "https:" || !allowedWebRedirectHost(redirectedURL.hostname)) {
+    await cancelResponseBody(response);
     return undefined;
   }
   try {
+    await cancelResponseBody(response);
     const redirected = await fetch(redirectedURL.toString(), {
       method: "GET",
       headers,
@@ -56,6 +60,10 @@ export async function fetchWebResponse(
   } catch {
     return undefined;
   }
+}
+
+async function cancelResponseBody(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
 }
 
 export async function fetchPublicPage(

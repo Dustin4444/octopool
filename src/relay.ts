@@ -47,7 +47,9 @@ type RelayBase = {
 type ActiveRelay = RelayBase & {
   route: RouteInfo;
   cacheEnabled: boolean;
+  sharedCacheKey: string | undefined;
   cacheKey: string | undefined;
+  attemptedIdentityCacheKeys: { cacheKey: string; identity: Pick<Identity, "id" | "kind"> }[];
   cacheFillToken: string | undefined;
   cacheStatus: "miss" | "bypass";
   cacheable: boolean;
@@ -117,7 +119,9 @@ async function prepareRelay(
     ...base,
     route,
     cacheEnabled,
+    sharedCacheKey: cacheKey,
     cacheKey,
+    attemptedIdentityCacheKeys: [],
     cacheFillToken: undefined,
     cacheStatus: cacheKey === undefined ? "bypass" : "miss",
     cacheable: cacheKey !== undefined,
@@ -172,11 +176,11 @@ async function readFreshRelayCache(state: ActiveRelay): Promise<CachedGitHubResp
     return cached;
   }
   state.route = await verifyPRStateHintLive(state.env, state.request, state.route);
-  state.cacheKey = state.cacheEnabled
+  const cacheKey = state.cacheEnabled
     ? await githubCacheKey(state.request.pool, state.request, state.route)
     : undefined;
-  state.cacheStatus = state.cacheKey === undefined ? "bypass" : "miss";
-  state.cacheable = state.cacheKey !== undefined;
+  state.sharedCacheKey = cacheKey;
+  await switchRelayCacheKey(state, cacheKey);
   cached = await readAvailableCache(state);
   return cached;
 }
@@ -185,7 +189,15 @@ async function readAvailableCache(state: ActiveRelay): Promise<CachedGitHubRespo
   if (state.cacheKey === undefined) {
     return undefined;
   }
-  const cached = await readGitHubCache(state.env, state.cacheKey, state.ctx);
+  return readCacheEntry(state, state.cacheKey, state.identity);
+}
+
+async function readCacheEntry(
+  state: ActiveRelay,
+  cacheKey: string,
+  identity: Identity | undefined,
+): Promise<CachedGitHubResponse | undefined> {
+  const cached = await readGitHubCache(state.env, cacheKey, state.ctx);
   if (
     cached === undefined ||
     !(await cachedResponseAvailable(
@@ -194,6 +206,7 @@ async function readAvailableCache(state: ActiveRelay): Promise<CachedGitHubRespo
       state.route,
       cached,
       state.coordinator,
+      identity,
     ))
   ) {
     return undefined;
@@ -217,6 +230,7 @@ async function coalesceRelayCacheMiss(
       state.route,
       fill.cached,
       state.coordinator,
+      state.identity,
     ))
   ) {
     return undefined;
@@ -263,6 +277,7 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
   if (identities.length === 0) {
     throw new HttpError(503, "no_identity", "No active identity can serve this route");
   }
+  await rememberIdentityCacheKeys(state, identities);
   const attemptedIdentityIds = new Set<string>();
   let fallbackReason = "identity_pool_depleted";
   for (let attempt = 0; attempt < identities.length; attempt++) {
@@ -272,6 +287,10 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     if (candidates.length === 0) {
       break;
     }
+    const identityCached = await serveFreshIdentityCache(state, identities, attemptedIdentityIds);
+    if (identityCached !== undefined) {
+      return identityCached;
+    }
     const selection = await selectIdentity(state.coordinator, {
       pool: state.request.pool,
       routeKey: state.route.routeKey,
@@ -280,6 +299,27 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     });
     const identity = findIdentity(identities, selection.identityId);
     state.identity = identity;
+    const identityCacheKey = state.cacheEnabled
+      ? await githubCacheKey(state.request.pool, state.request, state.route, identity)
+      : undefined;
+    rememberIdentityCacheKey(state, identityCacheKey, identity);
+    await switchRelayCacheKey(state, identityCacheKey);
+    const cached = await readAvailableCache(state);
+    if (cached !== undefined) {
+      return serveCachedGitHubResponse(
+        state.env,
+        state.ctx,
+        cachedResponseParams(state, cached, "hit"),
+      );
+    }
+    const coalesced = await coalesceRelayCacheMiss(state);
+    if (coalesced !== undefined) {
+      return serveCachedGitHubResponse(
+        state.env,
+        state.ctx,
+        cachedResponseParams(state, coalesced, "hit", { coalesced: true }),
+      );
+    }
     const github = sanitizeGitHubResponse(
       state.route,
       await callGitHub(state.env, identity, state.request, state.route),
@@ -306,6 +346,22 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
   throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
     reason: fallbackReason,
   });
+}
+
+async function switchRelayCacheKey(
+  state: ActiveRelay,
+  cacheKey: string | undefined,
+): Promise<void> {
+  if (state.cacheKey === cacheKey) {
+    return;
+  }
+  if (state.cacheKey !== undefined) {
+    await finishGitHubCacheFill(state.coordinator, state.cacheKey, state.cacheFillToken);
+  }
+  state.cacheKey = cacheKey;
+  state.cacheFillToken = undefined;
+  state.cacheStatus = cacheKey === undefined ? "bypass" : "miss";
+  state.cacheable = cacheKey !== undefined;
 }
 
 async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): Promise<Response> {
@@ -415,28 +471,73 @@ async function serveStaleRelayCache(
   state: ActiveRelay,
   staleReason: string,
 ): Promise<Response | undefined> {
-  if (state.cacheKey === undefined || !staleFallbackReason(staleReason)) {
+  if (!staleFallbackReason(staleReason)) {
     return undefined;
   }
-  const cached = await readStaleGitHubCache(state.env, state.cacheKey, state.route);
-  if (
-    cached === undefined ||
-    !(await cachedResponseAvailable(
+  for (const candidate of staleCacheCandidates(state)) {
+    const cached = await readStaleGitHubCache(state.env, candidate.cacheKey, state.route);
+    if (
+      cached === undefined ||
+      !(await cachedResponseAvailable(
+        state.env,
+        state.request.pool,
+        state.route,
+        cached,
+        state.coordinator,
+        candidate.identity,
+        true,
+      ))
+    ) {
+      continue;
+    }
+    return serveCachedGitHubResponse(
       state.env,
-      state.request.pool,
-      state.route,
-      cached,
-      state.coordinator,
-      true,
-    ))
-  ) {
-    return undefined;
+      state.ctx,
+      cachedResponseParams(state, cached, "stale", { staleReason }),
+    );
   }
-  return serveCachedGitHubResponse(
-    state.env,
-    state.ctx,
-    cachedResponseParams(state, cached, "stale", { staleReason }),
-  );
+  return undefined;
+}
+
+function staleCacheCandidates(
+  state: ActiveRelay,
+): { cacheKey: string; identity?: Pick<Identity, "id" | "kind"> }[] {
+  const candidates: { cacheKey: string; identity?: Pick<Identity, "id" | "kind"> }[] = [];
+  for (const attempted of state.attemptedIdentityCacheKeys) {
+    pushStaleCacheCandidate(candidates, attempted);
+  }
+  if (state.cacheKey !== undefined) {
+    pushStaleCacheCandidate(candidates, {
+      cacheKey: state.cacheKey,
+      ...(state.identity === undefined ? {} : { identity: state.identity }),
+    });
+  }
+  if (state.sharedCacheKey !== undefined && state.sharedCacheKey !== state.cacheKey) {
+    pushStaleCacheCandidate(candidates, { cacheKey: state.sharedCacheKey });
+  }
+  return candidates;
+}
+
+function rememberIdentityCacheKey(
+  state: ActiveRelay,
+  cacheKey: string | undefined,
+  identity: Pick<Identity, "id" | "kind">,
+): void {
+  if (
+    cacheKey !== undefined &&
+    !state.attemptedIdentityCacheKeys.some((candidate) => candidate.cacheKey === cacheKey)
+  ) {
+    state.attemptedIdentityCacheKeys.push({ cacheKey, identity });
+  }
+}
+
+function pushStaleCacheCandidate(
+  candidates: { cacheKey: string; identity?: Pick<Identity, "id" | "kind"> }[],
+  candidate: { cacheKey: string; identity?: Pick<Identity, "id" | "kind"> },
+): void {
+  if (!candidates.some((existing) => existing.cacheKey === candidate.cacheKey)) {
+    candidates.push(candidate);
+  }
 }
 
 function cachedResponseParams(
@@ -576,6 +677,47 @@ function staleFallbackReasonFromError(error: unknown): string | undefined {
   return typeof reason === "string" && staleFallbackReason(reason) ? reason : undefined;
 }
 
+async function serveFreshIdentityCache(
+  state: ActiveRelay,
+  identities: Identity[],
+  attemptedIdentityIds: Set<string>,
+): Promise<Response | undefined> {
+  if (!state.cacheEnabled) {
+    return undefined;
+  }
+  for (const identity of identities) {
+    if (attemptedIdentityIds.has(identity.id)) {
+      continue;
+    }
+    const cacheKey = await githubCacheKey(state.request.pool, state.request, state.route, identity);
+    const cached = await readCacheEntry(state, cacheKey, identity);
+    if (cached === undefined) {
+      continue;
+    }
+    state.identity = identity;
+    await switchRelayCacheKey(state, cacheKey);
+    return serveCachedGitHubResponse(
+      state.env,
+      state.ctx,
+      cachedResponseParams(state, cached, "hit"),
+    );
+  }
+  return undefined;
+}
+
+async function rememberIdentityCacheKeys(state: ActiveRelay, identities: Identity[]): Promise<void> {
+  if (!state.cacheEnabled) {
+    return;
+  }
+  for (const identity of identities) {
+    rememberIdentityCacheKey(
+      state,
+      await githubCacheKey(state.request.pool, state.request, state.route, identity),
+      identity,
+    );
+  }
+}
+
 async function selectIdentity(
   coordinator: DurableObjectStub<PoolCoordinator>,
   request: SelectionRequest,
@@ -598,10 +740,18 @@ async function cachedIdentityAvailable(
   env: Env,
   pool: string,
   route: ReturnType<typeof classifyRoute>,
-  identity: Pick<Identity, "id" | "kind"> | undefined,
+  cachedIdentity: Pick<Identity, "id" | "kind"> | undefined,
+  selectedIdentity: Pick<Identity, "id" | "kind"> | undefined,
 ): Promise<boolean> {
-  if (identity === undefined) {
-    return true;
+  if (selectedIdentity === undefined) {
+    return cachedIdentity === undefined;
+  }
+  if (
+    cachedIdentity === undefined ||
+    cachedIdentity.id !== selectedIdentity.id ||
+    cachedIdentity.kind !== selectedIdentity.kind
+  ) {
+    return false;
   }
   if (capabilitiesForRouteKind(route.kind).fallback === "github_public") {
     return false;
@@ -610,17 +760,18 @@ async function cachedIdentityAvailable(
   if (activeIdentities.length === 0) {
     throw new HttpError(503, "no_identity", "No active identity can serve this route");
   }
-  return activeIdentities.some((candidate) => candidate.id === identity.id);
+  return activeIdentities.some((candidate) => candidate.id === cachedIdentity.id);
 }
 
 async function staleCachedIdentityAvailable(
   env: Env,
   pool: string,
   route: ReturnType<typeof classifyRoute>,
-  identity: Pick<Identity, "id" | "kind"> | undefined,
+  cachedIdentity: Pick<Identity, "id" | "kind"> | undefined,
+  selectedIdentity: Pick<Identity, "id" | "kind"> | undefined,
 ): Promise<boolean> {
   try {
-    return await cachedIdentityAvailable(env, pool, route, identity);
+    return await cachedIdentityAvailable(env, pool, route, cachedIdentity, selectedIdentity);
   } catch (error) {
     if (error instanceof HttpError && error.code === "no_identity") {
       return false;
@@ -638,11 +789,12 @@ async function cachedResponseAvailable(
     created_at: string;
   },
   coordinator: DurableObjectStub<PoolCoordinator>,
+  selectedIdentity?: Pick<Identity, "id" | "kind">,
   stale = false,
 ): Promise<boolean> {
   const identityAvailable = stale
-    ? staleCachedIdentityAvailable(env, pool, route, cached.identity)
-    : cachedIdentityAvailable(env, pool, route, cached.identity);
+    ? staleCachedIdentityAvailable(env, pool, route, cached.identity, selectedIdentity)
+    : cachedIdentityAvailable(env, pool, route, cached.identity, selectedIdentity);
   const [available] = await Promise.all([
     identityAvailable,
     ensurePublicGitHubRepo(env, route, cached.created_at, coordinator),

@@ -8,6 +8,7 @@ type LeaseRow = {
 };
 
 type RateRow = {
+  limit_count: number;
   remaining: number;
   reset_at: number;
 };
@@ -20,6 +21,11 @@ export class PoolCoordinator extends DurableObject<Env> {
     this.ctx.blockConcurrencyWhile(async () => {
       this.ctx.storage.sql.exec(queries.createLeasesTable);
       this.ctx.storage.sql.exec(queries.createRateStatesTable);
+      try {
+        this.ctx.storage.sql.exec(queries.migrateRateStatesLimit);
+      } catch {
+        // Existing Durable Objects already have the column; new ones get it from CREATE TABLE.
+      }
       this.ctx.storage.sql.exec(queries.createCooldownsTable);
       this.ctx.storage.sql.exec(queries.createCacheFillsTable);
     });
@@ -105,6 +111,7 @@ export class PoolCoordinator extends DurableObject<Env> {
         queries.upsertRateState,
         result.identityId,
         result.resource,
+        result.rate.limit ?? 5000,
         result.rate.remaining,
         result.rate.resetAt * 1000,
       );

@@ -15,7 +15,7 @@ export async function loginGitHubCLI(request: Request, env: Env): Promise<Respon
   const body = await parseJsonObject(request);
   const githubToken = requireString(body.github_token, "github_token");
   const pool = requestedLoginPool(env, body.pool);
-  const user = await githubUserFromToken(githubToken);
+  const user = await githubUserFromToken(env, githubToken);
   const verifiedAt = await verifyGitHubOrgMemberWithToken(env, githubToken, user.login);
   const token = newToken("op");
   const caller = await ensureCliCaller(env, pool, user, verifiedAt, token);
@@ -36,7 +36,7 @@ export async function createCaller(request: Request, env: Env): Promise<Response
     typeof body.name === "string" && body.name.trim() !== "" ? body.name.trim() : githubLogin;
   await ensurePool(env, pool);
   const verifiedAt = await verifyGitHubOrgMember(env, githubLogin);
-  const githubUser = await githubUserByLogin(githubLogin);
+  const githubUser = await githubUserByLogin(env, githubLogin);
   const token = newToken("op");
   const caller = await ensureCliCaller(env, pool, { ...githubUser, name }, verifiedAt, token);
   return jsonResponse(

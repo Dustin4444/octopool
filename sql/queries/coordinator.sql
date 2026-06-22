@@ -9,10 +9,14 @@ CREATE TABLE IF NOT EXISTS leases (
 CREATE TABLE IF NOT EXISTS rate_states (
   identity_id TEXT NOT NULL,
   resource TEXT NOT NULL,
+  limit_count INTEGER NOT NULL DEFAULT 5000,
   remaining INTEGER NOT NULL,
   reset_at INTEGER NOT NULL,
   PRIMARY KEY (identity_id, resource)
 );
+
+-- name: MigrateRateStatesLimit :exec
+ALTER TABLE rate_states ADD COLUMN limit_count INTEGER NOT NULL DEFAULT 5000;
 
 -- name: CreateCooldownsTable :exec
 CREATE TABLE IF NOT EXISTS cooldowns (
@@ -37,7 +41,7 @@ FROM leases
 WHERE route_key = ?;
 
 -- name: GetRateState :one
-SELECT remaining, reset_at
+SELECT limit_count, remaining, reset_at
 FROM rate_states
 WHERE identity_id = ?
   AND resource = ?;
@@ -50,9 +54,10 @@ ON CONFLICT(route_key) DO UPDATE SET
   expires_at = excluded.expires_at;
 
 -- name: UpsertRateState :exec
-INSERT INTO rate_states (identity_id, resource, remaining, reset_at)
-VALUES (?1, ?2, ?3, ?4)
+INSERT INTO rate_states (identity_id, resource, limit_count, remaining, reset_at)
+VALUES (?1, ?2, ?3, ?4, ?5)
 ON CONFLICT(identity_id, resource) DO UPDATE SET
+  limit_count = excluded.limit_count,
   remaining = excluded.remaining,
   reset_at = excluded.reset_at;
 
@@ -65,7 +70,7 @@ ON CONFLICT(identity_id, route_key) DO UPDATE SET
   expires_at = excluded.expires_at;
 
 -- name: CoordinatorRates :many
-SELECT identity_id, resource, remaining, reset_at
+SELECT identity_id, resource, limit_count, remaining, reset_at
 FROM rate_states
 WHERE reset_at > ?
 ORDER BY identity_id, resource;
