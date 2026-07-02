@@ -1,6 +1,14 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import { bearer, callWorker, jsonResponse, POOL, seedPool, seedWebSession } from "./harness";
+import {
+  bearer,
+  callWorker,
+  jsonResponse,
+  orgMembershipResponse,
+  POOL,
+  seedPool,
+  seedWebSession,
+} from "./harness";
 
 const APP = "https://octopool.openclaw.ai";
 
@@ -17,11 +25,8 @@ describe("Worker end-to-end web sessions", () => {
       if (url.pathname === "/user" && bearer(request) === "oauth-user-token") {
         return jsonResponse({ id: 501, login: "web-user", name: "Web User" });
       }
-      if (
-        url.pathname === "/orgs/openclaw/members/web-user" &&
-        bearer(request) === "test-org-token"
-      ) {
-        return new Response(null, { status: 204 });
+      if (url.pathname === "/graphql" && bearer(request) === "test-org-token") {
+        return orgMembershipResponse(true);
       }
       return jsonResponse({ message: "unexpected OAuth request" }, 500);
     });
@@ -113,11 +118,8 @@ describe("Worker end-to-end web sessions", () => {
       if (url.pathname === "/user" && bearer(request) === "oauth-user-token") {
         return jsonResponse({ id: 502, login: "web-user-2" });
       }
-      if (
-        url.pathname === "/orgs/openclaw/members/web-user-2" &&
-        bearer(request) === "test-org-token"
-      ) {
-        return new Response(null, { status: 204 });
+      if (url.pathname === "/graphql" && bearer(request) === "test-org-token") {
+        return orgMembershipResponse(true);
       }
       return jsonResponse({ message: "unexpected OAuth request" }, 500);
     });
@@ -142,15 +144,12 @@ describe("Worker end-to-end web sessions", () => {
     await env.DB.prepare(
       "UPDATE callers SET org_verified_at = datetime('now', '-2 days') WHERE id = 'caller'",
     ).run();
-    let membershipStatus = 204;
+    let isMember = true;
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
-      if (
-        url.pathname === "/orgs/openclaw/members/caller" &&
-        bearer(request) === "test-org-token"
-      ) {
-        return new Response(null, { status: membershipStatus });
+      if (url.pathname === "/graphql" && bearer(request) === "test-org-token") {
+        return orgMembershipResponse(isMember);
       }
       return jsonResponse({ message: "unexpected membership request" }, 500);
     });
@@ -168,7 +167,7 @@ describe("Worker end-to-end web sessions", () => {
     await env.DB.prepare(
       "UPDATE callers SET org_verified_at = datetime('now', '-2 days') WHERE id = 'caller'",
     ).run();
-    membershipStatus = 404;
+    isMember = false;
     const revoked = await callWorker(`${APP}/v1/me`, { headers: { cookie } });
     expect(revoked.status).toBe(403);
     expect(await revoked.json()).toMatchObject({ error: { code: "org_member_denied" } });

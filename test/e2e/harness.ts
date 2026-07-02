@@ -155,6 +155,19 @@ export function jsonResponse(body: unknown, status = 200, headers?: HeadersInit)
   });
 }
 
+export function orgMembershipResponse(member: boolean): Response {
+  return jsonResponse({
+    data: {
+      user: {
+        organizations: {
+          nodes: member ? [{ login: "openclaw" }] : [],
+          pageInfo: { endCursor: null, hasNextPage: false },
+        },
+      },
+    },
+  });
+}
+
 export function rateHeaders(options: { remaining: number; retryAfter?: number }): HeadersInit {
   return {
     "x-ratelimit-limit": "5000",

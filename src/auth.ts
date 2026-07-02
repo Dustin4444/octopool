@@ -150,29 +150,7 @@ export async function verifyGitHubOrgMember(env: Env, login: string): Promise<st
       "GitHub org verifier token is not configured",
     );
   }
-  const org = env.ALLOWED_GITHUB_ORG;
-  const response = await fetch(
-    `https://api.github.com/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(login)}`,
-    {
-      headers: githubHeaders(token),
-      signal: githubRequestSignal(env),
-    },
-  );
-  if (response.status === 204) {
-    return new Date().toISOString();
-  }
-  if (response.status === 404) {
-    throw new HttpError(
-      403,
-      "org_member_denied",
-      `${login} is not a public or token-visible ${org} member`,
-    );
-  }
-  throw new HttpError(
-    502,
-    "org_verification_failed",
-    `GitHub membership check failed with ${response.status}`,
-  );
+  return verifyGitHubOrgMemberWithToken(env, token, login);
 }
 
 export async function verifyGitHubOrgMemberWithToken(
@@ -181,24 +159,103 @@ export async function verifyGitHubOrgMemberWithToken(
   login: string,
 ): Promise<string> {
   const org = env.ALLOWED_GITHUB_ORG;
-  const response = await fetch(
-    `https://api.github.com/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(login)}`,
-    {
-      headers: githubHeaders(token),
+  let after: string | null = null;
+
+  while (true) {
+    const response = await fetch("https://api.github.com/graphql", {
+      method: "POST",
+      headers: {
+        ...githubHeaders(token),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        query: ORG_MEMBERSHIP_QUERY,
+        variables: { login, after },
+      }),
       signal: githubRequestSignal(env),
-    },
-  );
-  if (response.status === 204) {
-    return new Date().toISOString();
+    });
+    if (!response.ok) {
+      throw new HttpError(
+        502,
+        "org_verification_failed",
+        `GitHub membership check failed with ${response.status}`,
+        githubRateLimitDetails(response.headers),
+      );
+    }
+
+    const page = await parseOrgMembershipPage(response);
+    if (page.organizations.some((candidate) => candidate.toLowerCase() === org.toLowerCase())) {
+      return new Date().toISOString();
+    }
+    if (!page.hasNextPage) {
+      throw new HttpError(403, "org_member_denied", `${login} is not a ${org} org member`);
+    }
+    if (page.endCursor === null || page.endCursor === after) {
+      throw new HttpError(502, "org_verification_failed", "GitHub membership page was invalid");
+    }
+    after = page.endCursor;
   }
-  if (response.status === 404) {
-    throw new HttpError(403, "org_member_denied", `${login} is not a ${org} org member`);
+}
+
+const ORG_MEMBERSHIP_QUERY = `
+  query OctopoolOrgMembership($login: String!, $after: String) {
+    user(login: $login) {
+      organizations(first: 100, after: $after) {
+        nodes { login }
+        pageInfo { endCursor hasNextPage }
+      }
+    }
   }
-  throw new HttpError(
-    502,
-    "org_verification_failed",
-    `GitHub membership check failed with ${response.status}`,
-  );
+`;
+
+async function parseOrgMembershipPage(response: Response): Promise<{
+  organizations: string[];
+  endCursor: string | null;
+  hasNextPage: boolean;
+}> {
+  const body: unknown = await response.json();
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new HttpError(502, "org_verification_failed", "GitHub membership response was invalid");
+  }
+  const payload = body as {
+    data?: {
+      user?: {
+        organizations?: {
+          nodes?: unknown;
+          pageInfo?: { endCursor?: unknown; hasNextPage?: unknown };
+        };
+      } | null;
+    };
+    errors?: unknown;
+  };
+  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+    throw new HttpError(502, "org_verification_failed", "GitHub membership query failed");
+  }
+  if (payload.data?.user === null) {
+    return { organizations: [], endCursor: null, hasNextPage: false };
+  }
+  const connection = payload.data?.user?.organizations;
+  const nodes = connection?.nodes;
+  const pageInfo = connection?.pageInfo;
+  if (
+    !Array.isArray(nodes) ||
+    typeof pageInfo?.hasNextPage !== "boolean" ||
+    !(typeof pageInfo.endCursor === "string" || pageInfo.endCursor === null)
+  ) {
+    throw new HttpError(502, "org_verification_failed", "GitHub membership response was invalid");
+  }
+  const organizations = nodes.flatMap((node) => {
+    if (typeof node !== "object" || node === null || Array.isArray(node)) {
+      return [];
+    }
+    const candidate = (node as { login?: unknown }).login;
+    return typeof candidate === "string" ? [candidate] : [];
+  });
+  return {
+    organizations,
+    endCursor: pageInfo.endCursor,
+    hasNextPage: pageInfo.hasNextPage,
+  };
 }
 
 export async function ensureFreshOrgMembership(env: Env, caller: CallerRow): Promise<void> {

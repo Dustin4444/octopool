@@ -76,11 +76,14 @@ caller row.
 
 ## Org verification tokens
 
-Two helpers check `GET /orgs/{org}/members/{login}`:
+Two helpers query the user's visible organizations through GitHub GraphQL:
 
 - During login, with the user's own token.
 - During background freshness checks, with the configured `OCTOPOOL_GITHUB_ORG_TOKEN`.
 
-`204` confirms membership; `404` denies (`403 org_member_denied`); anything else surfaces
-as `502 org_verification_failed`. If the verifier token is unset, verification returns
+The query paginates organization memberships and confirms the configured org by login. A
+completed query without the org denies (`403 org_member_denied`); transport, credential,
+rate-limit, or malformed-response failures surface as `502 org_verification_failed`. Using
+the GraphQL budget keeps org verification independent from REST core quota consumed by
+release and repository workflows. If the verifier token is unset, verification returns
 `503 org_verification_unavailable`.

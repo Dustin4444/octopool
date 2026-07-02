@@ -11,6 +11,7 @@
 
 ### Fixes
 
+- Use GitHub GraphQL for org-membership verification so exhausted REST core quota cannot disable the relay.
 - Fall back to the real GitHub CLI instead of returning partial results when relay-backed PR checks/details or filtered issue lists exhaust the bounded pagination window.
 - Reject non-integer `--limit` and `-L` values instead of silently substituting the default limit.
 - Reject malformed relay envelopes with missing or unknown body encodings instead of treating them as JSON.

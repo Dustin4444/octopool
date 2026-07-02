@@ -6,6 +6,7 @@ import {
   callWorker,
   CALLER_TOKEN,
   jsonResponse,
+  orgMembershipResponse,
   POOL,
   runScheduled,
   seedAudit,
@@ -89,11 +90,8 @@ describe("Worker end-to-end control plane", () => {
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
-      if (
-        url.pathname === "/orgs/openclaw/members/new-user" &&
-        bearer(request) === "test-org-token"
-      ) {
-        return new Response(null, { status: 204 });
+      if (url.pathname === "/graphql" && bearer(request) === "test-org-token") {
+        return orgMembershipResponse(true);
       }
       if (url.pathname === "/users/new-user") {
         return jsonResponse({ id: 99, login: "new-user" });
@@ -133,11 +131,8 @@ describe("Worker end-to-end control plane", () => {
       if (url.pathname === "/user" && bearer(request) === "github-user-token") {
         return jsonResponse({ id: 101, login: "cli-user", name: "CLI User" });
       }
-      if (
-        url.pathname === "/orgs/openclaw/members/cli-user" &&
-        bearer(request) === "github-user-token"
-      ) {
-        return new Response(null, { status: 204 });
+      if (url.pathname === "/graphql" && bearer(request) === "github-user-token") {
+        return orgMembershipResponse(true);
       }
       return jsonResponse({ message: "unexpected request" }, 500);
     });

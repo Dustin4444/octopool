@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { githubUserByLogin, githubUserFromToken, verifyGitHubOrgMember } from "../src/auth";
+import {
+  githubUserByLogin,
+  githubUserFromToken,
+  verifyGitHubOrgMember,
+  verifyGitHubOrgMemberWithToken,
+} from "../src/auth";
 import { githubToken } from "../src/github-auth";
 import type { Identity } from "../src/types";
 
@@ -48,7 +53,7 @@ describe("GitHub identity credentials", () => {
       if (url.pathname === "/users/octo") {
         return Response.json({ id: 42, login: "octo" });
       }
-      return new Response(null, { status: 204 });
+      return orgMembershipResponse(["openclaw"]);
     });
     vi.stubGlobal("fetch", fetchMock);
     const env = { ALLOWED_GITHUB_ORG: "openclaw", REQUEST_TIMEOUT_MS: "1234" } as unknown as Env;
@@ -66,7 +71,87 @@ describe("GitHub identity credentials", () => {
       expect(init).toMatchObject({ signal: expect.any(AbortSignal) });
     }
   });
+
+  it("verifies org membership without spending the REST core quota", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+      expect(init).toMatchObject({
+        method: "POST",
+        headers: expect.objectContaining({ authorization: "Bearer org-token" }),
+      });
+      return orgMembershipResponse(["OpenClaw"]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(verifyGitHubOrgMemberWithToken(env(), "org-token", "octo")).resolves.toEqual(
+      expect.any(String),
+    );
+    expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/graphql", expect.any(Object));
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      variables: { login: string; after: string | null };
+    };
+    expect(request.variables).toEqual({ login: "octo", after: null });
+  });
+
+  it("paginates visible organizations before denying membership", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(orgMembershipResponse(["other"], true, "cursor-1"))
+      .mockResolvedValueOnce(orgMembershipResponse(["openclaw"]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(verifyGitHubOrgMemberWithToken(env(), "org-token", "octo")).resolves.toEqual(
+      expect.any(String),
+    );
+    const secondRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      variables: { after: string };
+    };
+    expect(secondRequest.variables.after).toBe("cursor-1");
+  });
+
+  it("denies users outside the allowed org", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => orgMembershipResponse(["other"])),
+    );
+
+    await expect(verifyGitHubOrgMemberWithToken(env(), "org-token", "octo")).rejects.toMatchObject({
+      status: 403,
+      code: "org_member_denied",
+    });
+  });
+
+  it("reports invalid verifier credentials without leaking GitHub errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 })),
+    );
+
+    await expect(
+      verifyGitHubOrgMemberWithToken(env(), "invalid-token", "octo"),
+    ).rejects.toMatchObject({ status: 502, code: "org_verification_failed" });
+  });
 });
+
+function env(): Env {
+  return { ALLOWED_GITHUB_ORG: "openclaw", REQUEST_TIMEOUT_MS: "1234" } as unknown as Env;
+}
+
+function orgMembershipResponse(
+  organizations: string[],
+  hasNextPage = false,
+  endCursor: string | null = null,
+): Response {
+  return Response.json({
+    data: {
+      user: {
+        organizations: {
+          nodes: organizations.map((login) => ({ login })),
+          pageInfo: { endCursor, hasNextPage },
+        },
+      },
+    },
+  });
+}
 
 function identity(kind: Identity["kind"], installationId: number | null = null): Identity {
   return {
