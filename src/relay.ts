@@ -80,6 +80,11 @@ export async function relayGitHub(
   if (policy === null) {
     throw new HttpError(404, "pool_not_found", "Pool not found");
   }
+  // `GET /user` is served as the caller's public profile so identity probes
+  // (`gh api user -q .login`) stop bouncing as route_denied onto local tokens.
+  if (relayRequest.path === "/user") {
+    relayRequest.path = `/users/${encodeURIComponent(caller.github_login)}`;
+  }
   const base: RelayBase = {
     env,
     ctx,
@@ -645,6 +650,7 @@ function staleFallbackReason(reason: string): boolean {
     case "identities_cooling_down":
     case "identity_pool_depleted":
     case "no_identity":
+    case "web_only_unavailable":
       return true;
     default:
       return false;

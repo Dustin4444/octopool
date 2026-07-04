@@ -217,7 +217,9 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
     case "run":
       return completedRun(response) ? TERMINAL_CI_TTL_SECONDS : 30;
     case "run_list":
-      return completedRunList(response) ? 120 : 30;
+      // 45s active TTL: concurrent sessions poll run lists every 20-30s;
+      // at 30s those polls almost never overlap a fresh entry.
+      return completedRunList(response) ? 120 : 45;
     case "jobs":
       return completedJobs(response) ? TERMINAL_CI_TTL_SECONDS : 30;
     case "checks":
