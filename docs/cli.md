@@ -189,6 +189,11 @@ reauthentication cannot restore REST quota. Broader multi-account status checks 
 real CLI's exit status and output, with a diagnostic when the active token still passes the
 GraphQL check.
 
+`gh auth login --with-token` also stays delegated to the real CLI. If GitHub REST quota is
+exhausted while `gh` validates token scopes, the shim keeps the nonzero exit status but verifies
+the token through GraphQL and reports the core reset time. The token remains only in memory and
+is not stored by Octopool; retry the same login command after reset instead of reauthorizing.
+
 ### `octopool health [--pool <id>]`
 
 Fetches `GET /v1/pools/<pool>/health` using the stored token. Returns identity counts and

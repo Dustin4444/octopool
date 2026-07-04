@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 )
 
 func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
@@ -15,6 +16,9 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 	}
 	if isGHAuthStatus(args) {
 		return runGHAuthStatus(ctx, args, stdout, stderr)
+	}
+	if isGHWithTokenLogin(args) {
+		return runGHWithTokenLogin(ctx, args, os.Stdin, stdout, stderr)
 	}
 	if args[0] != "api" {
 		result := runGHTopLevel(ctx, args, stdout)

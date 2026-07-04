@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -92,14 +93,36 @@ func jqAvailable() bool {
 }
 
 func execRealGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
+	return execRealGHWithStdin(ctx, args, os.Stdin, stdout, stderr)
+}
+
+func execRealGHWithStdin(
+	ctx context.Context,
+	args []string,
+	stdin io.Reader,
+	stdout io.Writer,
+	stderr io.Writer,
+) error {
+	return execRealGHWithStdinAndEnv(ctx, args, stdin, stdout, stderr, os.Environ())
+}
+
+func execRealGHWithStdinAndEnv(
+	ctx context.Context,
+	args []string,
+	stdin io.Reader,
+	stdout io.Writer,
+	stderr io.Writer,
+	env []string,
+) error {
 	path, err := resolveGHPath(envDefault("OCTOPOOL_GH_PATH", "gh"))
 	if err != nil {
 		return err
 	}
 	cmd := exec.CommandContext(ctx, path, args...)
-	cmd.Stdin = os.Stdin
+	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	cmd.Env = env
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -108,4 +131,21 @@ func execRealGH(ctx context.Context, args []string, stdout io.Writer, stderr io.
 		return err
 	}
 	return nil
+}
+
+func envWithoutGitHubTokens() []string {
+	blocked := map[string]struct{}{
+		"GH_TOKEN":                {},
+		"GITHUB_TOKEN":            {},
+		"GH_ENTERPRISE_TOKEN":     {},
+		"GITHUB_ENTERPRISE_TOKEN": {},
+	}
+	env := make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if _, found := blocked[strings.ToUpper(name)]; !found {
+			env = append(env, entry)
+		}
+	}
+	return env
 }

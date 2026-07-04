@@ -4,6 +4,8 @@
 
 ### Fixes
 
+- Diagnose valid `gh auth login --with-token` credentials blocked by exhausted REST scope-check quota, report the reset time, and avoid unnecessary reauthorization without storing the token.
+
 ## 0.4.1 - 2026-07-04
 
 ### Fixes
