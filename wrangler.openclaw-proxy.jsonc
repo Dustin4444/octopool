@@ -11,10 +11,6 @@
   "vars": {
     "OCTOPOOL_ORIGIN": "https://octopool.dev",
   },
-  "routes": [
-    {
-      "pattern": "octopool.openclaw.ai",
-      "custom_domain": true,
-    },
-  ],
+  // octopool.openclaw.ai is served directly by the octopool Worker now; this
+  // proxy stays only until the octopool.dev teardown finishes.
 }
