@@ -13,6 +13,9 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 		fmt.Fprintln(stdout, "       octopool gh pr|issue|run|repo|release|workflow|label|gist|search ...")
 		return nil
 	}
+	if isGHAuthStatus(args) {
+		return runGHAuthStatus(ctx, args, stdout, stderr)
+	}
 	if args[0] != "api" {
 		result := runGHTopLevel(ctx, args, stdout)
 		switch result.action {

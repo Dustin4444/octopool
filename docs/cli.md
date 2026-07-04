@@ -180,8 +180,14 @@ Pagination is fail-closed: if bounded relay pagination cannot prove a complete P
 check set, or filtered issue list, the CLI delegates to real `gh` instead of returning a
 partial result. Non-integer `--limit`/`-L` values are rejected explicitly.
 
-Any other `gh` subcommand (`gh pr create`, `gh auth`, unusual formatting flags, …) is
-passed straight through to the real GitHub CLI, with its exit code preserved.
+Mutating and unsupported `gh` subcommands (`gh pr create`, unusual formatting flags, …)
+are passed straight through to the real GitHub CLI, with their exit codes preserved.
+`gh auth status` normally delegates too. For `gh auth status --active --hostname <host>`,
+if GitHub's REST scope probe reports the active token as invalid while the same token still
+authenticates through GraphQL, the shim reports the account as authenticated and warns that
+reauthentication cannot restore REST quota. Broader multi-account status checks retain the
+real CLI's exit status and output, with a diagnostic when the active token still passes the
+GraphQL check.
 
 ### `octopool health [--pool <id>]`
 

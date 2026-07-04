@@ -67,6 +67,54 @@ func TestCLIEndToEndRelayAndFallback(t *testing.T) {
 		}
 	})
 
+	t.Run("auth status survives a depleted REST scope probe", func(t *testing.T) {
+		fake := fakeGHAuthStatus(t, true)
+		result := runCLI(t, bin, "http://127.0.0.1:1", map[string]string{
+			"OCTOPOOL_GH_PATH": fake,
+			"GITHUB_TOKEN":     "test-token",
+		}, "gh", "auth", "status", "--active", "--hostname", "github.com")
+		if result.err != nil ||
+			!strings.Contains(result.stdout, "Logged in to github.com account monalisa (GITHUB_TOKEN)") ||
+			!strings.Contains(result.stdout, "do not re-authenticate") ||
+			strings.Contains(result.stderr, "token in GITHUB_TOKEN is invalid") {
+			t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+		}
+	})
+
+	t.Run("auth status preserves a genuinely invalid token failure", func(t *testing.T) {
+		fake := fakeGHAuthStatus(t, false)
+		result := runCLI(t, bin, "http://127.0.0.1:1", map[string]string{
+			"OCTOPOOL_GH_PATH": fake,
+		}, "gh", "auth", "status", "--active", "--hostname", "github.com")
+		if result.err == nil || !strings.Contains(result.stderr, "The token in keyring is invalid.") {
+			t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+		}
+	})
+
+	t.Run("broad auth status preserves failure while diagnosing the active token", func(t *testing.T) {
+		fake := fakeGHAuthStatus(t, true)
+		result := runCLI(t, bin, "http://127.0.0.1:1", map[string]string{
+			"OCTOPOOL_GH_PATH": fake,
+		}, "gh", "auth", "status", "--hostname", "github.com")
+		if result.err == nil ||
+			!strings.Contains(result.stderr, "The token in keyring is invalid.") ||
+			!strings.Contains(result.stderr, "do not re-authenticate") {
+			t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+		}
+	})
+
+	t.Run("formatted auth status preserves the real CLI contract", func(t *testing.T) {
+		fake := fakeGHAuthStatus(t, true)
+		result := runCLI(t, bin, "http://127.0.0.1:1", map[string]string{
+			"OCTOPOOL_GH_PATH": fake,
+		}, "gh", "auth", "status", "--active", "--hostname", "github.com", "--template", "{{.}}")
+		if result.err == nil ||
+			strings.Contains(result.stdout, "Logged in to") ||
+			!strings.Contains(result.stderr, "do not re-authenticate") {
+			t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+		}
+	})
+
 	t.Run("server fallback delegates unless disabled", func(t *testing.T) {
 		server := cliRelayServer(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusFailedDependency)
@@ -173,6 +221,32 @@ func fakeGH(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is Unix-only")
 	}
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func fakeGHAuthStatus(t *testing.T, graphqlValid bool) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is Unix-only")
+	}
+	path := filepath.Join(t.TempDir(), executableName("fake-gh"))
+	graphqlExit := "exit 1"
+	if graphqlValid {
+		graphqlExit = "printf 'monalisa\\n'; exit 0"
+	}
+	content := `#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  printf 'github.com\n  X Failed to log in to github.com account monalisa (keyring)\n  - The token in keyring is invalid.\n' >&2
+  exit 1
+fi
+if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
+  ` + graphqlExit + `
+fi
+exit 2
+`
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatal(err)
 	}

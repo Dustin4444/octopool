@@ -4,6 +4,8 @@
 
 ### Fixes
 
+- Stop `gh auth status` from sending users through redundant OAuth logins when GitHub's REST scope probe is rate-limited but the active token still authenticates through GraphQL.
+
 ## 0.4.0 - 2026-07-02
 
 ### Changes
