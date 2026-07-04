@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
+import { deleteEdgeJSON } from "../../src/edge-cache";
 import { bearer, jsonResponse, relay, seedPool } from "./harness";
 
 type RelayEnvelope = {
@@ -81,6 +82,78 @@ describe("Worker end-to-end relay backends", () => {
       relay: { backend: "github_public", cache: "hit", route_kind: "user_view" },
     });
     expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves GET /user as the caller's public profile", async () => {
+    await seedPool();
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(request.url).toBe("https://api.github.com/users/caller");
+      expect(bearer(request)).toBeUndefined();
+      return jsonResponse({ id: 42, login: "caller" });
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay("/user");
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      status: 200,
+      body: { id: 42, login: "caller" },
+      relay: { backend: "github_public", cache: "miss", route_kind: "user_view" },
+    });
+    const cached = await relay("/user");
+    expect(await cached.json<RelayEnvelope>()).toMatchObject({
+      status: 200,
+      relay: { backend: "github_public", cache: "hit", route_kind: "user_view" },
+    });
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves stale cache when a local-only route loses its token-free backend", async () => {
+    await seedPool();
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(request.url).toBe("https://api.github.com/users/octocat/repos?type=owner");
+      expect(bearer(request)).toBeUndefined();
+      return jsonResponse([{ id: 1, full_name: "octocat/hello" }], 200, publicRateHeaders());
+    });
+    vi.stubGlobal("fetch", upstream);
+    const primed = await relay("/users/octocat/repos", undefined, {
+      query: { type: "owner" },
+    });
+    expect(primed.status).toBe(200);
+
+    const cacheRow = await env.DB.prepare(
+      "SELECT cache_key FROM github_cache_entries LIMIT 1",
+    ).first<{ cache_key: string }>();
+    expect(cacheRow).not.toBeNull();
+    await env.DB.prepare(
+      `UPDATE github_cache_entries
+       SET expires_at = datetime('now', '-1 second'),
+           stale_expires_at = datetime('now', '+1 hour')
+       WHERE cache_key = ?`,
+    )
+      .bind(cacheRow!.cache_key)
+      .run();
+    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => jsonResponse({ message: "unavailable" }, 503)),
+    );
+
+    const response = await relay("/users/octocat/repos", undefined, {
+      query: { type: "owner" },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      status: 200,
+      body: [{ id: 1, full_name: "octocat/hello" }],
+      relay: {
+        cache: "stale",
+        route_kind: "user_repo_list",
+        stale_ok: true,
+        stale_reason: "web_only_unavailable",
+      },
+    });
   });
 
   it("returns local fallback when a local-only route has no token-free result", async () => {

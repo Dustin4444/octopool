@@ -206,7 +206,7 @@ describe("github cache policy", () => {
     expect(cacheTTLSeconds(runList, response({ workflow_runs: [{ status: "completed" }] }))).toBe(
       120,
     );
-    expect(cacheTTLSeconds(runList, response({ workflow_runs: [] }))).toBe(30);
+    expect(cacheTTLSeconds(runList, response({ workflow_runs: [] }))).toBe(45);
 
     const checks = classifyRoute(
       validateRelayRequest({

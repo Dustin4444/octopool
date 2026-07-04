@@ -4,7 +4,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestWriteGHBodyAllowsNullTextBody(t *testing.T) {
@@ -35,6 +37,74 @@ func TestGHRelayClientInvalidAuthUsesLocalFallback(t *testing.T) {
 	_, err := client.do(t.Context(), ghAPIRequest{method: "GET", path: "/repos/openclaw/openclaw"})
 	if !isLocalFallback(err) {
 		t.Fatalf("expected local fallback, got %v", err)
+	}
+}
+
+func TestGHRelayClientRetriesTransientFallback(t *testing.T) {
+	restoreDelays := relayRetryDelays
+	relayRetryDelays = []time.Duration{time.Millisecond, time.Millisecond}
+	t.Cleanup(func() { relayRetryDelays = restoreDelays })
+
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) < 3 {
+			w.WriteHeader(http.StatusFailedDependency)
+			_, _ = w.Write([]byte(`{"error":{"code":"fallback_local","message":"Run locally","details":{"reason":"identities_cooling_down"}}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":200,"body":{"ok":true},"body_encoding":"json"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := ghRelayClient{token: "token", baseURL: server.URL, pool: "maintainers"}
+	envelope, err := client.do(t.Context(), ghAPIRequest{method: "GET", path: "/repos/openclaw/openclaw"})
+	if err != nil {
+		t.Fatalf("expected retry success, got %v", err)
+	}
+	if envelope.Status != 200 {
+		t.Fatalf("status = %d", envelope.Status)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("calls = %d", got)
+	}
+}
+
+func TestGHRelayClientDoesNotRetryStructuralFallback(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusFailedDependency)
+		_, _ = w.Write([]byte(`{"error":{"code":"fallback_local","message":"Run locally","details":{"reason":"route_denied"}}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := ghRelayClient{token: "token", baseURL: server.URL, pool: "maintainers"}
+	_, err := client.do(t.Context(), ghAPIRequest{method: "GET", path: "/repos/openclaw/openclaw"})
+	if !isLocalFallback(err) {
+		t.Fatalf("expected local fallback, got %v", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("calls = %d", got)
+	}
+}
+
+func TestGHRelayClientRetriesDisabledByEnv(t *testing.T) {
+	t.Setenv("OCTOPOOL_RELAY_RETRIES", "0")
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusFailedDependency)
+		_, _ = w.Write([]byte(`{"error":{"code":"fallback_local","message":"Run locally","details":{"reason":"identities_cooling_down"}}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := ghRelayClient{token: "token", baseURL: server.URL, pool: "maintainers"}
+	_, err := client.do(t.Context(), ghAPIRequest{method: "GET", path: "/repos/openclaw/openclaw"})
+	if !isLocalFallback(err) {
+		t.Fatalf("expected local fallback, got %v", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("calls = %d", got)
 	}
 }
 

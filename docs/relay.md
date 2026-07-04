@@ -88,6 +88,10 @@ and patch hosts.
 - Public org repository/member/event reads, user/gist collection reads, global metadata reads,
   and public repository metadata collections can be served from unauthenticated GitHub API
   responses before spending pooled identity quota.
+- `GET /user` is relayed as the caller's public profile: Octopool rewrites it to
+  `GET /users/:login` for the authenticated caller and serves it token-free, so identity
+  probes never spend pooled or local quota. Private `/user` fields (plan, private repo
+  counts, email visibility) are not included; callers that need them fall back to real `gh`.
 - `GET /orgs/:org` is intentionally not relayed because authenticated GitHub responses can
   include additional org fields that are not present in unauthenticated public API responses.
 - `GET /users/:login/starred` and `/subscriptions` are intentionally not relayed because
@@ -95,7 +99,8 @@ and patch hosts.
 - `cache` is `hit`, `stale`, `miss`, or `bypass` (conditional, log, large-payload, or
   otherwise non-cacheable request).
 - `stale_ok: true` means an expired public cache entry was served because all eligible
-  identities were depleted, cooling down, missing, or rate-limited. `stale_reason` and
+  identities were depleted, cooling down, missing, or rate-limited, or because a token-free-only
+  route lost its public backend (`web_only_unavailable`). `stale_reason` and
   `cache_expires_at` are included on those responses.
 - `backend` is present as `web` or `github_public` when a cache miss or identity-less cache hit
   was served without a pooled API identity.

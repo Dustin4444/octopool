@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type relayEnvelope struct {
@@ -52,7 +54,61 @@ func newGHRelayClient() (ghRelayClient, error) {
 	return ghRelayClient{token: token, baseURL: baseURL, pool: pool}, nil
 }
 
+// Transient pool-exhaustion fallbacks are retried against the relay before the
+// CLI gives up and burns the caller's local token: a concurrent session often
+// fills the shared cache (or an identity cooldown resets) within seconds.
+var relayRetryDelays = []time.Duration{time.Second, 3 * time.Second}
+
+func transientFallbackReason(reason string) bool {
+	switch reason {
+	case "identities_cooling_down", "identity_pool_depleted",
+		"github_identity_depleted", "github_rate_limited":
+		return true
+	default:
+		return false
+	}
+}
+
+func relayRetryAttempts() int {
+	raw := strings.TrimSpace(os.Getenv("OCTOPOOL_RELAY_RETRIES"))
+	if raw == "" {
+		return len(relayRetryDelays)
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed < 0 {
+		return len(relayRetryDelays)
+	}
+	return parsed
+}
+
 func (client ghRelayClient) do(ctx context.Context, request ghAPIRequest) (relayEnvelope, error) {
+	retries := relayRetryAttempts()
+	for attempt := 0; ; attempt++ {
+		envelope, err := client.doOnce(ctx, request)
+		var fallback localFallbackError
+		if err == nil || attempt >= retries ||
+			!errors.As(err, &fallback) || !transientFallbackReason(fallback.Reason) {
+			return envelope, err
+		}
+		delay := relayRetryDelays[min(attempt, len(relayRetryDelays)-1)]
+		if !sleepContext(ctx, delay) {
+			return envelope, err
+		}
+	}
+}
+
+func sleepContext(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (relayEnvelope, error) {
 	body := map[string]any{
 		"pool":   client.pool,
 		"method": request.method,
