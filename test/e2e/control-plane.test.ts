@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
+import { insertAudit } from "../../src/db";
 import { poolHealth } from "../../src/health";
 import {
   bearer,
@@ -124,7 +125,7 @@ describe("Worker end-to-end control plane", () => {
     expect(health.status).toBe(200);
   });
 
-  it("limits CLI login to the configured pool and creates a usable caller", async () => {
+  it("keeps different CLI clients active while rotating only a re-logged client", async () => {
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
@@ -146,19 +147,121 @@ describe("Worker end-to-end control plane", () => {
     expect(await denied.json()).toMatchObject({ error: { code: "pool_denied" } });
     expect(upstream).not.toHaveBeenCalled();
 
+    const invalidClient = await postJSON("/v1/login/github-cli", {
+      github_token: "github-user-token",
+      pool: POOL,
+      client_name: "not a hostname",
+    });
+    expect(invalidClient.status).toBe(400);
+    expect(await invalidClient.json()).toMatchObject({
+      error: { code: "client_name_invalid" },
+    });
+    expect(upstream).not.toHaveBeenCalled();
+
     const response = await postJSON("/v1/login/github-cli", {
       github_token: "github-user-token",
       pool: POOL,
+      client_name: "cli-macbook",
     });
     expect(response.status).toBe(201);
-    const body = await response.json<{ caller: { github_login: string }; token: string }>();
-    expect(body.caller.github_login).toBe("cli-user");
+    const body = await response.json<{
+      caller: { github_login: string; client_name: string };
+      token: string;
+    }>();
+    expect(body.caller).toMatchObject({ github_login: "cli-user", client_name: "cli-macbook" });
     expect(upstream).toHaveBeenCalledTimes(2);
-    const health = await callWorker(`/v1/pools/${POOL}/health`, {
+    const firstHealth = await callWorker(`/v1/pools/${POOL}/health`, {
       headers: { authorization: `Bearer ${body.token}` },
     });
-    expect(health.status).toBe(200);
-    expect(await health.json()).toMatchObject({ identities_total: 0, identities_healthy: 0 });
+    expect(firstHealth.status).toBe(200);
+
+    const studioResponse = await postJSON("/v1/login/github-cli", {
+      github_token: "github-user-token",
+      pool: POOL,
+      client_name: "cli-mac-studio",
+    });
+    const studio = await studioResponse.json<{ token: string }>();
+    expect(studioResponse.status).toBe(201);
+
+    const rotatedResponse = await postJSON("/v1/login/github-cli", {
+      github_token: "github-user-token",
+      pool: POOL,
+      client_name: "cli-macbook",
+    });
+    const rotated = await rotatedResponse.json<{ token: string }>();
+    expect(rotatedResponse.status).toBe(201);
+
+    const [oldMacBook, macStudio, newMacBook] = await Promise.all([
+      callWorker(`/v1/pools/${POOL}/health`, {
+        headers: { authorization: `Bearer ${body.token}` },
+      }),
+      callWorker(`/v1/pools/${POOL}/health`, {
+        headers: { authorization: `Bearer ${studio.token}` },
+      }),
+      callWorker(`/v1/pools/${POOL}/health`, {
+        headers: { authorization: `Bearer ${rotated.token}` },
+      }),
+    ]);
+    expect(oldMacBook.status).toBe(401);
+    expect(macStudio.status).toBe(200);
+    expect(newMacBook.status).toBe(200);
+
+    const tokens = await env.DB.prepare(
+      "SELECT client_name FROM caller_tokens ORDER BY client_name",
+    ).all<{ client_name: string }>();
+    expect(tokens.results).toEqual([
+      { client_name: "cli-mac-studio" },
+      { client_name: "cli-macbook" },
+    ]);
+    const studioSession = await env.DB.prepare(
+      "SELECT id, caller_id FROM caller_tokens WHERE client_name = 'cli-mac-studio'",
+    ).first<{ id: string; caller_id: string }>();
+    expect(studioSession).not.toBeNull();
+
+    let newestToken = "";
+    for (let index = 0; index < 15; index += 1) {
+      const extraResponse = await postJSON("/v1/login/github-cli", {
+        github_token: "github-user-token",
+        pool: POOL,
+        client_name: `ephemeral-${index}`,
+      });
+      expect(extraResponse.status).toBe(201);
+      newestToken = (await extraResponse.json<{ token: string }>()).token;
+    }
+    const bounded = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM caller_tokens WHERE caller_id = (SELECT id FROM callers WHERE github_login = 'cli-user')",
+    ).first<{ count: number }>();
+    expect(bounded?.count).toBe(16);
+    const [retiredStudio, preservedMacBook, newestClient] = await Promise.all([
+      callWorker(`/v1/pools/${POOL}/health`, {
+        headers: { authorization: `Bearer ${studio.token}` },
+      }),
+      callWorker(`/v1/pools/${POOL}/health`, {
+        headers: { authorization: `Bearer ${rotated.token}` },
+      }),
+      callWorker(`/v1/pools/${POOL}/health`, {
+        headers: { authorization: `Bearer ${newestToken}` },
+      }),
+    ]);
+    expect(retiredStudio.status).toBe(401);
+    expect(preservedMacBook.status).toBe(200);
+    expect(newestClient.status).toBe(200);
+
+    await insertAudit(env, {
+      requestId: "retired-studio-request",
+      callerId: studioSession!.caller_id,
+      callerTokenId: studioSession!.id,
+      clientName: "cli-mac-studio",
+      pool: POOL,
+      routeKey: "health:retired-client",
+      routeKind: "repo_view",
+      status: 200,
+      durationMs: 1,
+    });
+    const retiredAudit = await env.DB.prepare(
+      "SELECT caller_token_id, client_name FROM audit_events WHERE request_id = 'retired-studio-request'",
+    ).first<{ caller_token_id: string | null; client_name: string }>();
+    expect(retiredAudit).toEqual({ caller_token_id: null, client_name: "cli-mac-studio" });
   });
 
   it("enforces dashboard host, session, role, and pool-grant boundaries", async () => {
