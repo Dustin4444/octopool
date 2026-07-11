@@ -4,6 +4,7 @@ allowBuilds:
   workerd: true
 overrides:
   vite: 8.1.4
+minimumReleaseAge: 2880
 minimumReleaseAgeExclude:
   - miniflare@4.20260609.0
   - wrangler@4.99.0

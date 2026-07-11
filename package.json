@@ -31,5 +31,9 @@
     "typescript": "^7.0.2",
     "vitest": "^4.1.10",
     "wrangler": "^4.107.1"
+  },
+  "packageManager": "pnpm@10.34.4",
+  "engines": {
+    "node": ">=24"
   }
 }
