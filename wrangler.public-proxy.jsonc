@@ -11,5 +11,6 @@
   "vars": {
     "OCTOPOOL_ORIGIN": "https://octopool.openclaw.ai",
   },
+  "migrations": [{ "tag": "v2-public-proxy", "deleted_classes": ["PoolCoordinator"] }],
   "routes": [{ "pattern": "octopool.dev", "custom_domain": true }],
 }
