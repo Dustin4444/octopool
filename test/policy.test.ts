@@ -162,6 +162,7 @@ describe("route policy", () => {
       "/repos/openclaw/openclaw/commits/v1.2.3",
       "/repos/openclaw/openclaw/statuses/ac49d8e2295a093f168baa45312e1e29238c0351",
       "/repos/openclaw/openclaw/actions/runs/26360397003/jobs",
+      "/repos/openclaw/openclaw/actions/runs/26360397003/attempts/2",
       "/repos/openclaw/openclaw/actions/jobs/77594668516/logs",
       "/repos/openclaw/openclaw/issues/80490/comments",
       "/repos/openclaw/openclaw/issues/comments",
@@ -216,6 +217,19 @@ describe("route policy", () => {
       });
       expect(classifyRoute(request, policy).owner).toBe("openclaw");
     }
+  });
+
+  it("relays workflow run attempts as cacheable run views", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/actions/runs/26360397003/attempts/2",
+    });
+    expect(classifyRoute(request, policy)).toMatchObject({
+      kind: "run_view",
+      cacheable: true,
+      routeKey: "GET /repos/openclaw/openclaw/actions/runs/:id/attempts/:attempt",
+    });
   });
 
   it("routes ref-named commit reads separately from SHA-named ones", () => {

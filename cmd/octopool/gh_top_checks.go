@@ -11,7 +11,7 @@ import (
 
 // prChecksMaxPRAgeSeconds bounds how old a relay-cached PR record may be when
 // resolving the head SHA for `gh pr checks`.
-const prChecksMaxPRAgeSeconds = 20
+const prChecksMaxPRAgeSeconds = 60
 
 func relayPRChecks(ctx context.Context, stdout io.Writer, repo string, number string, opts ghTopOptions) error {
 	client, err := newGHRelayClient()

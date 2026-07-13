@@ -74,6 +74,7 @@ var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/statuses/(?:[0-9A-Fa-f]{7,64})$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/actions/runs$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/actions/runs/(?:[0-9]+)$`),
+	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/actions/runs/(?:[0-9]+)/attempts/(?:[0-9]+)$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/actions/runs/(?:[0-9]+)/jobs$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/actions/runs/(?:[0-9]+)/artifacts$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/actions/jobs/(?:[0-9]+)$`),

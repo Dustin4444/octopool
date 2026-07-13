@@ -124,7 +124,7 @@ Edit `wrangler.jsonc` for your account:
 - `vars.GITHUB_OAUTH_CALLBACK_ORIGIN` — optional HTTPS origin registered as the GitHub OAuth callback when browser sign-in starts on a different host.
 - `routes[]` — the custom domain you want octopool served on.
 
-If you don't need OpenClaw's second-host proxy, you can ignore `wrangler.openclaw-proxy.jsonc` and deploy only the main Worker.
+If you don't need OpenClaw's second-host proxy, ignore `wrangler.public-proxy.jsonc` and deploy only the main Worker.
 
 ### 2. Create the data plane
 
@@ -226,7 +226,7 @@ pnpm install
 pnpm check        # format + lint + vitest + types + go test + go vet
 pnpm test         # vitest only
 pnpm test:e2e:cli-worker # compiled CLI → local Workerd/D1/DO → public GitHub
-pnpm run deploy   # wrangler deploy for the backing Worker (and openclaw proxy)
+pnpm run deploy   # authoritative Worker, then octopool.dev proxy Worker
 pnpm e2e          # smoke-test the live deployment
 pnpm docs:site    # build the docs site into dist/docs-site
 pnpm sql:generate # regenerate Worker query constants

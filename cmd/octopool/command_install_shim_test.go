@@ -133,6 +133,63 @@ func TestApplyShimInstallPlanIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestVerifyShimInstallChecksLoginShell(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is required to verify shell startup behavior")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ZDOTDIR", home)
+	shimDir := filepath.Join(home, "shim")
+	shimPath := filepath.Join(shimDir, "gh")
+	realGHPath := filepath.Join(home, "bin", "gh")
+	for _, path := range []string{shimPath, realGHPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	startupPath := filepath.Join(home, ".zshenv")
+	startup, err := updateShimBlock(nil, shimPath, realGHPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(startupPath, startup, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	profilePath := filepath.Join(home, ".zprofile")
+	if err := os.WriteFile(profilePath, []byte("export PATH="+shellSingleQuote(shimDir)+":\"$PATH\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := shimInstallPlan{
+		shellPath:   zsh,
+		shimPath:    shimPath,
+		realGHPath:  realGHPath,
+		startupPath: startupPath,
+	}
+
+	if err := verifyShimInstall(plan); err != nil {
+		t.Fatalf("verifyShimInstall() = %v", err)
+	}
+
+	shadowDir := filepath.Join(home, "shadow")
+	if err := os.MkdirAll(shadowDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(shadowDir, "gh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(profilePath, []byte("export PATH="+shellSingleQuote(shadowDir)+":\"$PATH\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyShimInstall(plan); err == nil || !strings.Contains(err.Error(), "login zsh") {
+		t.Fatalf("verifyShimInstall() = %v, want login-shell shadow error", err)
+	}
+}
+
 func TestShimNeedsUpdateRejectsRegularFile(t *testing.T) {
 	dir := t.TempDir()
 	shim := filepath.Join(dir, "gh")

@@ -1,12 +1,16 @@
 const APP_HOST = "octopool.openclaw.ai";
 export const APP_ORIGIN = `https://${APP_HOST}`;
 export const PUBLIC_HOST = "octopool.dev";
+export const PUBLIC_ORIGIN = `https://${PUBLIC_HOST}`;
 export const PROXY_HOST_HEADER = "x-octopool-forwarded-host";
 export const PROXY_SECRET_HEADER = "x-octopool-proxy-secret";
 
 export function effectiveHost(request: Request, env?: unknown): string {
   const forwarded = request.headers.get(PROXY_HOST_HEADER)?.trim().toLowerCase();
-  if (forwarded === APP_HOST && proxyHeaderAuthorized(request, env)) {
+  if (
+    (forwarded === APP_HOST || forwarded === PUBLIC_HOST) &&
+    proxyHeaderAuthorized(request, env)
+  ) {
     return forwarded;
   }
   return new URL(request.url).hostname.toLowerCase();
@@ -16,6 +20,9 @@ export function effectiveOrigin(request: Request, env?: unknown): string {
   const host = effectiveHost(request, env);
   if (host === APP_HOST) {
     return APP_ORIGIN;
+  }
+  if (host === PUBLIC_HOST) {
+    return PUBLIC_ORIGIN;
   }
   return new URL(request.url).origin;
 }

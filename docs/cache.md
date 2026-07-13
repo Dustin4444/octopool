@@ -45,7 +45,7 @@ Cacheable requests can instead bound acceptable staleness with a
 `cache-control: max-age=N` header. A fresh entry older than `N` seconds is treated as a
 miss and refetched, and the refill writes through to the shared cache, so concurrent
 bounded-freshness readers coalesce onto one upstream request rather than each bypassing
-the cache. The CLI's `gh pr checks` resolves the PR head SHA this way with `max-age=20`.
+the cache. The CLI's `gh pr checks` resolves the PR head SHA this way with `max-age=60`.
 
 ### Token-free GitHub reads
 
@@ -97,9 +97,9 @@ web hit still re-checks that public proof covers the entry before returning it.
 
 Per route kind and response state (`cacheTTLSeconds`):
 
-- workflow runs, jobs, checks, check suites, and commit statuses → 30s while active;
+- workflow runs, jobs, checks, check suites, and commit statuses → 60s while active;
   terminal payloads get 1h fresh plus up to 24h bounded stale fallback
-- run/workflow lists → 30s while active, 2m when every returned run is completed; lists
+- run/workflow lists → 60s while active, 2m when every returned run is completed; lists
   remain mutable because new runs can appear
 - PR files with a validated state discriminator → 5m; PR commits, reviews,
   comments, issue comments/events/timeline, and undiscriminated PR files → 1m..5m

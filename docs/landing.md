@@ -1,13 +1,15 @@
 # Landing Page & GitHub Login
 
-Octopool has two browser hosts on the same backing Worker and data plane:
+Octopool has two browser hosts on one authoritative data plane:
 
 - `octopool.openclaw.ai` is the authoritative website. It serves the animated angry
-  octopus, GitHub sign-in, dashboard link, and docs link. This host is served by a thin
-  OpenClaw-account proxy Worker that forwards into the backing `octopool.dev` Worker.
+  octopus, GitHub sign-in, dashboard link, and docs link. The OpenClaw-account Worker owns
+  the D1 cache, Durable Object, callers, and pooled identities.
 - `octopool.dev` is the mysterious public/download face. It serves the same angry
   octopus, but the primary action is `brew install openclaw/tap/octopool`; web login and
-  dashboard paths redirect to `octopool.openclaw.ai`.
+  dashboard paths redirect to `octopool.openclaw.ai`. A thin Worker in the domain's
+  Cloudflare account forwards API and public-page traffic into the authoritative Worker,
+  so both hosts share one cache and identity pool.
 
 API clients can still request JSON from either host.
 

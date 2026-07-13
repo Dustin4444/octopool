@@ -1,14 +1,14 @@
 # Deployment & Operations
 
 Octopool runs as a Cloudflare Worker (`octopool`) plus a Durable Object class
-(`PoolCoordinator`) and a D1 database. The OpenClaw deployment additionally fronts the
-authoritative website host (`octopool.openclaw.ai`) with a tiny proxy Worker
-(`octopool-openclaw-proxy`) on a separate Cloudflare account; self-hosters can ignore
-that and deploy only the main Worker.
+(`PoolCoordinator`) and a D1 database. The OpenClaw deployment serves the authoritative
+data plane at `octopool.openclaw.ai`; a thin `octopool.dev` Worker in the domain's
+Cloudflare account forwards into it so both hosts share one cache. Self-hosters can
+ignore that proxy and deploy only the main Worker.
 
 The Go CLI is a separate, statically-linked binary released via GoReleaser.
 
-Source: `wrangler.jsonc`, `wrangler.openclaw-proxy.jsonc`, `migrations/`, `package.json`,
+Source: `wrangler.jsonc`, `wrangler.public-proxy.jsonc`, `migrations/`, `package.json`,
 `test/e2e.sh`.
 
 ## Self-host on Cloudflare
@@ -42,9 +42,9 @@ Edit `wrangler.jsonc`:
   OAuth callback when browser sign-in starts on a different host.
 - `routes[]` — the custom domain you want octopool served on.
 
-If you only need one host, you can ignore `wrangler.openclaw-proxy.jsonc`. It exists so
-`octopool.openclaw.ai` (a different Cloudflare account) can proxy into the OpenClaw data
-plane while keeping the install host (`octopool.dev`) separate.
+If you only need one host, ignore `wrangler.public-proxy.jsonc`. OpenClaw uses it only
+because `octopool.dev` lives in a different Cloudflare account from the authoritative
+`octopool.openclaw.ai` data plane.
 
 ### 2. Create the data plane
 
@@ -126,8 +126,8 @@ octopool stats
 ## Cloudflare resources
 
 - Worker `octopool` — entry `src/index.ts`, `nodejs_compat`, observability on.
-- Worker `octopool-openclaw-proxy` (OpenClaw deployment only) — entry
-  `src/openclaw-proxy.ts`, custom-domain proxy for `octopool.openclaw.ai`.
+- Public-host Worker `octopool` in the personal Cloudflare account (OpenClaw deployment
+  only) — entry `src/openclaw-proxy.ts`, custom-domain proxy for `octopool.dev`.
 - Durable Object `PoolCoordinator` (binding `POOL_COORDINATOR`, SQLite-backed,
   migration tag `v1`).
 - D1 database `octopool` (binding `DB`).
@@ -153,8 +153,8 @@ Secrets (via `wrangler secret put`, never in D1/KV/logs):
 
 - `OCTOPOOL_ADMIN_TOKEN` — admin API auth.
 - `GITHUB_OAUTH_CLIENT_SECRET` — website GitHub login.
-- `OCTOPOOL_PROXY_SECRET` — shared secret on both Workers so only the OpenClaw proxy can
-  assert the authoritative app host.
+- `OCTOPOOL_PROXY_SECRET` — shared secret on both Workers so only the public-host proxy
+  can assert the original `octopool.dev` host.
 - `OCTOPOOL_GITHUB_ORG_TOKEN` — background org-membership verifier and public-repo
   proof fetcher.
 - `OCTOPOOL_GITHUB_APP_ID` — GitHub App id (for App identities).
@@ -193,7 +193,7 @@ pnpm install
 pnpm check        # format:check + lint + vitest + build + go test + go vet
 pnpm test         # vitest only
 pnpm test:e2e:cli-worker # compiled CLI → local Workerd/D1/DO → public GitHub
-pnpm run deploy   # wrangler deploy backing Worker, then OpenClaw proxy Worker
+pnpm run deploy   # authoritative Worker, then octopool.dev proxy Worker
 pnpm e2e          # smoke-test the live deployment
 ```
 
@@ -203,7 +203,7 @@ D1, a real Durable Object, and public GitHub. The Go CLI also builds/tests with
 `go build ./cmd/octopool` and `go test ./...`.
 
 `pnpm run deploy` runs both `wrangler deploy` calls. Self-hosters who don't operate the
-OpenClaw proxy can run `wrangler deploy` (Worker) directly. Pushing to `main` does **not**
+public-host proxy can run `wrangler deploy` directly. Pushing to `main` does **not**
 auto-deploy the Worker — only the docs site has a GitHub Pages workflow. Run
 `wrangler deploy` (or `pnpm run deploy`) whenever Worker code or landing-page CSS needs to
 ship to production.

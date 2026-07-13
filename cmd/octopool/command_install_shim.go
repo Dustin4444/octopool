@@ -67,7 +67,7 @@ func runInstallShim(args []string, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "startup file: %s\n", plan.startupPath)
 	fmt.Fprintf(stdout, "real gh: %s\n", plan.realGHPath)
 	if !*dryRun {
-		fmt.Fprintln(stdout, "verified: non-interactive zsh resolves gh through Octopool")
+		fmt.Fprintln(stdout, "verified: non-interactive and login zsh resolve gh through Octopool")
 	}
 	return nil
 }
@@ -336,16 +336,24 @@ func replaceSymlink(path string, target string) error {
 }
 
 func verifyShimInstall(plan shimInstallPlan) error {
-	command := exec.Command(plan.shellPath, "-c", `command -v gh; print -r -- "${OCTOPOOL_GH_PATH:-}"`)
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("verify non-interactive zsh: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 2 || !samePath(strings.TrimSpace(lines[0]), plan.shimPath) || !samePath(strings.TrimSpace(lines[1]), plan.realGHPath) {
-		return fmt.Errorf("non-interactive zsh did not resolve the installed shim (got %q)", strings.TrimSpace(stdout.String()))
+	for _, probe := range []struct {
+		name string
+		flag string
+	}{
+		{name: "non-interactive", flag: "-c"},
+		{name: "login", flag: "-lc"},
+	} {
+		command := exec.Command(plan.shellPath, probe.flag, `command -v gh; print -r -- "${OCTOPOOL_GH_PATH:-}"`)
+		var stdout, stderr bytes.Buffer
+		command.Stdout = &stdout
+		command.Stderr = &stderr
+		if err := command.Run(); err != nil {
+			return fmt.Errorf("verify %s zsh: %w: %s", probe.name, err, strings.TrimSpace(stderr.String()))
+		}
+		lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+		if len(lines) != 2 || !samePath(strings.TrimSpace(lines[0]), plan.shimPath) || !samePath(strings.TrimSpace(lines[1]), plan.realGHPath) {
+			return fmt.Errorf("%s zsh did not resolve the installed shim (got %q); ensure login startup files do not prepend another gh after %s", probe.name, strings.TrimSpace(stdout.String()), plan.startupPath)
+		}
 	}
 	return nil
 }

@@ -254,23 +254,21 @@ function freshTTLSeconds(
     case "issue":
       return closedIssue(response) ? 3_600 : 300;
     case "run":
-      return completedRun(response) ? TERMINAL_CI_TTL_SECONDS : 30;
+      return completedRun(response) ? TERMINAL_CI_TTL_SECONDS : 60;
     case "run_list":
-      // 45s active TTL: concurrent sessions poll run lists every 20-30s;
-      // at 30s those polls almost never overlap a fresh entry.
-      return completedRunList(response) ? 120 : 45;
+      return completedRunList(response) ? 120 : 60;
     case "jobs":
-      return completedJobs(response) ? TERMINAL_CI_TTL_SECONDS : 30;
+      return completedJobs(response) ? TERMINAL_CI_TTL_SECONDS : 60;
     case "checks":
-      return completedChecks(response) ? TERMINAL_CI_TTL_SECONDS : 30;
+      return completedChecks(response) ? TERMINAL_CI_TTL_SECONDS : 60;
     case "check_suites":
-      return completedCheckSuites(response) ? TERMINAL_CI_TTL_SECONDS : 30;
+      return completedCheckSuites(response) ? TERMINAL_CI_TTL_SECONDS : 60;
     case "status":
-      return completedStatus(response) ? TERMINAL_CI_TTL_SECONDS : 30;
+      return completedStatus(response) ? TERMINAL_CI_TTL_SECONDS : 60;
     case "status_list":
-      return completedStatusList(response) ? TERMINAL_CI_TTL_SECONDS : 30;
+      return completedStatusList(response) ? TERMINAL_CI_TTL_SECONDS : 60;
     case "job":
-      return completedJob(response) ? TERMINAL_CI_TTL_SECONDS : 30;
+      return completedJob(response) ? TERMINAL_CI_TTL_SECONDS : 60;
     case "pr_state":
       return stateAwarePRSubresource(route, response) ? 300 : 60;
   }

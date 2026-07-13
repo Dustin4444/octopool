@@ -68,7 +68,7 @@ func TestRunGHPRChecksUsesCacheableRequests(t *testing.T) {
 		}
 		if body["path"] == "/repos/openclaw/octopool/pulls/7" {
 			headers, _ := body["headers"].(map[string]any)
-			if headers["cache-control"] != "max-age=20" {
+			if headers["cache-control"] != "max-age=60" {
 				t.Fatalf("expected bounded-freshness PR lookup header, got %#v", body["headers"])
 			}
 			if _, ok := headers["if-none-match"]; ok {

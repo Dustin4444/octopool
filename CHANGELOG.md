@@ -2,6 +2,14 @@
 
 ## 0.4.5 - Unreleased
 
+### Changes
+
+- Route `octopool.dev` into the OpenClaw data plane, relay cached workflow-run attempts, and extend active CI plus PR-head cache bounds to 60 seconds so fleet polling shares one cache without spending the GitHub App budget unnecessarily.
+
+### Fixes
+
+- Make shim installation fail when login-shell startup ordering shadows Octopool, matching the documented login-shell guarantee.
+
 ## 0.4.4 - 2026-07-05
 
 ### Changes

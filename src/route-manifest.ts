@@ -46,6 +46,7 @@ const routeParameters = {
   // values of SHA length stay on the sha routes and their long TTLs.
   commitRef: "(?:[0-9A-Fa-f]{1,6}|[0-9A-Fa-f]{65,}|[^/?#]*[^/?#0-9A-Fa-f][^/?#]*)",
   id: "[0-9]+",
+  attempt: "[0-9]+",
   tag: "[^/?#]+",
   gistId: "[0-9A-Fa-f]+",
   slug: "[A-Za-z0-9_.-]+",
@@ -68,6 +69,7 @@ const routeParameterExamples: Record<RouteParameter, string> = {
   sha: "0123456789abcdef0123456789abcdef01234567",
   commitRef: "main",
   id: "42",
+  attempt: "2",
   tag: "v1.2.3",
   gistId: "abc123",
   slug: "mit",
@@ -131,6 +133,7 @@ function normalizeRouteKeyTemplate(template: string): string {
     .replace(/\/commits\/\{sha\}/g, "/commits/:sha")
     .replace(/\/commits\/\{commitRef\}/g, "/commits/:ref")
     .replace(/\/actions\/runs\/\{id\}/g, "/actions/runs/:id")
+    .replace(/\/attempts\/\{attempt\}/g, "/attempts/:attempt")
     .replace(/\/actions\/jobs\/\{id\}/g, "/actions/jobs/:id")
     .replace(/\/check-runs\/\{id\}/g, "/check-runs/:id")
     .replace(/\/milestones\/\{id\}/g, "/milestones/:id")
@@ -251,6 +254,7 @@ export const ROUTES = [
     fullResponseCap: true,
   }),
   route("/repos/{owner}/{repo}/actions/runs/{id}", "run_view"),
+  route("/repos/{owner}/{repo}/actions/runs/{id}/attempts/{attempt}", "run_view"),
   route("/repos/{owner}/{repo}/actions/runs/{id}/jobs", "run_jobs"),
   route("/repos/{owner}/{repo}/actions/runs/{id}/artifacts", "run_artifacts"),
   route("/repos/{owner}/{repo}/actions/jobs/{id}", "job_view"),

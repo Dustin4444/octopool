@@ -169,14 +169,14 @@ describe("web routing helpers", () => {
     expect(env.DB.prepare).not.toHaveBeenCalled();
   });
 
-  it("redirects HTTP at the OpenClaw proxy before forwarding", async () => {
-    const response = await proxyWorker.fetch(new Request("http://octopool.openclaw.ai/dashboard"), {
+  it("redirects HTTP at the public-host proxy before forwarding", async () => {
+    const response = await proxyWorker.fetch(new Request("http://octopool.dev/dashboard"), {
       OCTOPOOL_ORIGIN: "https://octopool.dev",
       OCTOPOOL_PROXY_SECRET: "proxy-secret",
     });
 
     expect(response.status).toBe(308);
-    expect(response.headers.get("location")).toBe("https://octopool.openclaw.ai/dashboard");
+    expect(response.headers.get("location")).toBe("https://octopool.dev/dashboard");
   });
 
   it("forwards app-host proxy requests with authenticated host context and no cache", async () => {
@@ -203,6 +203,28 @@ describe("web routing helpers", () => {
       expect(forwarded.cache).toBe("no-store");
       expect(forwarded.headers.get("host")).toBeNull();
       expect(forwarded.headers.get(PROXY_HOST_HEADER)).toBe("octopool.openclaw.ai");
+      expect(forwarded.headers.get(PROXY_SECRET_HEADER)).toBe("proxy-secret");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("forwards the public host into the authoritative data plane", async () => {
+    const fetchMock = vi.fn(async (_request: Request) => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const response = await proxyWorker.fetch(
+        new Request("https://octopool.dev/.well-known/octopool"),
+        {
+          OCTOPOOL_ORIGIN: "https://octopool.openclaw.ai",
+          OCTOPOOL_PROXY_SECRET: "proxy-secret",
+        },
+      );
+
+      expect(response.status).toBe(200);
+      const forwarded = fetchMock.mock.calls[0]?.[0] as Request;
+      expect(new URL(forwarded.url).origin).toBe("https://octopool.openclaw.ai");
+      expect(forwarded.headers.get(PROXY_HOST_HEADER)).toBe("octopool.dev");
       expect(forwarded.headers.get(PROXY_SECRET_HEADER)).toBe("proxy-secret");
     } finally {
       vi.unstubAllGlobals();

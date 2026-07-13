@@ -303,7 +303,17 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(run, response({ status: "completed" }))).toBe(3_600);
-    expect(cacheTTLSeconds(run, response({ status: "in_progress" }))).toBe(30);
+    expect(cacheTTLSeconds(run, response({ status: "in_progress" }))).toBe(60);
+
+    const runAttempt = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/actions/runs/123/attempts/2",
+      }),
+      policy,
+    );
+    expect(cacheTTLSeconds(runAttempt, response({ status: "in_progress" }))).toBe(60);
 
     const runList = classifyRoute(
       validateRelayRequest({
@@ -316,7 +326,7 @@ describe("github cache policy", () => {
     expect(cacheTTLSeconds(runList, response({ workflow_runs: [{ status: "completed" }] }))).toBe(
       120,
     );
-    expect(cacheTTLSeconds(runList, response({ workflow_runs: [] }))).toBe(45);
+    expect(cacheTTLSeconds(runList, response({ workflow_runs: [] }))).toBe(60);
 
     const checks = classifyRoute(
       validateRelayRequest({
@@ -329,7 +339,7 @@ describe("github cache policy", () => {
     expect(cacheTTLSeconds(checks, response({ check_runs: [{ status: "completed" }] }))).toBe(
       3_600,
     );
-    expect(cacheTTLSeconds(checks, response({ check_runs: [] }))).toBe(30);
+    expect(cacheTTLSeconds(checks, response({ check_runs: [] }))).toBe(60);
     const checkSuites = classifyRoute(
       validateRelayRequest({
         pool: "maintainers",
@@ -341,7 +351,7 @@ describe("github cache policy", () => {
     expect(
       cacheTTLSeconds(checkSuites, response({ check_suites: [{ status: "completed" }] })),
     ).toBe(3_600);
-    expect(cacheTTLSeconds(checkSuites, response({ check_suites: [] }))).toBe(30);
+    expect(cacheTTLSeconds(checkSuites, response({ check_suites: [] }))).toBe(60);
     const statuses = classifyRoute(
       validateRelayRequest({
         pool: "maintainers",
@@ -351,7 +361,7 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(statuses, response([{ state: "success" }]))).toBe(3_600);
-    expect(cacheTTLSeconds(statuses, response([{ state: "pending" }]))).toBe(30);
+    expect(cacheTTLSeconds(statuses, response([{ state: "pending" }]))).toBe(60);
     const job = classifyRoute(
       validateRelayRequest({
         pool: "maintainers",
@@ -361,7 +371,7 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(job, response({ status: "completed" }))).toBe(3_600);
-    expect(cacheTTLSeconds(job, response({ status: "in_progress" }))).toBe(30);
+    expect(cacheTTLSeconds(job, response({ status: "in_progress" }))).toBe(60);
 
     const files = classifyRoute(
       validateRelayRequest({
@@ -461,21 +471,21 @@ describe("github cache policy", () => {
 
     const checks = classify("/repos/openclaw/openclaw/commits/main/check-runs");
     expect(cacheTTLSeconds(checks, response({ check_runs: [{ status: "completed" }] }))).toBe(120);
-    expect(cacheTTLSeconds(checks, response({ check_runs: [] }))).toBe(30);
+    expect(cacheTTLSeconds(checks, response({ check_runs: [] }))).toBe(60);
 
     const checkSuites = classify("/repos/openclaw/openclaw/commits/main/check-suites");
     expect(
       cacheTTLSeconds(checkSuites, response({ check_suites: [{ status: "completed" }] })),
     ).toBe(120);
-    expect(cacheTTLSeconds(checkSuites, response({ check_suites: [] }))).toBe(30);
+    expect(cacheTTLSeconds(checkSuites, response({ check_suites: [] }))).toBe(60);
 
     const status = classify("/repos/openclaw/openclaw/commits/main/status");
     expect(cacheTTLSeconds(status, response({ statuses: [{ state: "success" }] }))).toBe(120);
-    expect(cacheTTLSeconds(status, response({ statuses: [{ state: "pending" }] }))).toBe(30);
+    expect(cacheTTLSeconds(status, response({ statuses: [{ state: "pending" }] }))).toBe(60);
 
     const statuses = classify("/repos/openclaw/openclaw/commits/main/statuses");
     expect(cacheTTLSeconds(statuses, response([{ state: "success" }]))).toBe(120);
-    expect(cacheTTLSeconds(statuses, response([{ state: "pending" }]))).toBe(30);
+    expect(cacheTTLSeconds(statuses, response([{ state: "pending" }]))).toBe(60);
 
     // Capped fresh TTLs stay below the terminal-CI detection threshold, so the
     // long terminal stale window never applies to ref-named routes.
