@@ -12,8 +12,10 @@ func runWhoami(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("whoami", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	jsonOutput := fs.Bool("json", false, "print JSON")
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout, "usage: octopool whoami [--json]"); err != nil {
 		return err
+	} else if handled {
+		return nil
 	}
 	if fs.NArg() != 0 {
 		return errors.New("usage: octopool whoami [--json]")

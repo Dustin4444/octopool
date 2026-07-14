@@ -2,6 +2,10 @@
 
 ## 0.4.7 - Unreleased
 
+### Fixes
+
+- Make every Octopool subcommand help flag exit successfully with command-specific usage and flag details instead of reporting `flag: help requested`.
+
 ## 0.4.6 - 2026-07-13
 
 ### Changes

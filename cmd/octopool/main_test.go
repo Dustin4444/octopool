@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +17,49 @@ func TestVersionCommand(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "octopool ") {
 		t.Fatalf("version output = %q", stdout.String())
+	}
+}
+
+func TestCommandHelp(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	authFile, err := authPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(authFile), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(authFile, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"login", "--help"}, "usage: octopool login"},
+		{[]string{"login", "https://octopool.example.com", "--help"}, "usage: octopool login"},
+		{[]string{"install-shim", "--help"}, "usage: octopool install-shim"},
+		{[]string{"whoami", "--help"}, "usage: octopool whoami"},
+		{[]string{"health", "--help"}, "usage: octopool health"},
+		{[]string{"stats", "--help"}, "usage: octopool stats"},
+		{[]string{"request", "--help"}, "usage: octopool request"},
+		{[]string{"admin", "--help"}, "usage: octopool admin"},
+		{[]string{"admin", "caller", "--help"}, "usage: octopool admin caller"},
+		{[]string{"admin", "identity", "--help"}, "usage: octopool admin identity"},
+	}
+	for _, test := range tests {
+		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if err := run(t.Context(), test.args, &stdout, &stderr); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(stdout.String(), test.want) {
+				t.Fatalf("expected %q in %q", test.want, stdout.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("unexpected stderr: %q", stderr.String())
+			}
+		})
 	}
 }
 

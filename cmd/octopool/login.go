@@ -34,8 +34,10 @@ func runLogin(ctx context.Context, args []string, stdout io.Writer) error {
 	client := fs.String("client", defaultClientName(), "client name for per-device stats")
 	ghPath := fs.String("gh-path", envDefault("OCTOPOOL_GH_PATH", "gh"), "GitHub CLI path")
 	trustRedirect := fs.Bool("trust-discovery-redirect", false, "allow discovery api_base on a different host")
-	if err := fs.Parse(normalizeLoginArgs(args)); err != nil {
+	if handled, err := parseCommandFlags(fs, normalizeLoginArgs(args), stdout, "usage: octopool login [server] [flags]"); err != nil {
 		return err
+	} else if handled {
+		return nil
 	}
 	baseURL, err := loginServerArgument(fs, *urlFlag, *serverFlag)
 	if err != nil {

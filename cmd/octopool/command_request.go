@@ -9,14 +9,10 @@ import (
 )
 
 func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
-	auth, err := loadAuth()
-	if err != nil {
-		return err
-	}
 	fs := flag.NewFlagSet("request", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	url := fs.String("url", defaultAuthURL(auth), "Octopool base URL")
-	pool := fs.String("pool", defaultAuthPool(auth), "pool id")
+	url := fs.String("url", defaultAuthURL(authFile{}), "Octopool base URL")
+	pool := fs.String("pool", defaultAuthPool(authFile{}), "pool id")
 	tokenEnv := fs.String("token-env", "OCTOPOOL_TOKEN", "caller token env var")
 	method := fs.String("method", "GET", "GitHub method")
 	path := fs.String("path", "", "GitHub API path")
@@ -26,9 +22,16 @@ func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
 	fs.Var(&queryValues, "query", "query key=value, repeatable")
 	fs.Var(&headerValues, "header", "header key=value, repeatable")
 	fs.Var(&routeHintValues, "route-hint", "route hint key=value, repeatable")
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout, "usage: octopool request --path PATH [flags]"); err != nil {
+		return err
+	} else if handled {
+		return nil
+	}
+	auth, err := loadAuth()
+	if err != nil {
 		return err
 	}
+	applyAuthFlagDefaults(fs, auth, url, pool)
 	if *path == "" {
 		return errors.New("--path is required")
 	}

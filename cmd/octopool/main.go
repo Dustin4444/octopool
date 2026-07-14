@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -138,4 +139,16 @@ func isGHArgv(argv0 string) bool {
 
 func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage: octopool <login|install-shim|whoami|gh|health|stats|request|admin> [flags]")
+}
+
+func parseCommandFlags(fs *flag.FlagSet, args []string, stdout io.Writer, usageLine string) (bool, error) {
+	err := fs.Parse(args)
+	if !errors.Is(err, flag.ErrHelp) {
+		return false, err
+	}
+	fmt.Fprintln(stdout, usageLine)
+	fs.SetOutput(stdout)
+	fs.PrintDefaults()
+	fs.SetOutput(io.Discard)
+	return true, nil
 }

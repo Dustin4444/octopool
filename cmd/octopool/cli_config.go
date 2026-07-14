@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -45,6 +46,19 @@ func defaultAuthURL(auth authFile) string {
 
 func defaultAuthPool(auth authFile) string {
 	return envDefault("OCTOPOOL_POOL", firstNonEmpty(auth.Pool, "maintainers"))
+}
+
+func applyAuthFlagDefaults(fs *flag.FlagSet, auth authFile, baseURL *string, pool *string) {
+	set := map[string]bool{}
+	fs.Visit(func(item *flag.Flag) {
+		set[item.Name] = true
+	})
+	if !set["url"] {
+		*baseURL = defaultAuthURL(auth)
+	}
+	if !set["pool"] {
+		*pool = defaultAuthPool(auth)
+	}
 }
 
 func validateAuthURLForRequest(auth authFile, effectiveURL string, tokenEnvName string) error {

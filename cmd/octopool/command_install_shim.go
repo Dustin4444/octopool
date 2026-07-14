@@ -33,12 +33,10 @@ func runInstallShim(args []string, stdout io.Writer) error {
 	fs.SetOutput(io.Discard)
 	shell := fs.String("shell", "", "shell to configure (default: $SHELL, currently zsh only)")
 	dryRun := fs.Bool("dry-run", false, "show changes without writing them")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprintln(stdout, "usage: octopool install-shim [--shell zsh] [--dry-run]")
-			return nil
-		}
+	if handled, err := parseCommandFlags(fs, args, stdout, "usage: octopool install-shim [--shell zsh] [--dry-run]"); err != nil {
 		return err
+	} else if handled {
+		return nil
 	}
 	if fs.NArg() != 0 {
 		return errors.New("install-shim does not accept positional arguments")

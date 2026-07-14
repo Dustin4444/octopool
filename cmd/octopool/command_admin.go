@@ -18,6 +18,9 @@ func runAdmin(ctx context.Context, args []string, stdout io.Writer) error {
 		return runAdminCaller(ctx, args[1:], stdout)
 	case "identity":
 		return runAdminIdentity(ctx, args[1:], stdout)
+	case "help", "-h", "--help":
+		fmt.Fprintln(stdout, "usage: octopool admin <caller|identity> [flags]")
+		return nil
 	default:
 		return fmt.Errorf("unknown admin subcommand %q", args[0])
 	}
@@ -31,8 +34,10 @@ func runAdminCaller(ctx context.Context, args []string, stdout io.Writer) error 
 	adminTokenEnv := fs.String("admin-token-env", "OCTOPOOL_ADMIN_TOKEN", "admin token env var")
 	githubLogin := fs.String("github-login", "", "GitHub login to register")
 	name := fs.String("name", "", "caller display name")
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout, "usage: octopool admin caller [flags]"); err != nil {
 		return err
+	} else if handled {
+		return nil
 	}
 	if *githubLogin == "" {
 		return errors.New("--github-login is required")
@@ -62,8 +67,10 @@ func runAdminIdentity(ctx context.Context, args []string, stdout io.Writer) erro
 	privateScopes := fs.Bool("private-scopes", false, "allow owner-wide scopes to access private repositories")
 	scopeValues := multiFlag{}
 	fs.Var(&scopeValues, "scope", "owner/repo, owner, or * for public repos; repeatable")
-	if err := fs.Parse(args); err != nil {
+	if handled, err := parseCommandFlags(fs, args, stdout, "usage: octopool admin identity [flags]"); err != nil {
 		return err
+	} else if handled {
+		return nil
 	}
 	if *id == "" || *login == "" || *secretRef == "" {
 		return errors.New("--id, --login, and --secret-ref are required")

@@ -76,20 +76,23 @@ type statsCache struct {
 }
 
 func runStats(ctx context.Context, args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	baseURL := fs.String("url", defaultAuthURL(authFile{}), "Octopool base URL")
+	pool := fs.String("pool", defaultAuthPool(authFile{}), "pool id")
+	tokenEnv := fs.String("token-env", "OCTOPOOL_TOKEN", "caller token env var")
+	since := fs.String("since", "24h", "stats window, e.g. 30m, 24h, 7d")
+	jsonOutput := fs.Bool("json", false, "print raw JSON")
+	if handled, err := parseCommandFlags(fs, args, stdout, "usage: octopool stats [flags]"); err != nil {
+		return err
+	} else if handled {
+		return nil
+	}
 	auth, err := loadAuth()
 	if err != nil {
 		return err
 	}
-	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	baseURL := fs.String("url", defaultAuthURL(auth), "Octopool base URL")
-	pool := fs.String("pool", defaultAuthPool(auth), "pool id")
-	tokenEnv := fs.String("token-env", "OCTOPOOL_TOKEN", "caller token env var")
-	since := fs.String("since", "24h", "stats window, e.g. 30m, 24h, 7d")
-	jsonOutput := fs.Bool("json", false, "print raw JSON")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
+	applyAuthFlagDefaults(fs, auth, baseURL, pool)
 	if err := validateAuthURLForRequest(auth, *baseURL, *tokenEnv); err != nil {
 		return err
 	}
