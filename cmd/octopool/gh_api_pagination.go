@@ -7,7 +7,9 @@ import (
 	"errors"
 	"io"
 	"math"
+	"net/url"
 	"strconv"
+	"strings"
 )
 
 type ghAPIPaginationState struct {
@@ -54,6 +56,36 @@ func relayPaginatedGHAPI(
 			return writeGHBody(ctx, stdout, envelope, request.jq)
 		}
 
+		if link, ok := relayResponseHeader(envelope.Headers, "link"); ok {
+			nextTarget, hasNext := relayNextLink(link)
+			// Every Link-followed page is one real gh would fetch and emit —
+			// even an empty terminal page. Probe suppression is only for the
+			// header-less heuristic, whose extra fetch real gh never makes.
+			pages = append(pages, envelope)
+			if !hasNext {
+				return writeGHAPIPages(ctx, stdout, pages, request.jq, request.slurp)
+			}
+			if pageIndex == maxRelayPages-1 {
+				return localFallbackError{Reason: "pagination_exhausted"}
+			}
+			if nextRequest, ok := relayNextPageRequest(request, nextTarget); ok {
+				request = nextRequest
+				continue
+			}
+			// GitHub may canonicalize next links (e.g. /repositories/{id}/...),
+			// which the relay's route allowlist cannot follow. When the link
+			// itself paginates numerically, adopt its page number on the
+			// original relay path; cursor-style links cannot be replayed and
+			// must go to real gh.
+			if nextPage, ok := relayLinkNumericPage(nextTarget); ok {
+				request.query["page"] = strconv.Itoa(nextPage)
+				continue
+			}
+			return localFallbackError{Reason: "pagination_link_unfollowable"}
+		}
+
+		perPage, validPerPage = positiveQueryInt(request.query["per_page"])
+		page, validPage = positiveQueryInt(request.query["page"])
 		if envelope.BodyEncoding != "json" || !validPerPage || !validPage {
 			return localFallbackError{Reason: "pagination_shape_unsupported"}
 		}
@@ -86,6 +118,110 @@ func relayPaginatedGHAPI(
 	return localFallbackError{Reason: "pagination_exhausted"}
 }
 
+func relayResponseHeader(headers map[string]string, name string) (string, bool) {
+	for key, value := range headers {
+		if strings.EqualFold(key, name) {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+func relayNextLink(header string) (string, bool) {
+	for _, entry := range splitRelayLinkHeader(header) {
+		open := strings.IndexByte(entry, '<')
+		if open < 0 {
+			continue
+		}
+		closeOffset := strings.IndexByte(entry[open+1:], '>')
+		if closeOffset < 0 {
+			continue
+		}
+		closeIndex := open + 1 + closeOffset
+		for _, parameter := range strings.Split(entry[closeIndex+1:], ";") {
+			key, value, ok := strings.Cut(parameter, "=")
+			if !ok || !strings.EqualFold(strings.TrimSpace(key), "rel") {
+				continue
+			}
+			value = strings.TrimSpace(value)
+			if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+				value = value[1 : len(value)-1]
+			}
+			for _, relation := range strings.Fields(value) {
+				if strings.EqualFold(relation, "next") {
+					return strings.TrimSpace(entry[open+1 : closeIndex]), true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+func splitRelayLinkHeader(header string) []string {
+	entries := make([]string, 0, 4)
+	start := 0
+	inAngle := false
+	inQuote := false
+	escaped := false
+	for index := 0; index < len(header); index++ {
+		character := header[index]
+		if inQuote {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if character == '\\' {
+				escaped = true
+			} else if character == '"' {
+				inQuote = false
+			}
+			continue
+		}
+		switch character {
+		case '<':
+			inAngle = true
+		case '>':
+			inAngle = false
+		case '"':
+			inQuote = true
+		case ',':
+			if !inAngle {
+				entries = append(entries, strings.TrimSpace(header[start:index]))
+				start = index + 1
+			}
+		}
+	}
+	entries = append(entries, strings.TrimSpace(header[start:]))
+	return entries
+}
+
+func relayNextPageRequest(request ghAPIRequest, target string) (ghAPIRequest, bool) {
+	nextURL, err := url.Parse(target)
+	if err != nil || nextURL.Path == "" || nextURL.Path != request.path {
+		return request, false
+	}
+	values, err := url.ParseQuery(nextURL.RawQuery)
+	if err != nil {
+		return request, false
+	}
+	query := make(map[string]any, len(values))
+	for key, items := range values {
+		switch len(items) {
+		case 1:
+			query[key] = items[0]
+		case 0:
+		default:
+			query[key] = items
+		}
+	}
+	nextRequest := request
+	nextRequest.query = query
+	if !safeRelayRequest(nextRequest) {
+		return request, false
+	}
+	return nextRequest, true
+}
+
 func positiveQueryInt(value any) (int, bool) {
 	raw, ok := value.(string)
 	if !ok {
@@ -93,6 +229,22 @@ func positiveQueryInt(value any) (int, bool) {
 	}
 	parsed, err := strconv.Atoi(raw)
 	return parsed, err == nil && parsed > 0
+}
+
+func relayLinkNumericPage(target string) (int, bool) {
+	nextURL, err := url.Parse(target)
+	if err != nil {
+		return 0, false
+	}
+	values, err := url.ParseQuery(nextURL.RawQuery)
+	if err != nil {
+		return 0, false
+	}
+	pages, ok := values["page"]
+	if !ok || len(pages) != 1 {
+		return 0, false
+	}
+	return positiveQueryInt(pages[0])
 }
 
 func relayPageHasNext(body []byte, perPage int, state *ghAPIPaginationState) (hasNext bool, empty bool, inferable bool) {
