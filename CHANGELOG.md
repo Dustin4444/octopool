@@ -2,9 +2,14 @@
 
 ## 0.4.7 - Unreleased
 
+### Changes
+
+- Keep bounded `gh api --paginate` and `--slurp` GET reads on the shared relay cache, falling back to real `gh` after 10 pages.
+
 ### Fixes
 
 - Make every Octopool subcommand help flag exit successfully with command-specific usage and flag details instead of reporting `flag: help requested`.
+- Keep `gh run watch` and `gh pr checks --watch` on relay-cached polling with a 30-second interval floor and backoff to 120 seconds instead of draining personal GitHub API quota.
 
 ## 0.4.6 - 2026-07-13
 

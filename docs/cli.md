@@ -109,10 +109,14 @@ octopool whoami
 
 Use `--json` for scripts.
 
-### `octopool gh api <GET path> [--jq <expr>]`
+### `octopool gh api <GET path> [--paginate] [--slurp] [--jq <expr>]`
 
 Relays a read-only `gh api` call through Octopool's cache and pool. Prints the GitHub
 response body exactly like `gh api`, optionally piping it through `jq -r <expr>`.
+GET reads using `--paginate` and `--slurp` stay relay-cached for up to 10 pages;
+longer result sets and response shapes whose completion cannot be proven without
+Link headers (arrays and `total_count` object lists can) fall through to the real
+`gh` for a complete response.
 
 ```sh
 octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
@@ -130,6 +134,7 @@ octopool gh pr view 85341 -R openclaw/openclaw --json number,files,commits,comme
 octopool gh pr list -R openclaw/openclaw --state open --limit 20 --json number,title,url
 octopool gh pr diff 85341 -R openclaw/openclaw --patch
 octopool gh pr checks 85341 -R openclaw/openclaw --json name,state,bucket,link,workflow
+octopool gh pr checks 85341 -R openclaw/openclaw --watch --fail-fast
 octopool gh search issues cache regression -R openclaw/openclaw --state open --json number,title,url
 octopool gh search prs rate limit -R openclaw/openclaw --state open --json number,title,url
 octopool gh issue view 80490 -R openclaw/openclaw --json number,title,state,url
@@ -137,6 +142,7 @@ octopool gh issue list -R openclaw/openclaw --state open --label bug --limit 20 
 octopool gh run list -R openclaw/openclaw --branch main --limit 10 --json databaseId,workflowName,status,conclusion,url
 octopool gh run view 26360397003 -R openclaw/openclaw --json databaseId,workflowName,status,conclusion,url
 octopool gh run view 26360397003 -R openclaw/openclaw --json status,conclusion,jobs
+octopool gh run watch 26360397003 -R openclaw/openclaw --exit-status
 octopool gh repo view openclaw/openclaw --json nameWithOwner,defaultBranchRef,url
 octopool gh workflow list -R openclaw/octopool --json id,name,path,state
 octopool gh workflow view ci.yml -R openclaw/octopool --json id,name,path,state
@@ -167,8 +173,9 @@ verified PR head SHA, allowing file pages to share a five-minute state-scoped ca
 `gh pr checks` uses the shared cache throughout: its PR
 head-SHA lookup sends `cache-control: max-age=60` so concurrent CI-polling sessions share
 one upstream PR read at most 60 seconds old, and the check/status reads for that SHA use
-the normal cache TTLs. Ask for raw `gh api` conditional requests only when instant
-freshness matters more than quota.
+the normal cache TTLs. Native `gh run watch` and `gh pr checks --watch` polling also stays
+on the relay, floors intervals at 30 seconds, and backs off to 120 seconds. Ask for raw
+`gh api` conditional requests only when instant freshness matters more than quota.
 `--jq` runs after `--json` filtering, matching the usual agent workflow for small
 machine-readable reads.
 
@@ -176,7 +183,7 @@ The command falls through to the real `gh` without contacting Octopool when any 
 hold:
 
 - method is not `GET`, or mutating field flags are present (`-f`, `-F`, `--field`,
-  `--raw-field`, `--paginate`, `--slurp`).
+  `--raw-field`).
 - a query key looks secret-bearing, or a header is outside the safe set
   (`accept`, `x-github-api-version`, `if-none-match`, `if-modified-since`).
 - `--jq` was requested but `jq` is not installed.
