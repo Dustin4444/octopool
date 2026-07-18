@@ -5,8 +5,9 @@ route with a public-visibility check. Both keep private data out of the shared c
 reduce load on pooled identities.
 
 Source: `src/cache.ts`, `src/cache-policy.ts`, `src/cache-coalesce.ts`,
-`src/edge-cache.ts`, `src/public-repos.ts`, `src/pr-state.ts`, `src/maintenance.ts`,
-migrations `0002`/`0003`/`0006`/`0011`.
+`src/edge-cache.ts`, `src/public-repos.ts`, `src/pr-state.ts`,
+`src/run-list-superset.ts`, `src/terminal-log-cache.ts`, `src/maintenance.ts`, migrations
+`0002`/`0003`/`0006`/`0011`.
 
 ## Read-through edge + D1 cache
 
@@ -43,9 +44,11 @@ need to re-contact GitHub just to validate the hint.
 
 ### What is cached
 
-Only successful `2xx` responses on cacheable routes are stored. The cache is **bypassed** when:
+Only successful `2xx` responses on cacheable routes are stored. The edge + D1 cache is
+**bypassed** when:
 
-- the route is a log route, large-payload route, or `rate_limit`, or
+- the route is a large-payload route or `rate_limit` (completed Actions logs use the
+  dedicated R2 cache described below), or
 - the request carries a conditional header (`if-none-match` / `if-modified-since`).
 
 Cacheable requests can instead bound acceptable staleness with a
@@ -118,9 +121,76 @@ Per route kind and response state (`cacheTTLSeconds`):
 - release lists/latest → 5m; release by tag/id → 1h
 - immutable commit objects → 24h; commit lists → 5m; contents → 1h
 - repo metadata → 10m; workflow metadata → 1h
-- large logs, explicit log routes, `rate_limit`, and conditional requests still bypass
+- active/unknown-run logs, `rate_limit`, and conditional requests still bypass
 
-### Cache-hit integrity
+## Completed Actions log cache
+
+`job_logs` requests fetch the job endpoint without using edge or D1 metadata cache and
+require that fresh job payload's own `status` to be `completed`. A cached completed run can
+therefore never make an active job from a re-run terminal. Whole-run log routes likewise
+require a fresh uncached run payload whose current status is `completed`, plus a positive
+`run_attempt`; the attempt becomes part of the R2 key so a completed re-run cannot receive
+an earlier attempt's archive. Active, unknown, attempt-less, or failed metadata probes keep
+the previous large-payload bypass behavior. Only a successful 2xx anonymous metadata
+response records a public-repository proof. A proven-terminal log uses the dedicated
+`ACTIONS_LOGS` R2 bucket, keyed by pool, exact route path, and whole-run attempt when
+applicable, so immutable log downloads are shared without putting their large payloads in D1.
+
+R2 stores the raw log bytes, content type, original body encoding, and a retention timestamp.
+After the fresh terminal-status proof, an object younger than one hour can be served without
+contacting the log endpoint. Older objects also make an authenticated log request without
+following its redirect: a validated `302 Location` confirms existence and refreshes the
+retention timestamp, while `404` purges the object and returns GitHub's deletion response.
+Thus a deletion can remain cached for at most the bounded one-hour no-log-probe window, not
+the full retention period.
+
+Objects untouched and unconfirmed for seven days expire. Reads enforce that lifetime from
+object metadata: expired objects are treated as misses and removed, so lifecycle cleanup
+timing can never cause stale data to be served. R2 read, write, or probe failures never fail
+a relay request: Octopool uses the existing authenticated redirect-validation path instead.
+
+Operator provisioning is a one-time bucket plus lifecycle setup. The required lifecycle
+rule is: enabled for prefix `github-actions-logs/v1/`, delete objects seven days after
+creation. Apply it with Wrangler (or configure the identical rule in the R2 dashboard):
+
+```sh
+wrangler r2 bucket create octopool-actions-logs
+wrangler r2 bucket lifecycle add octopool-actions-logs octopool-actions-logs-expire github-actions-logs/v1/ --expire-days 7
+```
+
+The operator owns this rule; worker code does not scan R2 or manage bucket lifecycle.
+
+As with edge + D1 hits, Octopool runs the public-repository guard before returning an R2
+log hit. Successful hits are audited as cacheable `hit` events and count as saved GitHub
+requests; active-run log fetches remain non-cacheable `bypass` events.
+Requests carrying `If-None-Match` or `If-Modified-Since` skip the completion lookup and
+all R2 reads and writes, preserving the normal conditional-request bypass path.
+
+## Actions run-list superset
+
+Repo-level `run_list` requests carrying
+`x-octopool-public-shape: actions-summary-v1` can share one canonical cache entry per pool
+and repository. The canonical request is the unfiltered `page=1&per_page=100` response and
+uses the existing state-aware run-list TTL policy. A miss fills that entry with one upstream
+request; fresh variants filter the cached runs by exact `head_branch`, or by a `status` value
+matching either the GitHub run `status` or terminal `conclusion`, then apply `per_page` and
+`limit` truncation locally.
+
+The derived response's `total_count` is the number of matching runs found in the cached
+100-run page before truncation. Shim consumers ignore totals beyond the returned page; this
+is deliberately not a claim about older GitHub pages. If local filtering returns fewer than
+the requested limit while GitHub's canonical `total_count` proves that older runs were not
+captured, Octopool falls back to the exact upstream filtered request. Page values above 1,
+page sizes above 100, workflow-scoped paths, unknown query parameters, unsupported GitHub
+status values, and requests without the shim shape keep exact upstream and per-query cache
+behavior. Conditional shim requests bypass the canonical cache but still translate the
+shim-only `limit` into a capped upstream `per_page` and shape successful responses locally.
+All other exact shaped requests, including workflow-scoped paths, use the same translation
+and never forward `limit` to GitHub. Locally shaped responses omit `ETag`, `Last-Modified`,
+`Content-Length`, and `Link` because those validators, lengths, and pagination links describe
+the upstream representation, not the transformed body.
+
+## Cache-hit integrity
 
 A fresh or bounded-stale hit is only served if:
 
@@ -144,7 +214,8 @@ refreshes use the same coordinator pattern, so simultaneous expired-proof checks
 GitHub request. Audit writes remain deferred.
 An hourly scheduled task deletes cache entries after each entry's route-specific
 `stale_expires_at` deadline in bounded batches, preserving every configured stale-serving
-window while keeping D1 growth bounded.
+window while keeping D1 growth bounded. R2 expiry is handled by the operator-configured
+bucket lifecycle rule described above.
 
 Hits are still audited, with the cached identity attributed. Each audit row records cache
 status as `hit`, `stale`, `miss`, `bypass`, or `unknown`, which powers `octopool stats` and
@@ -196,6 +267,7 @@ private-repo block — a hard `404`/private response always denies.
   (migration `0005`).
 - `audit_events.fallback_reason` / `audit_events.coalesced` — local fallback classification
   and duplicate-fill telemetry (migration `0009`).
+- `ACTIONS_LOGS` R2 binding (`octopool-actions-logs`) — raw terminal Actions log objects;
+  no D1 migration is required.
 
-Secret values are never written to the cache. R2 is deferred; current routes are bounded
-enough to live in D1, and large Actions logs skip the cache entirely.
+Secret values are never written to either cache.
