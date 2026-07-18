@@ -18,6 +18,13 @@ direct repository-resource response also proves that the repository is public, a
 separate repository metadata request; routes that need a pooled identity still run the
 explicit public-repository guard first. Successful results write through to both layers.
 
+Expired API-origin entries with an `etag` or `last-modified` validator are conditionally
+revalidated through the API before the normal token-free/API/pool fill chain. Anonymous REST
+entries are distinguished from web/raw/page entries by their stored `x-ratelimit-resource`
+header; identity-backed entries are always API-origin. A `304` reruns cache-hit integrity,
+then republishes the stored body with TTLs recomputed from that body. Web-origin validators
+are never sent across transports.
+
 ### Cache key
 
 SHA-256 (base64url) over a stable, sorted JSON of: pool, method, path, normalized
@@ -36,7 +43,7 @@ need to re-contact GitHub just to validate the hint.
 
 ### What is cached
 
-Only `200` responses on cacheable routes are stored. The cache is **bypassed** when:
+Only successful `2xx` responses on cacheable routes are stored. The cache is **bypassed** when:
 
 - the route is a log route, large-payload route, or `rate_limit`, or
 - the request carries a conditional header (`if-none-match` / `if-modified-since`).
@@ -144,6 +151,8 @@ status as `hit`, `stale`, `miss`, `bypass`, or `unknown`, which powers `octopool
 the dashboard hit-rate/top-route views. Coalesced followers are marked separately. Stats
 count both fresh and stale hits as saved GitHub requests and expose an eligible hit rate
 that excludes failed misses and deliberate local fallback responses.
+Successful `304` refreshes use the existing `hit` status so current stats and CLI parsers count
+the saved request, with `fallback_reason = cache_revalidated` as the distinct audit marker.
 
 ## Public-repo guard
 
