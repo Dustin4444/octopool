@@ -66,6 +66,74 @@ export function errorResponse(error: unknown, requestId?: string): Response {
   );
 }
 
+const MAX_UNEXPECTED_ERROR_FRAMES = 5;
+const MAX_STACK_SCAN_CHARS = 8_192;
+const STACK_LOCATION = /\.([cm]?[jt]sx?):(\d{1,8}):(\d{1,6})\)?\s*$/;
+
+function safeErrorName(error: Error): string {
+  if (error instanceof TypeError) return "TypeError";
+  if (error instanceof RangeError) return "RangeError";
+  if (error instanceof ReferenceError) return "ReferenceError";
+  if (error instanceof SyntaxError) return "SyntaxError";
+  if (error instanceof URIError) return "URIError";
+  if (error instanceof EvalError) return "EvalError";
+  return "Error";
+}
+
+function safeErrorFrames(error: Error): { extension: string; line: number; column: number }[] {
+  let stack: unknown;
+  try {
+    stack = error.stack;
+  } catch {
+    return [];
+  }
+  if (typeof stack !== "string") {
+    return [];
+  }
+  const frames: { extension: string; line: number; column: number }[] = [];
+  for (const rawLine of stack.slice(0, MAX_STACK_SCAN_CHARS).split("\n")) {
+    const match = STACK_LOCATION.exec(rawLine);
+    if (match?.[1] === undefined || match[2] === undefined || match[3] === undefined) {
+      continue;
+    }
+    const line = Number(match[2]);
+    const column = Number(match[3]);
+    if (line < 1 || column < 1) {
+      continue;
+    }
+    frames.push({ extension: match[1], line, column });
+    if (frames.length === MAX_UNEXPECTED_ERROR_FRAMES) {
+      break;
+    }
+  }
+  return frames;
+}
+
+export function logUnexpectedWorkerError(
+  request: Request,
+  requestId: string,
+  error: unknown,
+): void {
+  if (error instanceof HttpError || backendOverloadedError(error) !== undefined) {
+    return;
+  }
+  const frames = error instanceof Error ? safeErrorFrames(error) : [];
+  const detail = {
+    name: error instanceof Error ? safeErrorName(error) : "NonErrorThrown",
+    ...(error instanceof Error ? {} : { type: typeof error }),
+    ...(frames.length === 0 ? {} : { frames }),
+  };
+  // request_id is always client-visible; relay-owned failures also join D1 audit metadata.
+  console.error({
+    event: "octopool.worker.unexpected_exception",
+    code: "internal_error",
+    request_id: requestId,
+    method: request.method,
+    pathname: new URL(request.url).pathname,
+    error: detail,
+  });
+}
+
 export async function parseJsonObject(request: Request): Promise<JsonObject> {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {

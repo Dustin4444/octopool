@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -639,6 +640,26 @@ func TestWatchTickBailsImmediatelyOnDeterministicRefusal(t *testing.T) {
 	}
 }
 
+func TestWatchTickBailsImmediatelyOnTypedRelayError(t *testing.T) {
+	sleeps := recordWatchSleeps(t)
+	backoff := newWatchBackoff(30 * time.Second)
+	calls := 0
+	want := &relayResponseError{
+		Status:   http.StatusInternalServerError,
+		apiError: apiError{Code: "internal_error", RequestID: "request-final"},
+	}
+	err := retryWatchTick(t.Context(), &backoff, func() error {
+		calls++
+		return want
+	})
+	if err != want || calls != 1 {
+		t.Fatalf("err=%v calls=%d, want final typed relay error once", err, calls)
+	}
+	if len(*sleeps) != 0 {
+		t.Fatalf("sleeps=%v, want none after client retry exhaustion", *sleeps)
+	}
+}
+
 func TestWatchFallbackOnlyBeforeProgress(t *testing.T) {
 	fallback := localFallbackError{Reason: "route denied"}
 	if err := watchError(fallback, false); !shouldRunRealGH(err) {
@@ -651,13 +672,13 @@ func TestWatchFallbackOnlyBeforeProgress(t *testing.T) {
 
 func recordWatchSleeps(t *testing.T) *[]time.Duration {
 	t.Helper()
-	original := watchSleep
+	original := sleepContext
 	durations := []time.Duration{}
-	watchSleep = func(_ context.Context, duration time.Duration) error {
+	sleepContext = func(_ context.Context, duration time.Duration) error {
 		durations = append(durations, duration)
 		return nil
 	}
-	t.Cleanup(func() { watchSleep = original })
+	t.Cleanup(func() { sleepContext = original })
 	return &durations
 }
 

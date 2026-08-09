@@ -17,7 +17,7 @@ const (
 	watchMaxErrors   = 3
 )
 
-var watchSleep = func(ctx context.Context, duration time.Duration) error {
+var sleepContext = func(ctx context.Context, duration time.Duration) error {
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
 	select {
@@ -53,7 +53,7 @@ func newWatchBackoff(requested time.Duration) watchBackoff {
 }
 
 func (backoff *watchBackoff) sleep(ctx context.Context) error {
-	if err := watchSleep(ctx, backoff.current); err != nil {
+	if err := sleepContext(ctx, backoff.current); err != nil {
 		return err
 	}
 	backoff.current = min(backoff.current*2, backoff.limit)
@@ -69,6 +69,12 @@ func retryWatchTick(ctx context.Context, backoff *watchBackoff, poll func() erro
 		// Deterministic relay refusals (unsupported route, not logged in) never
 		// heal on retry; surface them immediately so first-tick fallback stays fast.
 		if shouldRunRealGH(err) {
+			return err
+		}
+		// The relay client already exhausted its typed response retry policy.
+		// Watch retries remain for transport, parse, and operation-level failures.
+		var relay *relayResponseError
+		if errors.As(err, &relay) {
 			return err
 		}
 		if attempt+1 < watchMaxErrors {
