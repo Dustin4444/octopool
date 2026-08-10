@@ -83,8 +83,8 @@ and patch hosts.
 - `repo_view` returns a fixed public metadata subset before caching so token-specific
   repository fields such as identity permissions are not shared.
 - Release list/latest/tag/id reads use unauthenticated public GitHub API reads; supported
-  top-level `gh release view` summaries prefer public GitHub release HTML. Raw API requests
-  retain exact REST response semantics.
+  top-level `gh release view` summaries prefer public GitHub release HTML and fall back to the
+  anonymous API. Raw API requests retain exact REST response semantics.
   Octopool does not use pooled credentials for releases, so draft/private release visibility
   is not shared.
 - Supported top-level `gh run view --json jobs` reads prefer job and step metadata composed
@@ -281,9 +281,9 @@ across head SHAs or closed/merged state.
 
 - Redirects from `api.github.com` are denied (`502 github_redirect_denied`) except the
   log-download flow above.
-- Response bodies are capped: 1 MiB default, up to `MAX_RESPONSE_BYTES` (2 MiB) for
-  large-payload routes and Actions run lists. Run lists remain cacheable; over-cap
-  responses fail with `502 github_response_too_large`.
+- Response bodies on every route use the single `MAX_RESPONSE_BYTES` cap (2 MiB default;
+  the hosted deployment sets 4 MiB). Over-cap responses return `424 fallback_local` with
+  reason `github_response_too_large` so callers can retry with local credentials.
 - Requests time out after `REQUEST_TIMEOUT_MS` (15s default).
 
 ## Audit

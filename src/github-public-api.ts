@@ -23,7 +23,7 @@ export function releaseAPIRequest(
   return {
     url: url.toString(),
     headers: publicAPIHeaders(request),
-    capBytes: responseCapBytes(env, route),
+    capBytes: responseCapBytes(env),
     usesApiQuota: true,
     payload: (body, headers, status) => {
       const parsed = parsePublicReleaseBody(body, route);
@@ -39,6 +39,7 @@ export function publicAPIRequest(
 ): WebRequest | undefined {
   if (
     request.method !== "GET" ||
+    releaseRoute(route) ||
     !capabilitiesForRouteKind(route.kind).publicApi ||
     !defaultGitHubJSONAccept(request.headers?.accept)
   ) {
@@ -49,7 +50,7 @@ export function publicAPIRequest(
   return {
     url: url.toString(),
     headers: publicAPIHeaders(request),
-    capBytes: responseCapBytes(env, route),
+    capBytes: responseCapBytes(env),
     usesApiQuota: true,
     payload: (body, headers, status) => {
       if (body.byteLength === 0) {
