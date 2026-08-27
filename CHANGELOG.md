@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.5.7 - 2026-08-26
 
 ### Fixes
 
+- Time out stalled GitHub OAuth token exchanges and return a clear login error instead of leaving sign-in hanging (thanks @SebTardif).
 - Normalize `gh pr view --json state` to `OPEN`, `CLOSED`, or `MERGED` across public-page and REST reads, keeping draft status separate and field subsets and `--jq` projections consistent.
 - Harden GitHub HTML text extraction and docs table-of-contents generation so malformed tag fragments cannot survive text conversion.
 
