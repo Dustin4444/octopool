@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.5.10 - Unreleased
+## 0.5.10 - 2026-08-28
 
 ### Fixes
 
-- Reject native-gh endpoint placeholders under active rewrite policy, guard canonical relay egress and derived probes, and block recognizable active rule JSON in supported submissions while preserving ordinary prose rewrites.
+- Reject native-gh endpoint placeholders under active rewrite policy, guard canonical relay egress and derived probes, and block recognizable active rule JSON in supported submissions while preserving ordinary prose rewrites; existing broad rules matching fixed transport text can now deny additional requests, so review them before upgrading.
 - Normalize `gh pr view --json mergeable` to `MERGEABLE`, `CONFLICTING`, or `UNKNOWN` before filtering and `--jq`, preserving raw `gh api` REST values and unsupported-field delegation; scripts relying on older boolean/null output must migrate to explicit enum comparisons.
 
 ## 0.5.9 - 2026-08-28
