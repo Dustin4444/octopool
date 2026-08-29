@@ -1,10 +1,11 @@
 # Changelog
 
-## 0.5.9 - Unreleased
+## 0.5.9 - 2026-08-28
 
 ### Changes
 
 - Add file-configured regex replacement and purging with deployment-wide server rules, additive local rules, and fail-closed protection for supported GitHub submissions and relay inputs.
+- Require a compatible server policy endpoint for the updated CLI; self-hosters must apply migration 0016 and deploy the Worker before upgrading clients.
 
 ## 0.5.8 - 2026-08-28
 
