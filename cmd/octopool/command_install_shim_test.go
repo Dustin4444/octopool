@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -15,11 +16,15 @@ func TestUpdateShimBlockAppendsAndReplaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(first)
+	wantShimDir := "octopool_shim_dir='/home/alice/.local/share/octopool/bin'"
+	if runtime.GOOS == "windows" {
+		wantShimDir = `octopool_shim_dir='\home\alice\.local\share\octopool\bin'`
+	}
 	for _, want := range []string{
 		"export EXISTING=1",
 		shimBlockStart,
 		"export OCTOPOOL_GH_PATH='/opt/bin/gh'",
-		"octopool_shim_dir='/home/alice/.local/share/octopool/bin'",
+		wantShimDir,
 		`export PATH="$octopool_path_next"`,
 		shimBlockEnd,
 	} {
@@ -38,6 +43,7 @@ func TestUpdateShimBlockAppendsAndReplaces(t *testing.T) {
 }
 
 func TestUpdateShimBlockKeepsPathIdempotentInZsh(t *testing.T) {
+	isolateTestConfig(t)
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {
 		t.Skip("zsh is required to exercise .zshenv PATH behavior")
@@ -134,6 +140,7 @@ func TestApplyShimInstallPlanIsIdempotent(t *testing.T) {
 }
 
 func TestVerifyShimInstallChecksLoginShell(t *testing.T) {
+	isolateTestConfig(t)
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {
 		t.Skip("zsh is required to verify shell startup behavior")
@@ -227,5 +234,64 @@ func TestExecutableNamedOctopool(t *testing.T) {
 	}
 	if executableNamedOctopool(other) {
 		t.Fatal("expected differently named executable to be rejected")
+	}
+}
+
+func TestExecutableNamedOctopoolControls(t *testing.T) {
+	windows := runtime.GOOS == "windows"
+	for _, tt := range []struct {
+		name string
+		mode os.FileMode
+		want bool
+	}{
+		{"octopool", 0o755, true},
+		{"OcToPoOl", 0o755, true},
+		{"octopool.exe", 0o755, windows},
+		{"OcToPoOl.ExE", 0o755, windows},
+		{"octopool", 0o644, windows},
+		{"octopool.exe", 0o644, windows},
+		{"octopool.cmd", 0o755, false},
+		{"octopool.bat", 0o755, false},
+		{"octopool.com", 0o755, false},
+		{"octopool.exe.bak", 0o755, false},
+		{"octopool.exe.exe", 0o755, false},
+		{"octopool-gh", 0o755, false},
+		{"other.exe", 0o755, false},
+	} {
+		t.Run(tt.name+"/"+tt.mode.String(), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), tt.name)
+			if err := os.WriteFile(path, []byte("binary"), tt.mode); err != nil {
+				t.Fatal(err)
+			}
+			// An octopool-named link must not hide a differently named target.
+			link := filepath.Join(t.TempDir(), executableName("octopool"))
+			if err := os.Symlink(path, link); err != nil {
+				t.Fatal(err)
+			}
+			for _, candidate := range []string{path, link} {
+				if got := executableNamedOctopool(candidate); got != tt.want {
+					t.Errorf("executableNamedOctopool(%q) = %v, want %v", candidate, got, tt.want)
+				}
+			}
+		})
+	}
+	for _, kind := range []string{"directory", "absent"} {
+		t.Run(kind, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), executableName("octopool"))
+			if kind == "directory" {
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			link := filepath.Join(t.TempDir(), executableName("octopool"))
+			if err := os.Symlink(path, link); err != nil {
+				t.Fatal(err)
+			}
+			for _, candidate := range []string{path, link} {
+				if executableNamedOctopool(candidate) {
+					t.Errorf("expected %s to be rejected: %s", kind, candidate)
+				}
+			}
+		})
 	}
 }
