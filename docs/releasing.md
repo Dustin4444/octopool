@@ -35,11 +35,12 @@ durable release evidence; signing uses the OpenClaw Foundation Developer ID.
    first (see docs/cache.md for the actions-logs bucket and its lifecycle rule), and
    `OCTOPOOL_PROXY_SECRET` must already exist on both Workers.
 7. Record evidence in openclaw/releases: dispatch
-   `openclaw-release-evidence.yml` with `release_id=octopool-X.Y.Z`,
-   `package_spec=octopool@X.Y.Z`, and the release workflow run in `runs`.
-   The `release_ref` provenance resolves against `openclaw/openclaw` and
-   reports `not-found` for octopool tags; that is expected. If the workflow's
-   push token is unavailable, generate locally with
+   `openclaw-release-evidence.yml` with `release_id=octopool-X.Y.Z` and
+   the Octopool CI/release workflow runs in `runs`. Leave `package_spec` and
+   `release_ref` empty: the shared resolvers support only the `openclaw` npm package
+   and refs in `openclaw/openclaw`, not this Go CLI. Put the verified Octopool tag,
+   commit and release URLs plus final signing/checksum proof in `notes` instead.
+   If the workflow cannot publish its evidence, generate locally with
    `node scripts/openclaw-release-evidence.mjs` and commit the evidence
    directory directly (precedent: `evidence/octopool-0.5.0`).
 8. Verify the published release body exactly matches the finalized dated changelog section,
