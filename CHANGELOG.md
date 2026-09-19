@@ -1,12 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.6.6 - 2026-09-19
 
 ### Fixes
 
 - Preserve native GraphQL rate-limit errors and label cached REST quota estimates without presenting their reset times as retry deadlines.
 - Keep login and membership refresh available when GraphQL quota is exhausted by accepting identity-bound active organization membership from GitHub REST, while preserving permission denials, retry backoff, and credential protection.
 - Reuse fresh pooled cache entries before revalidation and token-free fetches, avoiding redundant GitHub reads while preserving live scope, visibility, and explicit freshness checks.
+
+### Upgrade notes
+
+- Upgrade the CLI for corrected quota diagnostics. Deploy the Worker for enrollment recovery and cache reuse. No database migration or cache TTL change is required.
 
 ## 0.6.5 - 2026-09-19
 
