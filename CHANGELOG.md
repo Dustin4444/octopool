@@ -1,12 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.6.5 - 2026-09-19
 
 ### Fixes
 
 - Allow structurally checked CI run/job retries and workflow-run query fields, announce personal-token GraphQL delegation with low-quota/reset details, and report bounded git-probe failures with explicit repository recovery guidance.
 - Match native `gh repo view` owner IDs, owner fields, and visibility values before JSON/jq output, with guarded fallback for incomplete metadata.
 - Return the native GraphQL node ID from `gh repo view --json id`, preserving numeric IDs in raw REST API reads and guarded fallback for incomplete repository identities.
+
+### Upgrade notes
+
+- Upgrade the CLI to get bounded CI retries, GraphQL delegation notices, and git-probe diagnostics. The Worker is unchanged in this release, so no deploy and no database migration are required.
 
 ## 0.6.4 - 2026-09-14
 
