@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.8 - 2026-09-20
 
 ### Fixes
 
@@ -15,6 +15,10 @@
 - Stop run and PR-check watches immediately on oversized relay responses, avoiding repeated downloads and backoff delays.
 - Stop first-page validators from refreshing complete Actions job aggregates without checking later pages, including entries cached by older Workers; single-page validation and existing cache lifetimes remain unchanged.
 - Release discarded API and Actions-log redirect bodies before follow-up downloads, existence-probe completion, or redirect rejection, without changing redirect policy, credential handling, or log bytes.
+
+### Upgrade notes
+
+- Upgrade the CLI and deploy the Workers to receive all fixes. No database migration, re-login, or cache purge is required.
 
 ## 0.6.7 - 2026-09-19
 
