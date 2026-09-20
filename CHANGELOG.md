@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Route machine-readable run lists filtered by commit or event through the shared REST cache, preserving native filter values, protected dispatch, and freshness controls.
 - Reuse fresh larger shaped Actions run-list pages for small human-readable requests, preserving the first 25 runs, filtered totals, exact fallback, source expiry, and identity checks without another GitHub fetch.
 - Honor explicit cache-age limits for completed Actions logs, checking upstream existence before forced-fresh reads while reusing unchanged log bytes.
 - Stop run and PR-check watches immediately on oversized relay responses, avoiding repeated downloads and backoff delays.
