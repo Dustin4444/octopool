@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Fail JSON output on short writes or a failed final newline instead of reporting success, and emit quota notices only after complete output.
 - Reuse complete short or empty shaped Actions run-list pages for smaller requests, avoiding redundant GitHub fetches while retaining count, pagination, freshness, and filtered-fallback checks.
 - Honor `OCTOPOOL_FRESH=1` on direct request GET reads while preserving explicit cache-control headers, string protection, and raw response behavior.
 - Keep fresh anonymous run-completion proof usable during pooled identity lookup failures, avoiding extra metadata requests and preserving the existing one-hour completed-attempt jobs cache.
