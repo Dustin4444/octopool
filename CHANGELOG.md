@@ -1,11 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.6.9 - 2026-09-20
 
 ### Fixes
 
 - Route PR views requesting `mergeCommit` through the shared relay with fresh merge metadata, preserving native object/null output and avoiding personal-token GraphQL delegation for supported field combinations.
 - Reuse fresh raw workflow-list metadata for numeric workflow views, avoiding repeated workflow-name hydration requests while preserving complete REST objects, source expiry, visibility, identity eligibility, and explicit freshness.
+
+### Upgrade notes
+
+- Upgrade the CLI for `mergeCommit` relay coverage and deploy the Workers for workflow-metadata cache reuse. No database migration, re-login, or cache purge is required.
 
 ## 0.6.8 - 2026-09-20
 
