@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.10 - 2026-09-20
 
 ### Features
 
@@ -13,6 +13,10 @@
 - Avoid repeating an anonymous API request after rate-limited cache revalidation, retaining public HTML fallback, live visibility and identity checks, and normal anonymous attempts on later requests.
 - Acquire PR check-runs and statuses concurrently to reduce checks, rollup, and watch latency while preserving per-request policy checks, bounded pagination, output order, and terminal errors before native fallback.
 - Acquire PR-check Actions runs and workflow catalogues concurrently after validating check identities, reducing metadata latency while preserving complete pagination, workflow associations, lazy skipping, and terminal-error handling.
+
+### Upgrade notes
+
+- Upgrade the CLI and deploy both Workers for pooled landing reads, broader cache reuse, and faster PR-check metadata. Newly routed explicit-host REST and landing GraphQL reads stay fresh by default; advisory reads can opt into bounded reuse. No database migration, re-login, or cache purge is required.
 
 ## 0.6.9 - 2026-09-20
 
