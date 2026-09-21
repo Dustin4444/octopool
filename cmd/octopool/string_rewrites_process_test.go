@@ -106,6 +106,11 @@ func TestRewriteCaptureProcess(t *testing.T) {
 	if err := os.WriteFile(capturePath, data, 0600); err != nil {
 		os.Exit(81)
 	}
+	if path := os.Getenv("OCTOPOOL_TEST_REWRITE_PREFLIGHT_CAPTURE"); path != "" && slices.Contains(args, "--method=GET") {
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			os.Exit(81)
+		}
+	}
 	if path := os.Getenv("OCTOPOOL_TEST_REWRITE_CALLS"); path != "" {
 		file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 		if err != nil {
@@ -127,6 +132,13 @@ func TestRewriteCaptureProcess(t *testing.T) {
 	output, customOutput := os.LookupEnv("OCTOPOOL_TEST_REWRITE_STDOUT")
 	if !customOutput {
 		output = "child stdout\n"
+	}
+	if path := os.Getenv("OCTOPOOL_TEST_REWRITE_STDOUT_FILE"); path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			os.Exit(85)
+		}
+		output = string(data)
 	}
 	_, _ = io.WriteString(os.Stdout, output)
 	stderr, customStderr := os.LookupEnv("OCTOPOOL_TEST_REWRITE_STDERR")
@@ -2165,7 +2177,7 @@ func TestStringRewriteProcessBlocks(t *testing.T) {
 		{"pr", "merge", "1", "-Racme/repo", "--subject=safe", "--match-head-commit", strings.Repeat("a", 40)},
 		{"pr", "merge", "1", "-Racme/repo", "--squash", "--subject=safe", "--body=inline", "--match-head-commit", strings.Repeat("a", 40)},
 		{"api", "repos/acme/repo/pulls/1/merge", "--method", "PUT", "-f", "sha=short", "-f", "merge_method=squash"},
-		{"api", "repos/acme/repo/pulls/1/merge", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=merge"},
+		{"api", "repos/acme/repo/pulls/1/merge", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=unknown"},
 		{"api", "repos/acme/repo/pulls/1/merge", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=squash", "-F", "commit_title=false"},
 		{"api", "repos/acme/repo/pulls/1/merge", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=squash", "-f", "commit_title=safe", "-f", "commit_title=other"},
 		{"api", "repos/acme/internal-model/pulls/1/merge", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=squash"},
@@ -2184,8 +2196,11 @@ func TestStringRewriteProcessBlocks(t *testing.T) {
 		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
 			capture := captureRewriteGH(t)
 			err := execRealGHWithStdin(t.Context(), args, strings.NewReader(`{"body":"safe"}`), io.Discard, io.Discard)
-			if err != errRewriteBlocked {
-				t.Fatalf("expected generic block, got %v for %v", err, args)
+			if !errors.Is(err, errRewriteBlocked) {
+				t.Fatalf("expected block, got %v for %v", err, args)
+			}
+			if strings.Contains(err.Error(), "internal-model") {
+				t.Fatalf("denial exposed rule text: %v", err)
 			}
 			if _, err := os.Stat(capture); !os.IsNotExist(err) {
 				t.Fatal("blocked command executed")
@@ -2195,7 +2210,7 @@ func TestStringRewriteProcessBlocks(t *testing.T) {
 	for _, raw := range []string{`{"body":"safe","\u0062ody":"internal-model"}`, `{"body":"\ud800"}`, `{"body":"internal-model","unknown":"x"}`, `{"body":false}`, `{"body":"` + string([]byte{255}) + `"}`, `[]`} {
 		capture := captureRewriteGH(t)
 		err := execRealGHWithStdin(t.Context(), []string{"api", "repos/acme/repo/issues/1/comments", "--input=-"}, strings.NewReader(raw), io.Discard, io.Discard)
-		if err != errRewriteBlocked {
+		if !errors.Is(err, errRewriteBlocked) {
 			t.Fatalf("invalid JSON error=%v", err)
 		}
 		if _, err := os.Stat(capture); !os.IsNotExist(err) {
