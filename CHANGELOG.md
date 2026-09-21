@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 - 2026-09-21
 
 ### Features
 
@@ -21,7 +21,7 @@
 
 ### Upgrade notes
 
-- Deploy the Worker and upgrade the CLI for `pr-summary-v2`; older CLIs keep working on `pr-summary-v1`. No database migration, re-login, or cache purge is required.
+- Deploy both Workers and upgrade the CLI for the new PR/release HTML projections, Actions page repairs, and faster guarded fallback. Older CLIs keep working on `pr-summary-v1`. No database migration, re-login, or cache purge is required.
 
 ## 0.6.10 - 2026-09-20
 
