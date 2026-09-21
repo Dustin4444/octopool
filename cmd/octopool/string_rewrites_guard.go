@@ -34,6 +34,14 @@ func (policy stringRewritePolicy) guardRequest(request ghAPIRequest) error {
 	if len(policy.Rules) == 0 {
 		return nil
 	}
+	if query := landingGraphQLQuery(request.headers["x-octopool-public-shape"]); query != "" {
+		if err := policy.checkStructural("/graphql"); err != nil {
+			return err
+		}
+		if err := policy.check(query); err != nil {
+			return err
+		}
+	}
 	if request.method != "GET" && request.method != "POST" && request.method != "PATCH" && request.method != "PUT" {
 		return errRewriteBlocked
 	}
@@ -134,7 +142,7 @@ func rewriteInternalShapeHeader(key, value string) bool {
 	if key != "x-octopool-public-shape" {
 		return false
 	}
-	return slices.Contains([]string{publicShapeActionsSummary, publicShapeActionsJobs, publicShapeIssueSummary, publicShapeIssueList, publicShapeIssueSearch, publicShapePullRequestList, publicShapePullRequestSummary, publicShapePullRequestFiles, publicShapeLabelList, publicShapeWorkflowList, publicShapeWorkflowView, publicShapeReleaseSummary}, value)
+	return slices.Contains([]string{publicShapeActionsSummary, publicShapeActionsJobs, publicShapeIssueSummary, publicShapeIssueList, publicShapeIssueSearch, publicShapePullRequestList, publicShapePullRequestSummary, publicShapePullRequestFiles, publicShapePullRequestCISummary, publicShapePullRequestCIRollup, publicShapePullRequestMergeSnapshot, publicShapeLabelList, publicShapeWorkflowList, publicShapeWorkflowView, publicShapeReleaseSummary}, value)
 }
 
 var rewriteTagReadPath = regexp.MustCompile(`^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/git/ref/tags/[A-Za-z0-9_.-]+$`)
