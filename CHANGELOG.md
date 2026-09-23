@@ -1,16 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.7.2 - 2026-09-23
 
 ### Fixes
 
 - Allow positive `page` query fields on workflow-run reads, including native `--include` calls, while preserving pagination validation, freshness headers, and string protection.
-
 - Share cached workflow jobs and commit check runs between omitted filters and explicit `filter=latest`, preserving all-execution reads, pagination, identity eligibility and explicit freshness.
-
 - Reuse cached responses across omitted and explicit default GitHub API versions, and serve active workflow filenames from complete cached catalogues while preserving source expiry, explicit freshness, identity eligibility and public visibility.
-
 - Explain when JSON field bundles require native gh and when `--include` selects caller credentials, preserving routing, freshness, protection checks, and native output.
+
+### Upgrade notes
+
+- Upgrade the CLI and deploy both Workers for the pagination repair, routing explanations, and cache reuse improvements. No database migration, re-login, cache purge, or cache lifetime change is required.
 
 ## 0.7.1 - 2026-09-21
 
