@@ -16,10 +16,21 @@ bounded, 256-entry isolate cache of settled values. Entries expire 30 seconds af
 load starts; a slow load never extends that deadline. Revoked caller tokens, retired
 identities, and pool policy edits may therefore take up to 30 seconds to reach a warm
 isolate. Authoritative identity rechecks use fresh D1 reads and bypass both settled and
-pending lookups. String-rewrite policy itself always reads the D1 primary and is not
-stored in this cache; its caller authentication still uses the configuration cache.
+pending lookups. String-rewrite policy uses a separate deployment-wide `PolicyCoordinator`
+Durable Object, outside this cache; its caller authentication still uses the configuration cache.
+The object loads and validates the D1 primary on cold start and keeps the compiled snapshot
+in memory for at most 60 seconds, measured from the start of the load. Admin API writes run
+the existing D1 revision CAS through that same object and install the new snapshot before
+returning success, making them immediately visible to subsequent reads. Every caller/admin
+GET and relay policy load consults the object. Once the snapshot expires, concurrent reads
+share one gated primary reload before receiving policy. Writes that bypass the coordinator,
+including older Workers, manual D1 edits, and restores, become visible within 60 seconds.
+There is no isolate, edge, replica, or expired-policy fallback. Failed or uncertain writes
+discard the snapshot; failed reloads return 503 unavailable without serving expired rules.
+Eviction also requires a fresh primary load. See [policy coordinator upgrades](operations.md#policy-coordinator-upgrade)
+for deployment and recovery behavior.
 
-Identical concurrent loads coalesce only within one Worker request, using an asynchronous
+For the isolate configuration cache, identical concurrent loads coalesce only within one Worker request, using an asynchronous
 context created at the fetch boundary. Different requests load cold entries independently
 and reuse successful values once available. No request waits on another request's pending
 promise: that request may finish or be canceled before its load settles. Failed loads are

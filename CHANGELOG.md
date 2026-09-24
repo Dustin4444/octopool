@@ -2,9 +2,16 @@
 
 ## Unreleased
 
+### Features
+
 ### Fixes
 
 - Cap concurrent CLI relay reads and policy fetches across processes at eight per user on each machine, configurable with `OCTOPOOL_RELAY_CONCURRENCY`, using crash-safe advisory slots and bounded fail-open waiting.
+- Serve string-rewrite policy through a dedicated global Durable Object with a maximum snapshot age of 60 seconds, preserving revision-checked publication, immediate visibility after admin API PUTs, and fail-closed recovery; writes outside the coordinator become visible within 60 seconds.
+
+### Upgrade notes
+
+- Deploy the Worker with Durable Object migration `v2` (`PolicyCoordinator`). No CLI change, D1 schema migration, or policy write fence is required; writes from older Workers, manual D1 edits, and restores are picked up within 60 seconds, and reload failures fail closed.
 
 ## 0.8.0 - 2026-09-24
 

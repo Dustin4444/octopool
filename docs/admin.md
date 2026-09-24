@@ -220,12 +220,24 @@ successful response contains no rules:
 A stale or competing writer receives `409 string_rewrite_revision_conflict`; fetch and
 review the new policy before retrying. Use `rules: []` with the current revision to
 explicitly clear rules. Revisions are positive safe integers and increase on every
-successful PUT, including an unchanged ruleset. GET always reads the D1 primary; there is
-no policy cache, stale response, or offline fallback. All responses, including auth,
+successful PUT, including an unchanged ruleset. All GETs, relay policy loads, and PUTs use
+one deployment-wide `PolicyCoordinator` Durable Object. It validates and compiles the D1
+primary snapshot on cold start, then serves reads from memory for at most 60 seconds.
+Admin API PUT performs the D1 CAS and installs the acknowledged snapshot before returning
+success, making it immediately visible to subsequent reads. Concurrent reads see complete
+snapshots; reads after expiry share a gated primary reload. Any write that bypasses the
+coordinator, including an older Worker, manual D1 edit, or restore, is visible within
+60 seconds. Failed reloads return 503 unavailable and never serve the expired policy.
+An uncertain write discards the in-memory snapshot and requires a successful primary reload;
+a failed PUT may already have committed, so read and review before retrying. There is no
+expired-policy or offline fallback. See [upgrade and recovery behavior](operations.md#policy-coordinator-upgrade)
+for writes that bypass the coordinator.
+All responses, including auth,
 validation, conflict, and storage errors, use `Cache-Control: no-store`.
 
 Malformed imports return `400 invalid_string_rewrite_policy`. Missing/corrupt policy or
-D1 failure returns `503 string_rewrite_policy_unavailable`, never `fallback_local`.
+failure to obtain authoritative policy from D1 or the coordinator returns
+`503 string_rewrite_policy_unavailable`, never `fallback_local`.
 Policy and denial errors contain only generic categories, not patterns, replacements,
 or matched content. The GET endpoints intentionally disclose rules to authenticated
 administrators and callers.
@@ -291,11 +303,11 @@ See [CLI](cli.md#outbound-string-rewrite-protection) for declaration and header-
 Server-mediated relay requests remain strict.
 
 Each relay request owns a frozen transport context with its checked policy snapshot;
-there is no global mutable policy or stale policy fallback. Canonical outgoing URLs and
+there is no cross-request policy cache or expired-policy fallback in the relay. Canonical outgoing URLs and
 noncredential headers are checked after URL parsing and header normalization, including
 repository visibility, PR-state, Actions metadata/page/patch probes, pagination, Git/raw/web
 transports, and followed redirects. Relay-triggered membership refreshes and App token
-exchanges use the same transport; credential ownership does not change. The coordinator
+exchanges use the same transport; credential ownership does not change. The pool coordinator
 only coordinates leases/cache fills and never fetches GitHub or receives the policy.
 Policy denials cannot become stale-cache successes or local fallbacks. Literal path
 TAB/LF/CR is rejected even with empty rules; safe empty-policy requests otherwise retain

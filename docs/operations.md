@@ -1,7 +1,7 @@
 # Deployment & Operations
 
-Octopool runs as a Cloudflare Worker (`octopool`) plus a Durable Object class
-(`PoolCoordinator`) and a D1 database. The OpenClaw deployment serves the authoritative
+Octopool runs as a Cloudflare Worker (`octopool`) plus Durable Object classes
+(`PoolCoordinator` and `PolicyCoordinator`) and a D1 database. The OpenClaw deployment serves the authoritative
 data plane at `octopool.openclaw.ai`; a thin `octopool.dev` Worker in the domain's
 Cloudflare account forwards into it so both hosts share one cache. Self-hosters can
 ignore that proxy and deploy only the main Worker.
@@ -61,8 +61,11 @@ The pool coordinator's location hint in `src/pool-coordinator.ts`
 (`poolCoordinatorStub`) should match the D1 location so per-request coordinator
 calls do not cross regions.
 
-The `PoolCoordinator` Durable Object class is provisioned by the migration tag in
-`wrangler.jsonc` on first `wrangler deploy` — no separate step.
+The `PoolCoordinator` and `PolicyCoordinator` Durable Object classes are provisioned by
+migration tags `v1` and `v2` in `wrangler.jsonc` on `wrangler deploy`. See the
+[policy coordinator upgrade](#policy-coordinator-upgrade) for freshness and rollback behavior.
+The policy object's initial location hint also targets the D1 primary;
+keep its fixed `string-rewrite-policy` name unchanged across deployments.
 
 ### 3. Add secrets
 
@@ -140,6 +143,8 @@ The hosted OpenClaw deployment keeps both Workers in the OpenClaw Services accou
   `src/openclaw-proxy.ts`, custom-domain proxy for `octopool.dev`.
 - Durable Object `PoolCoordinator` (binding `POOL_COORDINATOR`, SQLite-backed,
   migration tag `v1`).
+- Durable Object `PolicyCoordinator` (binding `POLICY_COORDINATOR`, SQLite-backed class,
+  migration tag `v2`; D1 remains the durable policy store).
 - D1 database `octopool-wnam` (binding `DB`).
 
 Both hosted Worker deploys use the Molty item `OpenClaw Services Cloudflare API Token`;
@@ -376,20 +381,31 @@ See [Admin](admin.md#deployment-wide-string-protection) for the exact file/API c
 portable regex subset, limits, and revision conflict handling. This is a deployment-wide
 setting, not a per-pool override.
 
-Each protected CLI operation downloads a fresh policy; the Worker separately reads the
-D1 primary and compiles the policy for each relay request after authentication and
+Each protected CLI operation downloads a fresh policy; the Worker separately obtains the
+authoritative snapshot from `PolicyCoordinator` for each relay request after authentication and
 normalization, before classification, repository probes, caches, upstream calls, or
-audit metadata. A policy change therefore affects the next request even in a warm
+audit metadata. An admin API change through the coordinator affects the next request even in a warm
 isolate or on a cache hit. An in-flight operation uses the snapshot checked before its
-dispatch; changing a policy does not recall an already dispatched request. During a
-rolling deployment, old Worker instances and older CLIs retain their old behavior.
+dispatch; changing a policy does not recall an already dispatched request. Older CLIs retain
+their old behavior; writes by older Workers follow the 60-second visibility bound below.
 
-This costs a CLI-to-Worker round trip plus a primary D1 read for the policy download,
-another primary read for server-relayed traffic, and bounded regex compilation/matching.
-Even empty policies require the authoritative read. There is no persistent policy cache,
-stale-read window, read-replica shortcut, or offline fallback. Measure latency and CPU
-with representative rules and request sizes before broad activation, especially when
-callers are far from the D1 primary or approach the 128-rule limit.
+Each policy download and relay policy load costs one call to the dedicated global object.
+It holds a validated, compiled snapshot in memory, loads the D1 primary when cold or expired, and
+serializes D1 revision-CAS writes with snapshot installation before acknowledging success.
+Admin API writes through the coordinator are immediately visible to subsequent GETs and relay
+policy loads. Any other write, including older Workers, manual D1 edits, and restores, is visible
+within 60 seconds. The maximum snapshot age is measured from the start of its D1 load or write,
+so a slow response cannot extend that bound. The first read at expiry reloads from the primary
+under the existing gate; concurrent reads share that reload and never receive expired rules.
+Unexpired reads issue no policy SQL and share no pool/publication coordinator critical section.
+Relay requests still compile their request-scoped rules because compiled RE2 instances cannot
+cross the object boundary. No policy is cached outside the object. Even empty policies require
+an authoritative object read; there is no expired-policy fallback, replica shortcut, or offline
+allowance. Eviction reloads the primary. Failed writes invalidate the snapshot before any
+possibly committed D1 change; subsequent reads fail closed until primary reconciliation succeeds.
+Expired-snapshot reload failures likewise return 503 unavailable, never the old policy.
+Measure DO request/CPU/duration cost, response bytes, queue time, cold-load frequency and
+latency with representative rules before claiming cost or tail-latency savings.
 
 For reads the Worker inspects the normalized path and its segments, query keys and all
 values, and allowed forwarded header names/values. The JSON envelope is decoded once
@@ -416,13 +432,38 @@ Use the [correlation procedure](#correlating-policy-load-failures) below to inve
 exact failed attempt without exposing policy material or changing authentication.
 
 If policy storage is missing or corrupt, restore the migration/schema and last reviewed
-valid singleton row through the operator's controlled D1 recovery process. PUT cannot
+valid singleton row through the [controlled recovery process](#policy-coordinator-upgrade). PUT cannot
 repair an unreadable current policy, and a deleted row is not a supported way to clear
 rules. For a healthy policy, deliberate deactivation is an authenticated revision-checked
 PUT with `rules: []`. Do not remove the guard, suppress load failures, or treat a D1 outage
 as an empty policy. No live rollout or credentials are required for the unit and local
 Workerd integration tests; the ordinary Worker suite applies migration 0016 explicitly
 through the migration runner and exercises the same production checks.
+
+### Policy coordinator upgrade
+
+This Worker adds SQLite Durable Object migration `v2` and the `POLICY_COORDINATOR` binding;
+there is no new D1 schema migration or CLI change. All policy access uses the single fixed
+`string-rewrite-policy` object. Never rename it, split it by pool, or send traffic to two
+independent policy namespaces backed by the same D1 row.
+
+No policy write fence or exclusion of mixed Worker versions is required. Admin API writes
+mediated by the coordinator are immediately visible. During a mixed-version rollout, writes
+by an older Worker bypass the coordinator and become visible within 60 seconds, just like
+manual D1 edits and restores. Reads require a successful primary reload after snapshot expiry;
+failures fail closed with `503 string_rewrite_policy_unavailable` instead of expired rules.
+During the authorized rollout, verify authenticated admin/caller GETs through each ingress
+observe the reviewed policy within that bound. Do not log rule contents in rollout evidence.
+
+Keep migration `v2` and its binding/class in rollback builds; roll back application behavior
+with a forward deploy if the platform cannot roll back across the DO migration. Returning
+to coordinator reads does not require an object restart: direct-D1 changes are picked up at
+the next snapshot expiry, within 60 seconds. Keep the existing object name and namespace.
+
+For emergency direct D1 repair, restore the reviewed singleton row and verify authenticated
+policy GETs match the primary within 60 seconds. A restart is not required. Prefer the
+revision-checked admin API for normal edits because it publishes immediately; missing or
+corrupt rows still require storage repair, and failed reloads never authorize fallback.
 
 The Worker remains GET-only. Local GitHub writes use the caller's own credentials and
 need the updated CLI's supported content preparation. Direct real `gh`, browsers, Git
