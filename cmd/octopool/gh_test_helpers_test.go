@@ -318,8 +318,8 @@ func (f *runExportFixture) response(t *testing.T, req map[string]any) any {
 	switch {
 	case strings.HasPrefix(path, "/repos/acme/repo/actions/runs/") && strings.HasSuffix(path, "/jobs"):
 		q, _ := req["query"].(map[string]any)
-		if q["per_page"] != "100" || len(q) != 1 {
-			t.Errorf("ordinary jobs must use one canonical page100: %v", q)
+		if q["per_page"] != "100" || q["page"] != "1" || len(q) != 2 {
+			t.Errorf("ordinary jobs must start at canonical page100: %v", q)
 		}
 		return f.jobs
 	case strings.HasPrefix(path, "/repos/acme/repo/actions/runs/"):

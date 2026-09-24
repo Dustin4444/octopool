@@ -179,8 +179,6 @@ func TestGHRunWatchRejectsIncompleteJobs(t *testing.T) {
 			wantCalls := 1
 			if variant == "changed count" || variant == "short next page" {
 				wantCalls = 2
-			} else if variant == "cap" {
-				wantCalls = maxRelayPages
 			}
 			if jobCalls != wantCalls {
 				t.Fatalf("job calls=%d, want %d", jobCalls, wantCalls)
