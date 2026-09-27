@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { HttpError } from "../src/http";
 import { githubResponseLocalFallbackReason, localFallbackError } from "../src/local-fallback";
+import { isTransientRelayStorageError } from "../src/relay-storage-error";
 
 describe("local gh fallback signal", () => {
   it("converts safe relay denials into an explicit fallback response", () => {
@@ -11,20 +12,32 @@ describe("local gh fallback signal", () => {
     expect(fallback?.details).toMatchObject({ reason: "route_denied" });
   });
 
-  it("converts backend overload errors into a typed retryable fallback", () => {
+  it("converts storage overload errors into a typed local fallback", () => {
     const fallback = localFallbackError(
       new Error("D1_ERROR: D1 DB is overloaded. Requests queued for too long."),
     );
 
     expect(fallback?.status).toBe(424);
     expect(fallback?.code).toBe("fallback_local");
-    expect(fallback?.details).toMatchObject({ reason: "relay_overloaded" });
+    expect(fallback?.details).toMatchObject({ reason: "relay_storage_unavailable" });
 
     expect(localFallbackError(new Error("Durable Object is overloaded"))?.details).toMatchObject({
-      reason: "relay_overloaded",
+      reason: "relay_storage_unavailable",
     });
     expect(localFallbackError(new Error("TypeError: fetch failed"))).toBeUndefined();
   });
+
+  it.each(["Requests queued for too long", "Runtime is overloaded"])(
+    "preserves the legacy overload fallback for %s",
+    (message) => {
+      const error = new Error(message);
+      expect(isTransientRelayStorageError(error)).toBe(false);
+      const fallback = localFallbackError(error);
+      expect(fallback?.status).toBe(424);
+      expect(fallback?.code).toBe("fallback_local");
+      expect(fallback?.details).toEqual({ reason: "relay_overloaded" });
+    },
+  );
 
   it("hands oversized GitHub responses to local gh instead of dead-ending the caller", () => {
     const fallback = localFallbackError(
