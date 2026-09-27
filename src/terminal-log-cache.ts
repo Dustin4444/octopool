@@ -1,6 +1,9 @@
 import { base64ToBytes } from "./encoding";
+import { CACHE_PUBLICATION_EPOCH } from "./cache-publication";
+import { queries } from "./generated/sql";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { callGitHubWeb } from "./github-web";
+import { completedJobPageProof } from "./github-public-actions";
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { isRecord } from "./object";
 import { classifyRoute } from "./policy";
@@ -22,9 +25,34 @@ export type CachedTerminalLog = GitHubRelayResponse & {
 };
 
 export type TerminalLogCacheProof = { key: string };
+type TerminalLogProofOutcome =
+  | "r2_cached"
+  | "cached_job_view"
+  | "web_page"
+  | "anonymous_api"
+  | "unproven"
+  | "error";
 
 export function terminalLogCacheKey(request: RelayRequest): string {
   return `${LOG_KEY_PREFIX}${encodeURIComponent(request.pool)}${request.path}`;
+}
+
+export function terminalLogJobID(request: RelayRequest, route: RouteInfo): string | undefined {
+  if (!route.logs || route.owner === undefined || route.repo === undefined) return undefined;
+  const match = /^\/repos\/([^/]+)\/([^/]+)\/actions\/jobs\/([0-9]+)\/logs$/.exec(request.path);
+  return match?.[1] === route.owner && match[2] === route.repo ? match[3] : undefined;
+}
+
+export function recordTerminalLogProof(
+  request: RelayRequest,
+  outcome: TerminalLogProofOutcome,
+): void {
+  console.log({
+    event: "octopool.actions_log.completion_proof",
+    pool: request.pool,
+    path: request.path,
+    outcome,
+  });
 }
 
 export async function terminalLogCacheProof(
@@ -34,25 +62,53 @@ export async function terminalLogCacheProof(
   route: RouteInfo,
   policy: PoolPolicy,
 ): Promise<TerminalLogCacheProof | undefined> {
+  const jobID = terminalLogJobID(request, route);
+  if (jobID === undefined) {
+    return undefined;
+  }
+  let outcome: TerminalLogProofOutcome = "unproven";
   try {
-    if (!route.logs || route.owner === undefined || route.repo === undefined) {
-      return undefined;
-    }
-    const jobID = /\/actions\/jobs\/([0-9]+)\/logs$/.exec(request.path)?.[1];
-    if (jobID === undefined) {
-      return undefined;
-    }
-    const job = await fetchFreshMetadata(
-      env,
-      metadataRequest(request, `/repos/${route.owner}/${route.repo}/actions/jobs/${jobID}`),
-      policy,
-      ctx,
+    const metadata = metadataRequest(
+      request,
+      `/repos/${route.owner}/${route.repo}/actions/jobs/${jobID}`,
     );
-    return metadataProvesCompleted(job) ? { key: terminalLogCacheKey(request) } : undefined;
+    if (await cachedJobProvesCompleted(env, metadata, jobID)) {
+      outcome = "cached_job_view";
+      return { key: terminalLogCacheKey(request) };
+    }
+    if (await completedJobPageProof(env, route.owner!, route.repo!, jobID)) {
+      outcome = "web_page";
+      return { key: terminalLogCacheKey(request) };
+    }
+    const job = await fetchFreshMetadata(env, metadata, policy, ctx);
+    if (!metadataProvesCompleted(job, jobID)) return undefined;
+    outcome = "anonymous_api";
+    return { key: terminalLogCacheKey(request) };
   } catch (error) {
+    outcome = "error";
     rethrowStringRewriteDenial(error);
     console.error("actions log completion preflight failed", error);
     return undefined;
+  } finally {
+    recordTerminalLogProof(request, outcome);
+  }
+}
+
+async function cachedJobProvesCompleted(
+  env: Env,
+  request: RelayRequest,
+  jobID: string,
+): Promise<boolean> {
+  try {
+    // Completion is permanent for a job ID. Expiry bounds response reuse, not this fact.
+    // Search exact-path variants (including pooled identities) through the job-proof index.
+    const proof = await env.DB.prepare(queries.readCompletedJobCacheProof)
+      .bind(request.pool, request.path, CACHE_PUBLICATION_EPOCH, jobID)
+      .first<{ completed: number }>();
+    return proof?.completed === 1;
+  } catch (error) {
+    console.error("actions log cached completion proof failed", error);
+    return false;
   }
 }
 
@@ -160,12 +216,17 @@ async function fetchFreshMetadata(
   return observation.response;
 }
 
-function metadataProvesCompleted(response: GitHubRelayResponse | undefined): boolean {
+function metadataProvesCompleted(
+  response: GitHubRelayResponse | undefined,
+  jobID: string,
+): boolean {
   return (
     response !== undefined &&
     response.status >= 200 &&
     response.status < 300 &&
     isRecord(response.body) &&
+    Number.isSafeInteger(response.body.id) &&
+    String(response.body.id) === jobID &&
     response.body.status === "completed"
   );
 }

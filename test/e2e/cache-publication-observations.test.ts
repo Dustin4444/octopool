@@ -62,6 +62,9 @@ async function exercise(site: string, busy: boolean) {
     "fetch",
     vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
+      if (site === "terminal-metadata" && new URL(request.url).hostname === "github.com") {
+        return new Response(null, { status: 404 });
+      }
       expect(request.headers.has("authorization")).toBe(false);
       const capability = await owner();
       expect(capability).not.toBeNull();
@@ -70,7 +73,13 @@ async function exercise(site: string, busy: boolean) {
         await coordinator.completePublication(incumbent!, "failed");
       }
       observations++;
-      return jsonResponse({ number: 42, status: "completed", run_attempt: 1 }, 200, apiHeaders);
+      return jsonResponse(
+        site === "terminal-metadata"
+          ? { id: 9, status: "completed", run_attempt: 1 }
+          : { number: 42, status: "completed", run_attempt: 1 },
+        200,
+        apiHeaders,
+      );
     }),
   );
   if (site === "terminal-metadata") {
