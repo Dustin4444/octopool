@@ -13,6 +13,10 @@
 - Record why cache-accepting relay reads miss (`absent`, `expired`, `caller_max_age`, `unusable`, or `uncacheable`) in audit rows, including terminal job-log cache lookups, without extra D1 reads.
 - Scale settled check-run, check-suite, and commit-status collection freshness with the newest item timestamp from 60 to 300 seconds, preserving 120-second ref caps and live-read bounds.
 
+### Fixes
+
+- Run real `gh` with a stderr notice when Octopool is not logged in, instead of failing every shimmed command with `class=setup`; local string-rewrite rules still apply, broken saved logins still fail closed, and `OCTOPOOL_NO_FALLBACK=1` keeps the old refusal.
+
 ### Upgrade notes
 
 - The Worker changes and D1 migrations `0023`/`0024` are already deployed; this release changes no CLI behavior. `brew upgrade octopool` keeps the fleet on the current version.
